@@ -45,3 +45,13 @@ test('every literal t() text in the app has a pt-BR translation', async () => {
   }
   assert.deepEqual(missing, []);
 });
+
+test('no English text appears twice in pt-BR (the second would silently replace the first)', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const source = await readFile(new URL('../src/locales/pt-BR.js', import.meta.url), 'utf8');
+  const keys = [...source.matchAll(/^\s*("(?:[^"\\]|\\.)*")\s*:/gm)].map((m) => JSON.parse(m[1]));
+  const seen = new Set();
+  const repeated = keys.filter((k) => seen.has(k) || !seen.add(k));
+  assert.deepEqual(repeated, []);
+  assert.ok(keys.length > 50, `only ${keys.length} keys found: the pattern is wrong`);
+});

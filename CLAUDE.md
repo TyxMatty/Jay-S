@@ -24,5 +24,8 @@ npm test             # node:test
 ```
 
 - **Rust fora do OneDrive:** `.cargo/config.toml` (local, fora do git) aponta o `target-dir` para `C:/Users/<você>/.cargo-target/jay-s`.
+- **Mudou o `crates/jay-study`?** O `tauri dev` só vigia o `src-tauri`: o app continua com o motor velho. Mude a data de um arquivo do `src-tauri` (`touch src/main.rs`) ou reinicie o `npm run dev`.
+- **Testar o app sem clicar:** `$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS='--remote-debugging-port=9227'; npm run dev`, depois `node scripts/cdp-eval.mjs scripts/test-materials.js` (roda JS dentro do app) e `node scripts/cdp-shot.mjs saida.png` (print só da página do app). Anexar sem o diálogo: um segundo `jay-s.exe arquivo.pdf` (a instância única entrega os arquivos).
+- **Jay-AI num PC de dev:** `cargo run --release --example ai_setup -- "$env:APPDATA\io.github.tyxmatty.jays"` baixa o runtime e o modelo como o app; `JAYS_AI_ROOT=<mesma pasta> cargo test -- --ignored server` testa o servidor de verdade. Para medir a RAM do servidor, olhe o *working set*: o "privado" inclui a memória da GPU.
 - **Portas:** Vite 5178, depuração remota 9227 (Jay-C 5173/9222, Jay-A 5175, Jay-H 5176, Jay-E 5177/9226).
 - **Regras que vieram da linha:** `[hidden] { display: none !important }` global; texto de arquivo ou do modelo só por `textContent` (o `h()` de `ui/dom.js`), nunca `innerHTML`; a página nunca manda caminho de arquivo; dados do estudante em arquivos do Rust (o `localStorage` do WebView2 vai ao disco com atraso e se perde se o app for morto).

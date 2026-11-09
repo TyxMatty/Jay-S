@@ -11,7 +11,7 @@ O app de estudos da linha Jay. O estudante anexa **conteúdo** e/ou **provas**; 
 
 Em abas separadas ficam o **simulado** (opcional: a prova escolhida, com o tempo e o estilo que a pessoa quiser) e os **flashcards**, que se adaptam ao jeito do estudante (curtos e diretos ou mais longos) e ao que ele errou nos simulados.
 
-Escrito em 2026-11-09, a partir do Jay-C 0.4, Jay-A 0.3.3, Jay-E 0.2.1 e Jay-H 0.1.4. Licença: **MIT**, como a linha toda. A etapa 0 está pronta.
+Escrito em 2026-11-09, a partir do Jay-C 0.4, Jay-A 0.3.3, Jay-E 0.2.1 e Jay-H 0.1.4. Licença: **MIT**, como a linha toda. As etapas 0, 1 e 2 estão prontas.
 
 ## 1. Visão geral
 
@@ -51,6 +51,8 @@ flowchart TD
   PROVA --> SIM["Simulado (opcional)<br/>tempo e estilo à escolha<br/>sempre no modo prova"]
   MP --> R[("Resultado por tópico")]
   SIM --> R
+  R -- "direto, sem botão" --> AN["Jay-AI analisa<br/>o que errou, por quê, o que revisar"]
+  AN --> PERFIL
   LIB --> FC["Flashcards<br/>revisão espaçada"]
   R -- "tópicos fracos primeiro" --> FC
   FC -- "avaliações e tempos" --> PERFIL[("Perfil do estudante<br/>tamanho e tom dos cartões")]
@@ -59,21 +61,21 @@ flowchart TD
 
 - **"Deve checar" (conteúdo × prova):** regras baratas primeiro, sem modelo: questões numeradas, alternativas `a)`–`e)` ou `(A)`–`(E)`, somatória (`01`, `02`, `04`…), "Questão", "Gabarito". Se a nota fica no meio, o Jay-AI decide; a pessoa sempre pode trocar. Um arquivo pode ser os dois (apostila com exercícios no fim).
 - **Separar as questões é determinístico** (regras + layout), não do modelo: assim o modo 2 reaproveita a questão **exatamente** como estava, sem o modelo reescrever ou inventar. O Jay-AI só ajuda a marcar o tópico de cada uma.
-- **Análise numa prova de exemplo:** o resultado de um simulado (acertos por tópico, tempo por questão) vira a lista de tópicos fracos que os flashcards e a próxima prova priorizam.
+- **O resultado vai direto para o Jay-AI:** ao terminar uma prova ou um simulado, o resultado completo (cada resposta, certa ou errada, o tópico, o tempo por questão) é mandado ao Jay-AI automaticamente, sem botão. Ele escreve a análise (o que errou, por quê, o que revisar) e atualiza o perfil; os tópicos fracos passam na frente nos flashcards e na próxima prova. Se o Jay-AI não estiver baixado, o resultado fica guardado e é analisado quando ele estiver.
 
 ### Requisitos funcionais
 
 | # | Requisito | Etapa |
 |---|---|---|
 | RF-0 | Janela, estilos Calmo/Neon/Suave, tema, idioma (inglês e português), instância única, as seções | 0 ✅ |
-| RF-1 | Anexar PDF, DOCX, TXT/Markdown e fotos (PNG/JPEG) pelo diálogo ou soltando; extrair o texto (OCR do Windows nas fotos); dizer se é conteúdo, prova ou os dois, com troca manual | 1 |
-| RF-2 | Jay-AI: baixar o `llama-server` e o modelo uma vez (com SHA-256), subir sob demanda, descarregar quando para, cancelar, mostrar o estado na pílula | 2 |
+| RF-1 | Anexar PDF, DOCX, TXT/Markdown e fotos (PNG/JPEG) pelo diálogo, soltando ou pelo "Abrir com"; extrair o texto (OCR do Windows nas fotos e páginas escaneadas); dizer se é conteúdo, prova ou os dois, com troca manual | 1 ✅ |
+| RF-2 | Jay-AI: baixar o `llama-server` e o modelo uma vez (com SHA-256), subir sob demanda, descarregar quando para, cancelar, mostrar o estado na pílula | 2 ✅ |
 | RF-3 | Separar as questões de uma prova (enunciado, alternativas, gabarito quando houver) | 3 |
 | RF-4 | Gerar prova: modo 1 (nova) e modo 2 (reaproveitar + conteúdo). Estilos iniciais: **ENEM** (alternativas A–E, texto-base) e **vestibulares do Paraná: UEPG, UEM, UNICENTRO etc.** (somatória 01–64 onde a prova usa; o formato de cada um é conferido numa prova real antes de entrar). Número de questões | 3 |
 | RF-5 | Fazer a prova **no app**: marcar a alternativa (X) ou as proposições da somatória (a soma aparece sozinha); **modo prova** (resultado só no fim, com revisão questão a questão) e **modo aprender** (corrige cada resposta na hora, com gabarito e explicação); salvar a cada resposta | 4 |
 | RF-5b | Simulado: escolher a prova, o tempo e o estilo; cronômetro; sempre no modo prova; resultado por tópico | 4 |
 | RF-6 | Flashcards: gerar do conteúdo, revisão espaçada, avaliar o cartão ("longo demais", "curto demais"), tópicos fracos primeiro | 5 |
-| RF-7 | Perfil do estudante: tamanho e tom dos cartões e das explicações aprendidos das avaliações, tempos e resultados | 6 |
+| RF-7 | Perfil do estudante: tamanho e tom dos cartões e das explicações aprendidos das avaliações, tempos e resultados; **cada resultado de prova e simulado vai direto para o Jay-AI**, que escreve a análise | 4 / 6 |
 | RF-8 | Instalador, o Jay-S no catálogo do Jay-H, CI | 7 |
 
 ### Requisitos não funcionais
@@ -96,7 +98,7 @@ flowchart TD
 | Shell e UI | **Tauri v2 + Vanilla JS + Vite**, como a linha | Copiados do Jay-H: `styles/theme.css`, a base do `app.css`, `ui/dom.js`, `ui/theme.js`, `ui/window-icon.js`, `core/i18n.js`, `core/style.js`, `store/settings.js`, `taskbar_icon.rs`, os atalhos do navegador desligados no release, a fonte Inter e o lobo. Do Jay-A: `ui/tabs.js`, `ui/card-title.js` e o layout com navegação lateral. Sem framework: o JS do app é carregado por seção, quando aberta. |
 | Motor | Crate Rust **`jay-study`** (etapa 1), sem Tauri | Testes com `cargo test` sem compilar o app, como o `jay-audio` e o `jay-docs`. |
 | Jay-AI | **`llama-server` do llama.cpp** (MIT) num **processo filho**, falando por HTTP em `127.0.0.1` | Fechar o processo devolve toda a memória (dentro do processo do app, a memória do modelo ficaria presa no alocador). Um modelo que trave não leva a janela junto (como o TeX do Jay-E). Sem compilar C++ no build do app. A build **Vulkan** do Windows roda em NVIDIA, AMD e Intel sem os ~400 MB do CUDA; sem GPU, a build de CPU. |
-| Modelo | Padrão: **Qwen3 4B Instruct, Q4_K_M** (~2,5 GB, Apache-2.0). Leve: **Qwen3 1.7B, Q4_K_M** (~1,1 GB) para PCs com pouca RAM/VRAM | Bom em português e em seguir formato. Cabe inteiro numa GPU de 4 GB (o PC de dev tem uma RTX 3050 4 GB e 16 GB de RAM). Spike S1 mede qualidade e velocidade antes de fechar. |
+| Modelo | Padrão: **Qwen3.5 4B, Q4_K_M** (2,74 GB, Apache-2.0, fev/2026). Leve: **Qwen3.5 2B, Q4_K_M** (1,28 GB) para PCs com pouca memória. Os dois de um commit fixo do `unsloth/*-GGUF` no Hugging Face | Mais novo que o Qwen3 do plano e bom em português. Medido no PC de dev (RTX 3050, Vulkan): lê 1 918 tokens/s e escreve 53 tokens/s; carrega em 2–3 s. O "pensar antes" do Qwen3.5 fica desligado (`--reasoning off`). |
 | Saída do modelo | **JSON com esquema** (`json_schema` do `llama-server`, que vira gramática): cada questão e cada cartão saem num formato fixo, validado de novo no Rust | O modelo não consegue devolver texto fora do formato: acaba a classe de bugs "o parser não entendeu a resposta". |
 | Textos longos | O conteúdo é dividido em trechos de ~1 500 tokens; cada pedido leva só os trechos do tópico (busca por palavras, BM25 simples) | Contexto de 8k tokens mantém o cache KV pequeno (RAM/VRAM). *shortcut: sem embeddings nem banco vetorial; trocar se a busca por palavras errar tópico com frequência.* |
 | PDF (texto) | **hayro** (Rust puro, como o Jay-E), com o `Device` que junta os glifos copiado do `jay-docs` | Depender do `jay-docs` inteiro traria vídeo, codecs de imagem e libwebp. |
@@ -105,7 +107,7 @@ flowchart TD
 | Dados | **Arquivos JSON** na pasta de dados do app, um por item, gravação atômica | Volume de um estudante só; nada de SQLite (C a compilar, mais memória). *shortcut: trocar por SQLite se a biblioteca passar de alguns milhares de itens.* |
 | Revisão espaçada | **SM-2** (o algoritmo clássico do Anki), ~30 linhas | Suficiente e testável; o FSRS fica para depois se fizer falta. |
 | Estilos de prova | **Arquivos de dados** (`presets/*.json`), lidos com validação como os presets do Jay-A | Primeiro: ENEM (5 alternativas A–E, texto-base) e os vestibulares do Paraná (UEPG, UEM, UNICENTRO…; somatória com proposições 01, 02, 04, 08, 16, 32, 64). Discursiva, V/F e personalizado depois. Estilo novo = um arquivo. |
-| Correção | **No Rust**, a partir do gabarito guardado na prova; a página recebe o gabarito de uma questão só quando ela é corrigida (modo aprender) ou no fim (modo prova) | A pessoa não acha a resposta pelo DevTools no meio do simulado, e a nota vem de um lugar só. Somatória: certo só se a soma for exata (como a UEPG); o resultado mostra também quais proposições acertou. |
+| Correção | **No Rust**, a partir do gabarito guardado na prova; a página recebe o gabarito de uma questão só quando ela é corrigida (modo aprender) ou no fim (modo prova) | A pessoa não acha a resposta pelo DevTools no meio do simulado, e a nota vem de um lugar só. Somatória: a regra de cada vestibular vem no estilo. A UEPG (instruções da prova de 2025) dá **pontuação parcial**: a questão vale se a soma tiver pelo menos uma proposição correta e **nenhuma errada**; com uma errada, zero. O resultado mostra quais proposições acertou. |
 | Instância única | `tauri-plugin-single-instance` | Como a linha. |
 | Bandeja | **Não** | Nada roda em segundo plano: fechar a janela fecha o app **e o `llama-server`**. |
 | Porta do Vite | **5178** | Jay-C 5173, Jay-A 5175, Jay-H 5176, Jay-E 5177: todos rodam em dev ao mesmo tempo. Depuração remota na **9227**. |
@@ -136,10 +138,12 @@ Navegação lateral como o Jay-A: **Materiais**, **Provas**, **Simulado**, **Fla
 ## 5. Jay-AI e memória
 
 - **Sob demanda:** o `llama-server` só sobe quando um pedido chega e fecha 2 min depois do último. Gerar uma prova inteira é uma fila de pedidos no mesmo processo.
-- **GPU quando cabe:** `-ngl 99` se a VRAM livre (lida pelo Vulkan) comporta o modelo + cache; senão, menos camadas, e sem GPU, CPU pura. `--mmap` ligado (as páginas do arquivo não contam como memória privada), `--mlock` desligado, contexto 8 192, `--parallel 1`.
+- **GPU quando cabe:** o `--fit` do llama.cpp (ligado por padrão) põe na GPU as camadas que cabem; sem GPU, CPU pura. Contexto 8 192, `--parallel 1`.
+- **Sem mapear o arquivo (`--load-mode none`):** medido na RTX 3050, o servidor ficava com **3,4 GB de RAM** com o arquivo mapeado (as páginas lidas para a GPU continuam na memória); lendo o arquivo uma vez, **0,7 GB** ocioso e ~1 GB depois de um pedido, e carrega mais rápido (2–3 s). O "privado" de ~4 GB que o Windows mostra é memória da GPU contada como reservada, não RAM.
+- **Fechar ocioso, medido:** 2 min depois do último pedido o processo some e a memória volta. O servidor roda num *job object* do Windows: se o Jay-S fechar ou travar, o Windows encerra o servidor junto.
 - **Um pedido por vez**, com Parar (fecha o pedido HTTP; o servidor descarta a geração) e tempo limite por pedido.
 - **Tamanho fixo de saída:** `n_predict` limitado por pedido (ex.: 1 questão ≈ 400 tokens).
-- **Downloads:** o `llama-server` de uma release fixa do `ggml-org/llama.cpp` no GitHub e o GGUF de um commit fixo no Hugging Face, ambos com **URL e SHA-256 no código**; arquivo que não bate é apagado. Download retomável (o modelo tem GBs), numa pasta `.part` que só vira o arquivo final depois do SHA-256.
+- **Downloads:** o `llama-server` da release **b12229** do `ggml-org/llama.cpp` (build Vulkan, 37,9 MB) e o GGUF de um commit fixo no Hugging Face, com **URL, tamanho e SHA-256 no código**; arquivo que não bate é apagado. Retomável: um `.part` que só ganha o nome final depois do SHA-256 (o hash cobre também os bytes retomados). O zip do runtime é aberto recusando nomes que saiam da pasta (*zip slip*). Medido: runtime + modelo de 2,7 GB em ~1 min nesta conexão.
 
 ## 6. Dados
 
@@ -179,8 +183,8 @@ Cada etapa termina com algo testável; ao fim de cada uma, commit, resumo e a pe
 | # | Etapa | Pronto quando |
 |---|---|---|
 | 0 ✅ | Scaffold: janela, estilos, tema, idioma, instância única, as seções (vazias, dizendo em que etapa chegam), a pílula do Jay-AI | `npm test` e `cargo check` passam; `npm run web` mostra as seções nos 3 estilos, claro e escuro |
-| 1 | Materiais: crate `jay-study`; anexar (diálogo, soltar), copiar para a pasta de dados, extrair texto (TXT/MD, PDF, DOCX, foto por OCR), classificar conteúdo × prova pelas regras; lista com tipo trocável; apagar | uma prova do ENEM em PDF é marcada "prova" e uma apostila "conteúdo"; um PDF truncado e uma bomba ZIP viram aviso; os testes de `id` (seção 7, item 2) passam |
-| 2 | Jay-AI (spike S1): download com SHA-256 e retomada, subir/parar sob demanda, fechar ocioso, JSON com esquema, Parar; a seção Jay-AI e a pílula | memória do app medida antes/durante/depois (RNF-1); `fetch` sem chave dá 401; um pedido com esquema devolve JSON válido |
+| 1 ✅ | Materiais: crate `jay-study`; anexar (diálogo, soltar, "Abrir com"), copiar para a pasta de dados, extrair texto (TXT/MD, PDF, DOCX, foto por OCR), classificar conteúdo × prova pelas regras; lista com tipo trocável; apagar | uma prova do ENEM em PDF é marcada "prova" e uma apostila "conteúdo"; um PDF truncado e uma bomba ZIP viram aviso; os testes de `id` (seção 7, item 2) passam |
+| 2 ✅ | Jay-AI (spike S1): download com SHA-256 e retomada, subir/parar sob demanda, fechar ocioso, JSON com esquema, Parar; a seção Jay-AI e a pílula | memória do app medida antes/durante/depois (RNF-1); `fetch` sem chave dá 401; um pedido com esquema devolve JSON válido |
 | 3 | Provas: separar questões de uma prova; gerar no modo 1 e 2; estilos ENEM e Paraná (UEPG/UEM/UNICENTRO, somatória) | 10 questões ENEM de uma apostila; uma prova da UEPG reaproveitada com 5 questões novas do conteúdo; injeção de prompt num PDF aparece como texto |
 | 4 | Fazer a prova no app (X e somatória), modo prova e modo aprender; simulado com cronômetro; salvar a cada resposta; resultado por tópico | no modo prova nenhum gabarito chega à página antes do fim (conferido pelo DevTools); no modo aprender cada resposta é corrigida na hora; somatória 01+04+16 = 21 corrigida certo; matar o app no meio e reabrir mantém as respostas |
 | 5 | Flashcards: gerar, SM-2, avaliar o cartão, tópicos fracos primeiro | o intervalo do SM-2 bate com a tabela de referência nos testes |
@@ -188,6 +192,21 @@ Cada etapa termina com algo testável; ao fim de cada uma, commit, resumo e a pe
 | 7 | Release: instalador NSIS, o Jay-S no Jay-H, CI com testes, audits e os testes adversariais | instalar numa conta de teste; o Jay-H instala e atualiza o Jay-S |
 
 **Etapa 0, medido (2026-11-09):** ver o commit da etapa.
+
+**Etapa 1, medido (2026-11-09):** provas públicas baixadas do INEP e da UEPG, fora do repositório.
+- **ENEM 2023, 1º dia** (PDF de 32 páginas, 6,9 MB): 95 questões achadas (as 90 + as 5 da outra língua estrangeira), "prova", com certeza; 180 ms.
+- **UEPG Vestibular 2025, Grupo 1** (16 páginas): 45 questões de somatória (3 × 15), "prova", com certeza; 52 ms.
+- **Gabarito do ENEM** (1 página de "número letra"): "conteúdo". *Falta (etapa 3): reconhecer um gabarito e ligá-lo à prova.*
+- **No app, pela depuração remota** (`scripts/test-materials.js` e `test-materials-ui.js`, anexando por um segundo `jay-s.exe arquivos…`): os três acima aparecem com páginas, letras e questões; um `.exe` vira "não é PDF, DOCX, texto nem foto"; um PDF cortado em 3 KB vira "danificado ou incompleto"; trocar o tipo grava; "Ver texto" mostra o texto como texto; apagar some da tela e do disco, e o arquivo original continua. Os `id`s hostis (`..`, `../../x`, `C:\Windows`, `CON`, maiúsculas, um id que não existe) dão `not_found` pelos comandos reais.
+- **Testes:** `cargo test` no `jay-study` (28, mais 1 que precisa do modelo), `npm test` (13, com um novo: chave repetida no `pt-BR.js`, que apagaria a tradução de outra em silêncio).
+- **Não visto:** o diálogo de anexar e o soltar na janela (não dá para automatizar; usam o mesmo `library::import` do segundo lançamento), OCR de foto e de PDF escaneado num caso real.
+
+**Etapa 2, medido (2026-11-09):**
+- **Download:** runtime (37,9 MB) e Qwen3.5 4B (2,74 GB) pelo `jay-study` em ~1 min, SHA-256 conferidos.
+- **Servidor** (`cargo test -- --ignored server`, com o modelo de verdade): sem a chave, **401**; com ela, a resposta segue o esquema JSON ("Curitiba").
+- **No app** (`scripts/test-jayai.js`): carregou em 2,0–3,0 s e respondeu em 1,1–1,4 s; a pílula passa por carregando → pronto; **2 min ocioso, o processo some**.
+- **Memória:** o servidor, de 3,4 GB para ~1 GB de RAM com `--load-mode none` (seção 5); ~2,7 GB na GPU. A interface (WebView2) com o Vite de dev e a depuração ligada: ~206 MB privados, acima da meta de 150 MB do RNF-1. *Falta: medir no build de release.*
+- **Não visto:** o botão "Baixar" do app com o modelo leve (o download foi testado pelo exemplo `ai_setup`, mesmo código), o Parar no meio de um download.
 
 ## 9. Riscos e spikes
 
@@ -200,6 +219,6 @@ Cada etapa termina com algo testável; ao fim de cada uma, commit, resumo e a pe
 
 ## 10. Decisões em aberto
 
-- **D1:** o modelo padrão (Qwen3 4B) — confirmar depois do S1.
+- **D1 ✅:** Qwen3.5 4B (padrão) e Qwen3.5 2B (leve). A qualidade das questões em português se mede na etapa 3.
 - **D2 ✅:** primeiros estilos: ENEM e os vestibulares do Paraná (UEPG, UEM, UNICENTRO etc.). Falta: uma prova real de cada para conferir o formato.
 - **D3:** exportar prova: PDF pela impressão da WebView2 (como o Jay-E) basta?

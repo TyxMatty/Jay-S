@@ -1,5 +1,5 @@
 # CI: the same tests as `npm test` and `cargo test` on a developer's PC, on every push to main and
-# every pull request. Copied from Jay-C. Rust runs on Windows: the registry reading is Windows code.
+# every pull request. Copied from Jay-C. Rust runs on Windows: the OCR and the job object are Windows code.
 name: CI
 
 on:
@@ -40,11 +40,16 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: frontend/src-tauri
+          workspaces: |
+            frontend/src-tauri
+            crates/jay-study
       - run: npm ci
       # The app embeds the built frontend (tauri.conf.json frontendDist), so it must exist to compile.
       - run: npm run build -w frontend
-      # Without --ignored: the test that downloads Jay-C's real installer stays on developers' PCs.
+      # The engine: readers, rules, data folder, Jay-AI downloads (the real-model test stays ignored).
+      - name: Engine
+        working-directory: crates/jay-study
+        run: cargo test
       - name: App
         working-directory: frontend/src-tauri
         run: cargo test

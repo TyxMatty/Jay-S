@@ -8,6 +8,8 @@ import { toggleTheme, currentTheme } from './theme.js';
 import { settings } from '../store/settings.js';
 import { resolveStyle } from '../core/style.js';
 import { t } from '../core/i18n.js';
+import { onAiStatus, aiReady } from '../core/ai.js';
+import { isTauri } from '../core/bridge.js';
 
 /** Each language in its own name, so it can be found whichever one is showing. */
 const LANGUAGES = [
@@ -132,20 +134,44 @@ function comingPanel(icon, title, text, stage) {
   );
 }
 
-/** Jay-C's server pill, here for Jay-AI: off, loading, ready or working. Clicking it opens the Jay-AI section. */
+/** Jay-C's server pill, here for Jay-AI: not installed, off, loading, ready or working. Clicking it opens the Jay-AI section. */
 function createStatusPill(onClick) {
-  const pill = h('button', { type: 'button', class: 'status-pill', 'data-state': 'offline', onClick }, t('Jay-AI not installed'));
+  const pill = h('button', { type: 'button', class: 'status-pill', 'data-state': 'offline', onClick }, isTauri ? t('Jay-AI not installed') : t('Only in the app.'));
+  onAiStatus((s) => {
+    const [state, text] = s.downloading
+      ? ['checking', t('Downloading Jay-AI…')]
+      : !aiReady(s)
+        ? ['offline', t('Jay-AI not installed')]
+        : { off: ['idle', t('Jay-AI off')], loading: ['checking', t('Jay-AI loading…')], ready: ['online', t('Jay-AI ready')], working: ['updates', t('Jay-AI working…')] }[s.server];
+    pill.dataset.state = state;
+    pill.textContent = text;
+  });
   return pill;
 }
 
 const tabLabel = (icon, text) => h('span', { class: 'tab-label' }, h('span', { class: 'tab-icon', html: icon }), text);
+
+/**
+ * A section whose code loads the first time it's opened (docs/ARQUITETURA.md, section 2: no section
+ * costs memory before it's used). `load()` resolves to the section's element.
+ */
+function lazyPanel(load) {
+  const panel = h('div', { class: 'lazy-panel' });
+  let loaded = false;
+  panel.open = () => {
+    if (loaded) return;
+    loaded = true;
+    load().then((section) => panel.replaceChildren(section));
+  };
+  return panel;
+}
 
 export function mountApp(root) {
   const items = [
     {
       key: 'materials',
       label: tabLabel(icons.book, t('Materials')),
-      panel: comingPanel(icons.attach, t('Materials'), t('Attach your content and your exams (PDF, DOCX, text or photos). Jay-S tells which is which.'), 1),
+      panel: lazyPanel(() => import('./materials.js').then((m) => m.createMaterialsPanel())),
     },
     {
       key: 'exams',
@@ -165,11 +191,18 @@ export function mountApp(root) {
     {
       key: 'jayai',
       label: tabLabel(icons.spark, t('Jay-AI')),
-      panel: comingPanel(icons.spark, t('Jay-AI'), t('The model that reads your files and writes the questions, on this computer. Loaded only while it works.'), 2),
+      panel: lazyPanel(() => import('./jayai.js').then((m) => m.createJayAiPanel())),
     },
     { key: 'settings', label: tabLabel(icons.settings, t('Settings')), panel: createSettingsPanel() },
   ];
-  const tabs = createTabs({ idPrefix: 'section', label: t('Sections'), className: 'app-nav', vertical: true, items });
+  const tabs = createTabs({
+    idPrefix: 'section',
+    label: t('Sections'),
+    className: 'app-nav',
+    vertical: true,
+    items,
+    onSelect: (key) => items.find((i) => i.key === key).panel.open?.(),
+  });
 
   const header = h(
     'header',

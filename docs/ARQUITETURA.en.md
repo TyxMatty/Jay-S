@@ -11,7 +11,7 @@ The study app of the Jay line. The student attaches **content** and/or **exams**
 
 Separate tabs hold the **mock test** (optional: the chosen exam, with the time limit and style the student wants) and the **flashcards**, which adapt to the student's way of studying (short and direct or longer) and to what they got wrong in mock tests.
 
-Written on 2026-11-09, from Jay-C 0.4, Jay-A 0.3.3, Jay-E 0.2.1 and Jay-H 0.1.4. License: **MIT**, like the whole line. Stage 0 is done.
+Written on 2026-11-09, from Jay-C 0.4, Jay-A 0.3.3, Jay-E 0.2.1 and Jay-H 0.1.4. License: **MIT**, like the whole line. Stages 0, 1 and 2 are done.
 
 ## 1. Overview
 
@@ -51,6 +51,8 @@ flowchart TD
   PROVA --> SIM["Mock test (optional)<br/>time and style of choice<br/>always in exam mode"]
   MP --> R[("Result per topic")]
   SIM --> R
+  R -- "directly, no button" --> AN["Jay-AI analyzes<br/>what was wrong, why, what to review"]
+  AN --> PERFIL
   LIB --> FC["Flashcards<br/>spaced repetition"]
   R -- "weak topics first" --> FC
   FC -- "ratings and times" --> PERFIL[("Student profile<br/>card length and tone")]
@@ -59,21 +61,21 @@ flowchart TD
 
 - **"Must check" (content vs. exam):** cheap rules first, without the model: numbered questions, choices `a)`–`e)` or `(A)`–`(E)`, sum-type (`01`, `02`, `04`…), "Questão", "Gabarito". If the score lands in the middle, Jay-AI decides; the student can always change it. A file can be both (a handout with exercises at the end).
 - **Splitting questions is deterministic** (rules + layout), not done by the model: this way mode 2 reuses the question **exactly** as it was, without the model rewriting or inventing anything. Jay-AI only helps tag each one's topic.
-- **Analysis on a sample exam:** a mock test's result (correct answers per topic, time per question) becomes the list of weak topics that flashcards and the next exam prioritize.
+- **The result goes straight to Jay-AI:** when an exam or a mock test ends, the whole result (each answer, right or wrong, its topic, the time per question) is sent to Jay-AI automatically, with no button. It writes the analysis (what was wrong, why, what to review) and updates the profile; weak topics go first in flashcards and in the next exam. If Jay-AI isn't downloaded, the result is kept and analyzed once it is.
 
 ### Functional requirements
 
 | # | Requirement | Stage |
 |---|---|---|
 | RF-0 | Window, Calm/Neon/Soft styles, theme, language (English and Portuguese), single instance, the sections | 0 ✅ |
-| RF-1 | Attach PDF, DOCX, TXT/Markdown and photos (PNG/JPEG) through the dialog or by dropping; extract the text (Windows OCR for photos); tell whether it's content, an exam or both, with manual override | 1 |
-| RF-2 | Jay-AI: download `llama-server` and the model once (with SHA-256), start on demand, unload when idle, cancel, show the state in the pill | 2 |
+| RF-1 | Attach PDF, DOCX, TXT/Markdown and photos (PNG/JPEG) through the dialog, by dropping or with "Open with"; extract the text (Windows OCR for photos and scanned pages); tell whether it's content, an exam or both, with manual override | 1 ✅ |
+| RF-2 | Jay-AI: download `llama-server` and the model once (with SHA-256), start on demand, unload when idle, cancel, show the state in the pill | 2 ✅ |
 | RF-3 | Split an exam's questions (stem, choices, answer key when present) | 3 |
 | RF-4 | Build an exam: mode 1 (new) and mode 2 (reuse + content). First styles: **ENEM** (choices A–E, base text) and **Paraná entrance exams: UEPG, UEM, UNICENTRO etc.** (sum-type 01–64 where the exam uses it; each one's format is checked against a real exam before it ships). Number of questions | 3 |
 | RF-5 | Take the exam **in the app**: mark the choice (X) or the sum-type propositions (the sum shows up by itself); **exam mode** (result only at the end, with a question-by-question review) and **learning mode** (grades each answer at once, with answer key and explanation); saved on every answer | 4 |
 | RF-5b | Mock test: pick the exam, the time and the style; timer; always in exam mode; result per topic | 4 |
 | RF-6 | Flashcards: generate from content, spaced repetition, rate the card ("too long", "too short"), weak topics first | 5 |
-| RF-7 | Student profile: card and explanation length and tone learned from ratings, times and results | 6 |
+| RF-7 | Student profile: card and explanation length and tone learned from ratings, times and results; **every exam and mock test result goes straight to Jay-AI**, which writes the analysis | 4 / 6 |
 | RF-8 | Installer, Jay-S in Jay-H's catalog, CI | 7 |
 
 ### Non-functional requirements
@@ -96,7 +98,7 @@ flowchart TD
 | Shell and UI | **Tauri v2 + Vanilla JS + Vite**, like the line | Copied from Jay-H: `styles/theme.css`, the base of `app.css`, `ui/dom.js`, `ui/theme.js`, `ui/window-icon.js`, `core/i18n.js`, `core/style.js`, `store/settings.js`, `taskbar_icon.rs`, browser shortcuts off in release, the Inter font and the wolf. From Jay-A: `ui/tabs.js`, `ui/card-title.js` and the side-nav layout. No framework: the app's JS is loaded per section, when opened. |
 | Engine | Rust crate **`jay-study`** (stage 1), no Tauri | Tests with `cargo test` without building the app, like `jay-audio` and `jay-docs`. |
 | Jay-AI | **llama.cpp's `llama-server`** (MIT) in a **child process**, over HTTP on `127.0.0.1` | Closing the process returns all its memory (inside the app's process, the model's memory would stay stuck in the allocator). A model that hangs doesn't take the window with it (like Jay-E's TeX). No C++ to compile in the app build. The Windows **Vulkan** build runs on NVIDIA, AMD and Intel without CUDA's ~400 MB; without a GPU, the CPU build. |
-| Model | Default: **Qwen3 4B Instruct, Q4_K_M** (~2.5 GB, Apache-2.0). Light: **Qwen3 1.7B, Q4_K_M** (~1.1 GB) for PCs with little RAM/VRAM | Good at Portuguese and at following formats. Fits entirely on a 4 GB GPU (the dev PC has an RTX 3050 4 GB and 16 GB of RAM). Spike S1 measures quality and speed before deciding. |
+| Model | Default: **Qwen3.5 4B, Q4_K_M** (2.74 GB, Apache-2.0, Feb 2026). Light: **Qwen3.5 2B, Q4_K_M** (1.28 GB) for PCs with little memory. Both from a pinned commit of `unsloth/*-GGUF` on Hugging Face | Newer than the planned Qwen3 and good at Portuguese. Measured on the dev PC (RTX 3050, Vulkan): reads 1,918 tokens/s and writes 53 tokens/s; loads in 2–3 s. Qwen3.5's "thinking first" is off (`--reasoning off`). |
 | Model output | **JSON with a schema** (`llama-server`'s `json_schema`, which becomes a grammar): every question and card comes out in a fixed format, validated again in Rust | The model can't return text outside the format: the "the parser didn't understand the reply" class of bugs is gone. |
 | Long texts | Content is split into ~1,500-token chunks; each request carries only the topic's chunks (keyword search, simple BM25) | An 8k-token context keeps the KV cache small (RAM/VRAM). *shortcut: no embeddings or vector DB; switch if keyword search often misses the topic.* |
 | PDF (text) | **hayro** (pure Rust, like Jay-E), with the glyph-collecting `Device` copied from `jay-docs` | Depending on all of `jay-docs` would bring video, image codecs and libwebp. |
@@ -105,7 +107,7 @@ flowchart TD
 | Data | **JSON files** in the app data folder, one per item, atomic writes | One student's volume; no SQLite (C to compile, more memory). *shortcut: switch to SQLite if the library grows past a few thousand items.* |
 | Spaced repetition | **SM-2** (Anki's classic algorithm), ~30 lines | Enough and testable; FSRS later if needed. |
 | Exam styles | **Data files** (`presets/*.json`), read with validation like Jay-A's presets | First: ENEM (5 choices A–E, base text) and the Paraná entrance exams (UEPG, UEM, UNICENTRO…; sum-type with propositions 01, 02, 04, 08, 16, 32, 64). Essay, true/false and custom later. New style = one file. |
-| Grading | **In Rust**, from the answer key stored in the exam; the page gets a question's answer key only when it's graded (learning mode) or at the end (exam mode) | The student can't find the answer through DevTools in the middle of a mock test, and the score comes from one place. Sum-type: correct only if the sum is exact (like UEPG); the result also shows which propositions were right. |
+| Grading | **In Rust**, from the answer key stored in the exam; the page gets a question's answer key only when it's graded (learning mode) or at the end (exam mode) | The student can't find the answer through DevTools in the middle of a mock test, and the score comes from one place. Sum-type: each entrance exam's rule comes with its style. UEPG (2025 exam instructions) gives **partial credit**: the question counts if the sum has at least one correct proposition and **no wrong one**; with a wrong one, zero. The result shows which propositions were right. |
 | Single instance | `tauri-plugin-single-instance` | Like the line. |
 | Tray | **No** | Nothing runs in the background: closing the window closes the app **and `llama-server`**. |
 | Vite port | **5178** | Jay-C 5173, Jay-A 5175, Jay-H 5176, Jay-E 5177: all run in dev at once. Remote debugging on **9227**. |
@@ -137,10 +139,12 @@ Side navigation like Jay-A: **Materials**, **Exams**, **Mock test**, **Flashcard
 ## 5. Jay-AI and memory
 
 - **On demand:** `llama-server` only starts when a request arrives and closes 2 min after the last one. Building a whole exam is a queue of requests in the same process.
-- **GPU when it fits:** `-ngl 99` if free VRAM (read through Vulkan) holds the model + cache; otherwise fewer layers, and without a GPU, pure CPU. `--mmap` on (file pages don't count as private memory), `--mlock` off, context 8,192, `--parallel 1`.
+- **GPU when it fits:** llama.cpp's `--fit` (on by default) puts on the GPU the layers that fit; without a GPU, pure CPU. Context 8,192, `--parallel 1`.
+- **No memory-mapped file (`--load-mode none`):** measured on the RTX 3050, the server held **3.4 GB of RAM** with the file mapped (the pages read for the GPU stay in memory); reading the file once, **0.7 GB** idle and ~1 GB after a request, and it loads faster (2–3 s). The ~4 GB "private" Windows shows is GPU memory counted as committed, not RAM.
+- **Closing when idle, measured:** 2 min after the last request the process is gone and the memory is back. The server runs in a Windows *job object*: if Jay-S closes or crashes, Windows ends the server too.
 - **One request at a time**, with Stop (closes the HTTP request; the server drops the generation) and a per-request timeout.
 - **Fixed output size:** `n_predict` capped per request (e.g. 1 question ≈ 400 tokens).
-- **Downloads:** `llama-server` from a pinned `ggml-org/llama.cpp` release on GitHub and the GGUF from a pinned Hugging Face commit, both with **URL and SHA-256 in the code**; a file that doesn't match is deleted. Resumable download (the model is GBs), into a `.part` file that only becomes the final file after the SHA-256 check.
+- **Downloads:** `llama-server` from `ggml-org/llama.cpp` release **b12229** (Vulkan build, 37.9 MB) and the GGUF from a pinned Hugging Face commit, with **URL, size and SHA-256 in the code**; a file that doesn't match is deleted. Resumable: a `.part` that only gets the final name after the SHA-256 (the hash covers resumed bytes too). The runtime zip is unpacked refusing names that leave the folder (*zip slip*). Measured: runtime + 2.7 GB model in ~1 min on this connection.
 
 ## 6. Data
 
@@ -180,8 +184,8 @@ Each stage ends with something testable; at the end of each one: commit, summary
 | # | Stage | Done when |
 |---|---|---|
 | 0 ✅ | Scaffold: window, styles, theme, language, single instance, the sections (empty, saying which stage fills them), the Jay-AI pill | `npm test` and `cargo check` pass; `npm run web` shows the sections in the 3 styles, light and dark |
-| 1 | Materials: the `jay-study` crate; attach (dialog, drop), copy into the data folder, extract text (TXT/MD, PDF, DOCX, photo by OCR), classify content vs. exam by rules; list with a changeable kind; delete | an ENEM exam PDF is marked "exam" and a handout "content"; a truncated PDF and a ZIP bomb become warnings; the `id` tests (section 7, item 2) pass |
-| 2 | Jay-AI (spike S1): download with SHA-256 and resume, start/stop on demand, close when idle, JSON with schema, Stop; the Jay-AI section and the pill | app memory measured before/during/after (RNF-1); `fetch` without the key gives 401; a request with a schema returns valid JSON |
+| 1 ✅ | Materials: the `jay-study` crate; attach (dialog, drop, "Open with"), copy into the data folder, extract text (TXT/MD, PDF, DOCX, photo by OCR), classify content vs. exam by rules; list with a changeable kind; delete | an ENEM exam PDF is marked "exam" and a handout "content"; a truncated PDF and a ZIP bomb become warnings; the `id` tests (section 7, item 2) pass |
+| 2 ✅ | Jay-AI (spike S1): download with SHA-256 and resume, start/stop on demand, close when idle, JSON with schema, Stop; the Jay-AI section and the pill | app memory measured before/during/after (RNF-1); `fetch` without the key gives 401; a request with a schema returns valid JSON |
 | 3 | Exams: split an exam's questions; build in modes 1 and 2; ENEM and Paraná styles (UEPG/UEM/UNICENTRO, sum-type) | 10 ENEM questions from a handout; a UEPG exam reused with 5 new questions from the content; prompt injection in a PDF shows up as text |
 | 4 | Take the exam in the app (X and sum-type), exam mode and learning mode; mock test with a timer; saved on every answer; result per topic | in exam mode no answer key reaches the page before the end (checked through DevTools); in learning mode each answer is graded at once; sum 01+04+16 = 21 graded right; killing the app midway and reopening keeps the answers |
 | 5 | Flashcards: generate, SM-2, rate the card, weak topics first | the SM-2 interval matches the reference table in the tests |
@@ -189,6 +193,21 @@ Each stage ends with something testable; at the end of each one: commit, summary
 | 7 | Release: NSIS installer, Jay-S in Jay-H, CI with tests, audits and the adversarial tests | install on a test account; Jay-H installs and updates Jay-S |
 
 **Stage 0, measured (2026-11-09):** see the stage's commit.
+
+**Stage 1, measured (2026-11-09):** public exams downloaded from INEP and UEPG, outside the repository.
+- **ENEM 2023, day 1** (32-page PDF, 6.9 MB): 95 questions found (the 90 + the 5 of the other foreign language), "exam", sure; 180 ms.
+- **UEPG 2025 entrance exam, Group 1** (16 pages): 45 sum-type questions (3 × 15), "exam", sure; 52 ms.
+- **ENEM answer key** (1 page of "number letter"): "content". *Still to do (stage 3): recognize an answer key and link it to its exam.*
+- **In the app, through remote debugging** (`scripts/test-materials.js` and `test-materials-ui.js`, attaching by a second `jay-s.exe files…`): the three above show with pages, letters and questions; an `.exe` becomes "not a PDF, DOCX, text file or photo"; a PDF cut at 3 KB becomes "damaged or incomplete"; changing the kind saves; "Show text" shows the text as text; deleting removes it from the screen and the disk, and the original file stays. Hostile `id`s (`..`, `../../x`, `C:\Windows`, `CON`, uppercase, an id that doesn't exist) get `not_found` through the real commands.
+- **Tests:** `cargo test` in `jay-study` (28, plus 1 that needs the model), `npm test` (13, with a new one: a repeated key in `pt-BR.js`, which would silently erase another's translation).
+- **Not seen:** the attach dialog and dropping on the window (can't be automated; they use the same `library::import` as the second launch), OCR of a photo and of a scanned PDF in a real case.
+
+**Stage 2, measured (2026-11-09):**
+- **Download:** runtime (37.9 MB) and Qwen3.5 4B (2.74 GB) through `jay-study` in ~1 min, SHA-256 checked.
+- **Server** (`cargo test -- --ignored server`, with the real model): without the key, **401**; with it, the reply follows the JSON schema ("Curitiba").
+- **In the app** (`scripts/test-jayai.js`): loaded in 2.0–3.0 s and answered in 1.1–1.4 s; the pill goes loading → ready; **after 2 idle minutes, the process is gone**.
+- **Memory:** the server, from 3.4 GB to ~1 GB of RAM with `--load-mode none` (section 5); ~2.7 GB on the GPU. The interface (WebView2) with the dev Vite and debugging on: ~206 MB private, above RNF-1's 150 MB target. *Still to do: measure the release build.*
+- **Not seen:** the app's "Download" button with the light model (the download was tested through the `ai_setup` example, same code), Stop in the middle of a download.
 
 ## 9. Risks and spikes
 
@@ -201,6 +220,6 @@ Each stage ends with something testable; at the end of each one: commit, summary
 
 ## 10. Open decisions
 
-- **D1:** the default model (Qwen3 4B) — confirm after S1.
+- **D1 ✅:** Qwen3.5 4B (default) and Qwen3.5 2B (light). Portuguese question quality is measured in stage 3.
 - **D2 ✅:** first styles: ENEM and the Paraná entrance exams (UEPG, UEM, UNICENTRO etc.). Still needed: one real exam of each to check the format.
 - **D3:** exporting an exam: is a PDF through WebView2 printing (like Jay-E) enough?
