@@ -11,7 +11,7 @@ The study app of the Jay line. The student attaches **content** and/or **exams**
 
 Separate tabs hold the **mock test** (optional: the chosen exam, with the time limit and style the student wants) and the **flashcards**, which adapt to the student's way of studying (short and direct or longer) and to what they got wrong in mock tests.
 
-Written on 2026-11-09, from Jay-C 0.4, Jay-A 0.3.3, Jay-E 0.2.1 and Jay-H 0.1.4. License: **MIT**, like the whole line. Stages 0 to 6 are done; stage 7 (installer and release) is left.
+Written on 2026-11-09, from Jay-C 0.4, Jay-A 0.3.3, Jay-E 0.2.1 and Jay-H 0.1.4. License: **MIT**, like the whole line. Stages 0 to 6 are done; of stage 7, the installer is built and measured, and the real install, Jay-H and the audits in the CI are missing (section 8).
 
 ## 1. Overview
 
@@ -250,6 +250,21 @@ Security (the 10 points): **7** is the point touched: Stop is no longer lost in 
 
 Dragging files over the window, in any section, shows three areas: **Content**, **Exams** and **Answer keys**. The one under the cursor lights up, and that's what the file becomes; after the drop, the app opens Materials on that tab. Dropping between the areas attaches nothing. Rust keeps the dropped paths; the page only says which area they fell on (`materials_drop`), so it still never sends a path. A drag from Explorer can't be automated: the areas were checked by screenshot, and the import uses the same `library::import` as the button.
 
+### The installer (stage 7)
+
+The installer is Tauri's NSIS one, with no script of ours (`Jay-S_0.0.1_x64-setup.exe`, 4.48 MiB). By the 10 points:
+
+1. **Attack surface.** One new boundary: the installer `.exe`, downloaded from GitHub (by the person or by Jay-H) and run on the PC. Most realistic path: a swapped installer, from a site that isn't the project's. It is **not signed**: Windows can't say who made it and SmartScreen warns "unknown publisher". What holds today: releases only on the project's GitHub, over HTTPS, with the SHA-256 in the notes. Code signing is an open decision (it costs money; the whole line goes without).
+2. **Access control / IDOR.** No accounts. The install is per user (`installMode: currentUser`): it writes to `%LOCALAPPDATA%\Jay-S`, to `HKCU` and to the profile's own shortcuts; it doesn't ask for administrator and doesn't touch another account on the PC.
+3. **Data permissions.** The installer neither carries nor creates student data: the installed folder holds `jay-s.exe` and `uninstall.exe` (measured), and the data folder (`%APPDATA%\io.github.tyxmatty.jays`) is created on first use. Uninstalling keeps the data folder, unless the person ticks the "delete the application data" box of Tauri's uninstaller (unticked by default); an update doesn't delete it. **Not measured:** the uninstall wasn't run.
+4. **Untrusted input.** No new input: no NSIS template of ours, no `installerHooks`, no arguments of ours. The shortcut and the taskbar "relaunch" point at the `.exe`'s own path, in quotes.
+5. **Exposed credentials.** None in the installer or in the workflow that builds it (`permissions: contents: read`; publishing the release is a manual step).
+6. **Authentication.** Doesn't apply.
+7. **Resource abuse and races.** Installing over a running app: Tauri's installer asks to close the app first. Not measured.
+8. **Supply chain.** `npm audit`: 0 vulnerabilities (2026-11-09). `cargo audit`: **not run** (not installed on the dev PC); it goes into the CI, which is still missing. The Actions are still pinned by version (`@v7`), not by SHA: missing. Without WebView2 on the PC (old Windows 10), the installer downloads Microsoft's over HTTPS (Tauri's default mode); on Windows 11 it is part of the system. Not measured: the dev PC has WebView2.
+9. **Network and exposure.** Same CSP and capabilities. The installed app opens no debugging port; one only exists if the person sets `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` in their own environment.
+10. **Adversarial tests and release criteria.** `frontend/test/installer.test.js` (in `npm test`): NSIS only, per user, no `resources` and no `externalBin` (no model, no `llama-server`, nobody's files inside the installer), no script of ours; CSP with no outside address; capabilities only `core:`. **Blocks the release:** that test failing; an installer over 15 MB (RNF-2); a tag that isn't the version (checked in the installer workflow); `cargo audit` with a high vulnerability, once it is in the CI.
+
 ## 8. Stages
 
 Each stage ends with something testable; at the end of each one: commit, summary, and the question whether to go on to the next.
@@ -291,6 +306,14 @@ Each stage ends with something testable; at the end of each one: commit, summary
 - **Memory:** the server, from 3.4 GB to ~1 GB of RAM with `--load-mode none` (section 5); ~2.7 GB on the GPU. The interface (WebView2) with the dev Vite and debugging on: ~206 MB private, above RNF-1's 150 MB target. *Still to do: measure the release build.*
 - **RAM in release (measured later):** the app's tree (Rust + WebView2) at 189 MB private, 93 of them WebView2's GPU process; with `--disable-gpu` on the window (`tauri.conf.json`, `additionalBrowserArgs`), **110 MB**: Jay-S is text, no video, and Jay-AI uses the GPU through its own process. RNF-1 (under 150 MB) met.
 - **Not seen:** the app's "Download" button with the light model (the download was tested through the `ai_setup` example, same code), Stop in the middle of a download.
+
+**Stage 7, measured (2026-11-09), the installer part:**
+- **Release build:** 6 min 24 s. Installer `Jay-S_0.0.1_x64-setup.exe` with **4,696,750 bytes (4.48 MiB)**, within RNF-2's 15 MB; `jay-s.exe` with 14.9 MB; not signed.
+- **Silent install (`/S`):** 2.7 s, exit code 0; folder with `jay-s.exe` and `uninstall.exe`; uninstall key with `DisplayName Jay-S`, `DisplayVersion 0.0.1` and `Publisher TyxMatty` (the version is what Jay-H reads); the installed app opened its window in 0.1 s with **~120 MB private** in its tree (RNF-1, under 150 MB).
+- **What that install doesn't prove:** it was run from inside a packaged (MSIX) program, and Windows gives the processes such a program starts a private copy of AppData. The files went to that copy, not to the `%LOCALAPPDATA%` Explorer and Jay-H see. It proves the installer runs, writes what is expected and that the installed binary opens within the RAM target; it is **not** a real install. It was undone (folder, keys and the two shortcuts, which were real and pointed at nothing).
+- **Blank page on the taskbar:** an artifact of the same test, not a defect of the app. The app wrote the .ico to the private copy and gave Explorer the normal path, where there is no file. Proof: the same window showed the icon once the property pointed at the private copy's real path (with and without `,0`). The comments in `taskbar_icon.rs` that gave other causes were corrected.
+- **Tests:** `npm test` (16, 2 of them new: `installer.test.js`).
+- **Missing:** a real install, running the installer from Explorer (pages, language choice, SmartScreen, taskbar icon), and on a test account; uninstalling; Jay-S in Jay-H's catalog; `npm audit`, `cargo audit`, gitleaks and the `innerHTML` search in the CI; Actions pinned by SHA; the first release (version and tag).
 
 ## 9. Risks and spikes
 

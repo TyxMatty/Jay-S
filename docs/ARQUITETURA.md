@@ -11,7 +11,7 @@ O app de estudos da linha Jay. O estudante anexa **conteúdo** e/ou **provas**; 
 
 Em abas separadas ficam o **simulado** (opcional: a prova escolhida, com o tempo e o estilo que a pessoa quiser) e os **flashcards**, que se adaptam ao jeito do estudante (curtos e diretos ou mais longos) e ao que ele errou nos simulados.
 
-Escrito em 2026-11-09, a partir do Jay-C 0.4, Jay-A 0.3.3, Jay-E 0.2.1 e Jay-H 0.1.4. Licença: **MIT**, como a linha toda. As etapas 0 a 6 estão prontas; falta a 7 (instalador e lançamento).
+Escrito em 2026-11-09, a partir do Jay-C 0.4, Jay-A 0.3.3, Jay-E 0.2.1 e Jay-H 0.1.4. Licença: **MIT**, como a linha toda. As etapas 0 a 6 estão prontas; da 7, o instalador está gerado e medido, e faltam a instalação de verdade, o Jay-H e os audits na CI (seção 8).
 
 ## 1. Visão geral
 
@@ -249,6 +249,21 @@ Segurança (os 10 pontos): **7** é o ponto tocado: o Parar não se perde mais n
 
 Arrastar arquivos sobre a janela, em qualquer seção, mostra três áreas: **Conteúdo**, **Provas** e **Gabaritos**. A área sob o cursor fica acesa e é o que o arquivo vira; depois de soltar, o app abre Materiais nessa aba. Soltar entre as áreas não anexa nada. O Rust guarda os caminhos soltos; a página só diz em qual área caiu (`materials_drop`), então continua sem nunca mandar um caminho. Um arraste do Explorer não dá para automatizar: as áreas foram conferidas por print, e a importação usa o mesmo `library::import` do botão.
 
+### O instalador (etapa 7)
+
+O instalador é o NSIS do Tauri, sem script próprio (`Jay-S_0.0.1_x64-setup.exe`, 4,48 MiB). Pelos 10 pontos:
+
+1. **Superfície de ataque.** Uma fronteira nova: o `.exe` do instalador, baixado do GitHub (pela pessoa ou pelo Jay-H) e rodado no PC. Caminho mais realista: um instalador trocado, vindo de um site que não é o do projeto. Ele **não é assinado**: o Windows não diz quem o fez e o SmartScreen avisa "editor desconhecido". O que vale hoje: release só no GitHub do projeto, por HTTPS, com o SHA-256 nas notas. Assinar o código é decisão aberta (custa dinheiro; a linha toda está sem).
+2. **Controle de acesso / IDOR.** Sem contas. A instalação é por usuário (`installMode: currentUser`): grava em `%LOCALAPPDATA%\Jay-S`, em `HKCU` e nos atalhos do próprio perfil; não pede administrador e não toca em outra conta do PC.
+3. **Permissões de dados.** O instalador não leva nem cria dados do estudante: a pasta instalada tem `jay-s.exe` e `uninstall.exe` (medido), e a pasta de dados (`%APPDATA%\io.github.tyxmatty.jays`) nasce no primeiro uso. Desinstalar mantém a pasta de dados, a menos que a pessoa marque a caixa "apagar os dados do aplicativo" do desinstalador do Tauri (desmarcada por padrão); uma atualização não apaga. **Não medido:** a desinstalação não foi rodada.
+4. **Entrada não confiável.** Nenhuma entrada nova: sem modelo NSIS próprio, sem `installerHooks`, sem argumentos nossos. O atalho e o "relaunch" da barra de tarefas apontam para o caminho do próprio `.exe`, entre aspas.
+5. **Credenciais expostas.** Nenhuma no instalador nem no workflow que o gera (`permissions: contents: read`; publicar a release é um passo manual).
+6. **Autenticação.** Não se aplica.
+7. **Abuso de recursos e corridas.** Instalar por cima com o app aberto: o instalador do Tauri pede para fechar o app antes. Não medido.
+8. **Cadeia de dependências.** `npm audit`: 0 vulnerabilidades (2026-11-09). `cargo audit`: **não rodado** (não está instalado no PC de dev); entra na CI, que falta. As Actions ainda estão por versão (`@v7`), não por SHA: falta. Sem o WebView2 no PC (Windows 10 antigo), o instalador baixa o da Microsoft por HTTPS (modo padrão do Tauri); no Windows 11 ele faz parte do sistema. Não medido: o PC de dev tem o WebView2.
+9. **Rede e exposição.** CSP e *capabilities* iguais. O app instalado não abre porta de depuração; ela só existe se a própria pessoa definir `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` no ambiente dela.
+10. **Testes adversariais e critérios de release.** `frontend/test/installer.test.js` (no `npm test`): só NSIS, por usuário, sem `resources` nem `externalBin` (nem modelo, nem `llama-server`, nem arquivo de ninguém dentro do instalador), sem script próprio; CSP sem endereço externo; *capabilities* só `core:`. **Bloqueia a release:** esse teste falhando; instalador acima de 15 MB (RNF-2); tag diferente da versão (conferido no workflow do instalador); `cargo audit` com vulnerabilidade alta, quando estiver na CI.
+
 ## 8. Etapas
 
 Cada etapa termina com algo testável; ao fim de cada uma, commit, resumo e a pergunta se segue para a próxima.
@@ -290,6 +305,14 @@ Cada etapa termina com algo testável; ao fim de cada uma, commit, resumo e a pe
 - **Memória:** o servidor, de 3,4 GB para ~1 GB de RAM com `--load-mode none` (seção 5); ~2,7 GB na GPU. A interface (WebView2) com o Vite de dev e a depuração ligada: ~206 MB privados, acima da meta de 150 MB do RNF-1. *Falta: medir no build de release.*
 - **RAM no release (medido depois):** a árvore do app (Rust + WebView2) com 189 MB privados, 93 deles do processo de GPU do WebView2; com `--disable-gpu` na janela (`tauri.conf.json`, `additionalBrowserArgs`), **110 MB**: o Jay-S é texto, sem vídeo, e o Jay-AI usa a GPU pelo processo dele. RNF-1 (abaixo de 150 MB) cumprido.
 - **Não visto:** o botão "Baixar" do app com o modelo leve (o download foi testado pelo exemplo `ai_setup`, mesmo código), o Parar no meio de um download.
+
+**Etapa 7, medido (2026-11-09), a parte do instalador:**
+- **Build de release:** 6 min 24 s. Instalador `Jay-S_0.0.1_x64-setup.exe` com **4.696.750 bytes (4,48 MiB)**, dentro dos 15 MB do RNF-2; `jay-s.exe` com 14,9 MB; não assinado.
+- **Instalação silenciosa (`/S`):** 2,7 s, código 0; pasta com `jay-s.exe` e `uninstall.exe`; chave de desinstalação com `DisplayName Jay-S`, `DisplayVersion 0.0.1` e `Publisher TyxMatty` (a versão é o que o Jay-H lê); o app instalado abriu a janela em 0,1 s com **~120 MB privados** na árvore (RNF-1, abaixo de 150 MB).
+- **O que essa instalação não prova:** ela foi rodada de dentro de um programa empacotado (MSIX), e o Windows dá aos processos que um programa assim inicia uma cópia privada do AppData. Os arquivos foram para essa cópia, não para o `%LOCALAPPDATA%` que o Explorer e o Jay-H veem. Ela prova que o instalador roda, grava o esperado e que o binário instalado abre dentro da meta de RAM; **não** é uma instalação de verdade. Foi desfeita (pasta, chaves e os dois atalhos, que eram de verdade e apontavam para o nada).
+- **Página em branco na barra de tarefas:** artefato do mesmo teste, não defeito do app. O app gravou o .ico na cópia privada e deu ao Explorer o caminho normal, onde não há arquivo. Prova: a mesma janela mostrou o ícone quando a propriedade apontou para o caminho real da cópia privada (com e sem `,0`). Os comentários do `taskbar_icon.rs` que davam outras causas foram corrigidos.
+- **Testes:** `npm test` (16, com 2 novos: `installer.test.js`).
+- **Falta:** instalar de verdade, rodando o instalador pelo Explorer (páginas, escolha do idioma, SmartScreen, ícone da barra), e numa conta de teste; desinstalar; o Jay-S no catálogo do Jay-H; `npm audit`, `cargo audit`, gitleaks e a busca por `innerHTML` na CI; Actions por SHA; a primeira release (versão e tag).
 
 ## 9. Riscos e spikes
 

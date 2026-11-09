@@ -27,9 +27,8 @@ use windows::Win32::UI::WindowsAndMessaging::{CreateIcon, DestroyIcon, HICON, IC
 use windows::core::PWSTR;
 
 /// The window's own app ID: not the Start menu shortcut's (`io.github.tyxmatty.jays`, set by the
-/// installer), or Windows ties them again. Dev and release get different IDs: Explorer caches the
-/// relaunch icon per ID, and a dev build sharing the release's ID showed a blank page on the
-/// taskbar (measured in Jay-S, 2026-11-09).
+/// installer), or Windows ties them again. Dev and release get different IDs, so a dev build never
+/// shares a taskbar button (or what Explorer remembers about it) with the installed app.
 const WINDOW_APP_ID: &str = if cfg!(debug_assertions) { "io.github.tyxmatty.jays.window.dev" } else { "io.github.tyxmatty.jays.window" };
 
 /// `rgba`: `size` x `size` pixels, 4 bytes each (straight alpha), as from a canvas.
@@ -40,11 +39,13 @@ pub fn set_taskbar_icon(window: tauri::WebviewWindow, rgba: Vec<u8>, size: u32) 
         return Err(format!("expected {size}x{size} RGBA pixels, got {} bytes", rgba.len()));
     }
     let hwnd = HWND(window.hwnd().map_err(|e| e.to_string())?.0);
-    // Named after its content, so a changed picture is never served from an icon cache. Dev and
-    // release get different names: Explorer remembers a path it once failed to load (a dev build run
-    // from a sandboxed shell writes where Explorer can't see), and the installed app must not inherit
-    // that blank. The base name also changed from "taskbar-", whose paths may already be remembered
-    // blank on the user's PC (measured in Jay-A, which does the same).
+    // Named after its content, so a changed picture is never served from an icon cache. Explorer
+    // loads this file itself, so it must be where Explorer sees it: an app started from a packaged
+    // (MSIX) program gets a private copy of AppData, the file lands there, Explorer finds nothing at
+    // this path and the button shows a blank page (measured in Jay-S, 2026-11-09: the same window
+    // showed the picture once the property pointed at the private copy's real path). Dev and release
+    // get different names so the installed app never inherits a path Explorer once failed to load;
+    // the base name also changed from "taskbar-" for the same reason (Jay-A does the same).
     let kind = if cfg!(debug_assertions) { "dev" } else { "app" };
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     rgba.hash(&mut hasher);
@@ -71,9 +72,9 @@ pub fn set_taskbar_icon(window: tauri::WebviewWindow, rgba: Vec<u8>, size: u32) 
     }
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     // The app ID and relaunch icon only untie the installed app from its Start menu shortcut. Run
-    // from anywhere else (dev, a build folder) Windows doesn't load the relaunch icon and the button
-    // shows a blank page (measured in Jay-S on Windows 11 26300, even with a plain red icon), while
-    // ICON_BIG alone shows the picture.
+    // from anywhere else (dev, a build folder) there is no shortcut to untie and ICON_BIG alone
+    // shows the picture; it also keeps a dev run started from a packaged program (see above) from
+    // pointing Explorer at a file it can't see.
     if !installed(&exe) {
         return Ok(());
     }
@@ -102,8 +103,7 @@ fn relaunch_with_icon(hwnd: HWND, exe: &Path, ico_path: &Path) -> windows::core:
     let store: IPropertyStore = unsafe { SHGetPropertyStoreForWindow(hwnd)? };
     set_text(&store, &PKEY_AppUserModel_RelaunchCommand, &format!("\"{}\"", exe.display()))?;
     set_text(&store, &PKEY_AppUserModel_RelaunchDisplayNameResource, "Jay-S")?;
-    // "file,index", as the property is documented: a bare path showed a blank page on the taskbar
-    // (measured in Jay-S, 2026-11-09).
+    // "file,index", as the property is documented (a bare path loads too: measured in Jay-S).
     set_text(&store, &PKEY_AppUserModel_RelaunchIconResource, &format!("{},0", ico_path.display()))?;
     unsafe {
         store.SetValue(&PKEY_AppUserModel_ID, &PROPVARIANT::default())?;
