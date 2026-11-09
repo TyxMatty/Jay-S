@@ -72,6 +72,7 @@ export function createRunner(started, onFinished) {
     return h(
       'div',
       { class: 'runner-feedback', 'data-tone': right ? 'right' : g.points > 0 ? 'partial' : 'wrong' },
+      h('span', { class: 'feedback-symbol', 'aria-hidden': 'true' }, right ? '✓' : g.points > 0 ? '½' : '✗'),
       h('strong', {}, right ? t('Right!') : g.points > 0 ? t('Partly right ({p} of 1).', { p: fmt(g.points) }) : t('Not this time.')),
       ' ',
       t('Answer: {answer}', { answer: g.answer ?? '?' }),
@@ -194,12 +195,25 @@ export function createRunner(started, onFinished) {
     { class: 'app-panel is-single runner' },
     h('div', { class: 'panel-head' }, h('h1', {}, attempt.title), h('span', { class: 'badge', 'data-status': learn ? 'ok' : 'check' }, learn ? t('Learning mode') : t('Exam mode')), timer),
     nav,
-    h('fieldset', {}, body),
+    h('div', { class: 'exam-sheet' }, body),
     status,
     h('div', { class: 'button-row runner-actions' }, prev, next, finish),
   );
   el.dispose = () => clearInterval(tick);
   return el;
+}
+
+/** The score as a ring filled to the share of points, colored by how it went (and said in words). */
+function scoreHero(r, attempt) {
+  const share = r.total ? r.points / r.total : 0;
+  const tone = share >= 0.7 ? 'right' : share >= 0.4 ? 'partial' : 'wrong';
+  const verdict = { right: t('Great result!'), partial: t('Halfway there.'), wrong: t('Lots to review: Jay-AI says where to start.') }[tone];
+  return h(
+    'div',
+    { class: 'score-hero', 'data-tone': tone },
+    h('div', { class: 'score-ring', style: `--share:${share}`, role: 'img', 'aria-label': t('{p} of {total}', { p: fmt(r.points), total: r.total }) }, h('span', {}, `${Math.round(share * 100)}%`)),
+    h('div', {}, h('p', { class: 'result-score' }, t('{p} of {total}', { p: fmt(r.points), total: r.total })), h('p', { class: 'score-verdict' }, verdict), h('p', { class: 'hint' }, attempt.mode === 'learn' ? t('Learning mode') : attempt.time_limit ? t('Mock test') : t('Exam mode'))),
+  );
 }
 
 /** The result of a finished attempt: score, per topic, per question, and Jay-AI's analysis. */
@@ -242,7 +256,7 @@ export function createResult(attempt, questions, { onBack }) {
     { class: 'topic-bars' },
     r.topics.map((tp) => {
       const share = tp.total ? tp.points / tp.total : 0;
-      return h('li', {}, h('span', {}, tp.topic), h('span', { class: 'topic-bar', style: `--share:${share}` }), h('span', { class: 'hint' }, t('{p} of {total}', { p: fmt(tp.points), total: tp.total })));
+      return h('li', { 'data-tone': share >= 0.7 ? 'right' : share >= 0.4 ? 'partial' : 'wrong' }, h('span', {}, tp.topic), h('span', { class: 'topic-bar', style: `--share:${share}` }), h('span', { class: 'hint' }, t('{p} of {total}', { p: fmt(tp.points), total: tp.total })));
     }),
   );
   const review = h(
@@ -269,7 +283,7 @@ export function createResult(attempt, questions, { onBack }) {
     'section',
     { class: 'app-panel is-single result' },
     h('div', { class: 'panel-head' }, h('h1', {}, attempt.title), h('button', { type: 'button', class: 'btn btn-secondary', onClick: () => { el.dispose(); onBack(); } }, t('Back'))),
-    h('fieldset', {}, h('p', { class: 'result-score' }, t('{p} of {total}', { p: fmt(r.points), total: r.total })), h('p', { class: 'hint' }, attempt.mode === 'learn' ? t('Learning mode') : t('Exam mode'))),
+    scoreHero(r, attempt),
     h('fieldset', {}, h('h3', { class: 'card-title' }, h('span', { class: 'card-icon', html: icons.spark, 'aria-hidden': 'true' }), t("Jay-AI's analysis")), analysis),
     h('fieldset', {}, h('h3', {}, t('By topic')), topics),
     h('fieldset', {}, h('h3', {}, t('Question by question')), review),
