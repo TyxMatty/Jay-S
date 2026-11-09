@@ -7,6 +7,9 @@ mod docx;
 mod ocr;
 mod pdf;
 
+#[cfg(test)]
+pub(crate) use pdf::tests::sample as pdf_sample;
+
 use serde::{Deserialize, Serialize};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 

@@ -112,7 +112,7 @@ pub struct ExamMaterialInfo {
 /// What an exam material holds, for the builder: how many questions, and the key that fits it.
 #[tauri::command]
 pub fn exam_material_info(library: State<Library>, id: String) -> Result<ExamMaterialInfo, Failure> {
-    let key = library.store.best_key(&id);
+    let key = library.store.key_for(&id);
     let qs = library.store.material_questions(&id, key.as_deref())?;
     Ok(ExamMaterialInfo { questions: qs.len(), sum: qs.iter().filter(|q| q.kind == exam::QuestionKind::Sum).count(), answered: qs.iter().filter(|q| q.answer.is_some()).count(), key })
 }

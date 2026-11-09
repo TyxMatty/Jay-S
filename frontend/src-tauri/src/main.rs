@@ -7,6 +7,7 @@
 mod ai;
 mod library;
 mod study;
+mod view;
 #[cfg(windows)]
 mod taskbar_icon;
 
@@ -16,7 +17,7 @@ fn main() {
     tauri::Builder::default()
         // First plugin: a second launch exits at once, shows the running Jay-S and hands it its files.
         .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
-            library::import(app, library::paths_from_args(&args, cwd.as_ref()));
+            library::import(app, library::paths_from_args(&args, cwd.as_ref()), library::Attach::default());
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.unminimize();
                 let _ = window.show();
@@ -24,6 +25,7 @@ fn main() {
             }
         }))
         .plugin(tauri_plugin_dialog::init())
+        .register_asynchronous_uri_scheme_protocol("jays", view::protocol)
         .setup(|app| {
             // The student's data: %APPDATA%\io.github.tyxmatty.jays (docs/ARQUITETURA.md, section 6).
             let root = app.path().app_data_dir()?;
@@ -55,7 +57,8 @@ fn main() {
         .on_window_event(|window, event| {
             // A drop on the window: Rust gets the paths, the page only hears about the materials.
             if let WindowEvent::DragDrop(DragDropEvent::Drop { paths, .. }) = event {
-                library::import(window.app_handle(), paths.clone());
+                let target = window.app_handle().state::<library::Library>().drop_target.lock().unwrap_or_else(|e| e.into_inner()).clone();
+                library::import(window.app_handle(), paths.clone(), target);
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -64,6 +67,10 @@ fn main() {
             library::materials_set_kind,
             library::materials_text,
             library::materials_delete,
+            library::materials_drop_target,
+            library::materials_set_key,
+            library::materials_key,
+            view::materials_view,
             ai::ai_status,
             ai::ai_set_choice,
             ai::ai_install,

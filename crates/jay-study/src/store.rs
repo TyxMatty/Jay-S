@@ -40,6 +40,20 @@ pub struct Material {
     /// SHA-256 of the attached file: the same file attached again gives the existing material.
     #[serde(default)]
     pub sha256: Option<String>,
+    /// For an exam: which answer key goes with it (the student's choice; automatic by default).
+    #[serde(default)]
+    pub key: KeyChoice,
+}
+
+/// An exam's answer key: found automatically (`Store::best_key`), none (Jay-AI answers), or one
+/// the student picked or attached from the exam.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "mode", content = "id", rename_all = "lowercase")]
+pub enum KeyChoice {
+    #[default]
+    Auto,
+    None,
+    Material(String),
 }
 
 #[derive(Debug)]
@@ -195,6 +209,7 @@ impl Store {
                 detected,
                 warnings: extracted.warnings,
                 sha256: Some(sha256),
+                key: KeyChoice::Auto,
             };
             // meta.json last: until it exists, the folder isn't listed.
             write_json(&dir.join("meta.json"), &material)?;
@@ -204,6 +219,29 @@ impl Store {
             let _ = std::fs::remove_dir_all(&dir);
         }
         result
+    }
+
+    /// Which answer key goes with exam `material`. A chosen key must be a material of kind `key`.
+    pub fn set_key(&self, material: &str, choice: KeyChoice) -> Result<Material, StoreError> {
+        if let KeyChoice::Material(key) = &choice
+            && self.material(key)?.kind != MaterialKind::Key
+        {
+            return Err(StoreError::NotFound);
+        }
+        let mut m = self.material(material)?;
+        m.key = choice;
+        write_json(&self.material_dir(material)?.join("meta.json"), &m)?;
+        Ok(m)
+    }
+
+    /// The answer key exam `material` uses: the student's choice, or the automatic one. A chosen key
+    /// that was deleted (or is no longer a key) counts as none.
+    pub fn key_for(&self, material: &str) -> Option<String> {
+        match self.material(material).ok()?.key {
+            KeyChoice::Auto => self.best_key(material),
+            KeyChoice::None => None,
+            KeyChoice::Material(key) => self.material(&key).ok().filter(|k| k.kind == MaterialKind::Key).map(|k| k.id),
+        }
     }
 
     pub fn set_kind(&self, material: &str, kind: MaterialKind) -> Result<Material, StoreError> {

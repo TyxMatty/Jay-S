@@ -15,16 +15,28 @@ pub const IMPORT_EVENT: &str = "materials-import";
 /// How much text "Show text" brings to the page.
 const PREVIEW_CHARS: usize = 20_000;
 
+/// What the student chose when attaching: the kind (from the Materials tab they're on) and, for an
+/// answer key, the exam it belongs to.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub struct Attach {
+    #[serde(default)]
+    pub kind: Option<MaterialKind>,
+    #[serde(default)]
+    pub exam: Option<String>,
+}
+
 pub struct Library {
     pub store: Store,
     /// One writer at a time: imports run in order, and a change never races a delete
     /// (docs/ARQUITETURA.md, section 7, item 7).
     write: Mutex<()>,
+    /// Where a file dropped on the window goes (the Materials tab open, as the page tells).
+    pub drop_target: Mutex<Attach>,
 }
 
 impl Library {
     pub fn new(store: Store) -> Self {
-        Self { store, write: Mutex::new(()) }
+        Self { store, write: Mutex::new(()), drop_target: Mutex::new(Attach::default()) }
     }
 
     /// Held by every command that changes a file: Tauri runs commands in parallel, and two quick
@@ -71,7 +83,7 @@ enum ImportEvent {
 }
 
 /// Reads `paths` one by one on a thread of its own, telling the page as each starts and ends.
-pub fn import(app: &AppHandle, paths: Vec<PathBuf>) {
+pub fn import(app: &AppHandle, paths: Vec<PathBuf>, attach: Attach) {
     if paths.is_empty() {
         return;
     }
@@ -92,7 +104,17 @@ pub fn import(app: &AppHandle, paths: Vec<PathBuf>) {
         for (token, path, name) in jobs {
             let result = {
                 let _guard = library.write.lock().unwrap_or_else(|e| e.into_inner());
-                library.store.import(&path)
+                // The student's choice wins over what the rules detected; an answer key attached
+                // for an exam becomes that exam's key.
+                library.store.import(&path).and_then(|m| match attach.kind {
+                    Some(kind) if kind != m.kind => library.store.set_kind(&m.id, kind),
+                    _ => Ok(m),
+                }).and_then(|m| {
+                    if let (Some(exam), MaterialKind::Key) = (&attach.exam, m.kind) {
+                        library.store.set_key(exam, jay_study::KeyChoice::Material(m.id.clone()))?;
+                    }
+                    Ok(m)
+                })
             };
             let event = match result {
                 Ok(material) => ImportEvent::Done { token, material },
@@ -115,12 +137,12 @@ pub struct StartupFiles(pub Mutex<Vec<PathBuf>>);
 
 #[tauri::command]
 pub fn materials_list(app: AppHandle, library: State<Library>, startup: State<StartupFiles>) -> Vec<Material> {
-    import(&app, std::mem::take(&mut *startup.0.lock().unwrap_or_else(|e| e.into_inner())));
+    import(&app, std::mem::take(&mut *startup.0.lock().unwrap_or_else(|e| e.into_inner())), Attach::default());
     library.store.materials()
 }
 
 #[tauri::command]
-pub async fn materials_pick(app: AppHandle) {
+pub async fn materials_pick(app: AppHandle, attach: Option<Attach>) {
     // async: the blocking dialog runs off the main thread.
     let picked = app
         .dialog()
@@ -129,7 +151,34 @@ pub async fn materials_pick(app: AppHandle) {
         .add_filter("*", &["*"])
         .blocking_pick_files()
         .unwrap_or_default();
-    import(&app, picked.into_iter().filter_map(|p| p.into_path().ok()).collect());
+    import(&app, picked.into_iter().filter_map(|p| p.into_path().ok()).collect(), attach.unwrap_or_default());
+}
+
+/// The Materials tab the page shows: files dropped on the window take its kind.
+#[tauri::command]
+pub fn materials_drop_target(library: State<Library>, attach: Attach) {
+    *library.drop_target.lock().unwrap_or_else(|e| e.into_inner()) = attach;
+}
+
+/// Which answer key goes with an exam (automatic, none, or a key material).
+#[tauri::command]
+pub fn materials_set_key(library: State<Library>, id: String, key: jay_study::KeyChoice) -> Result<Material, Failure> {
+    let _guard = library.write.lock().unwrap_or_else(|e| e.into_inner());
+    Ok(library.store.set_key(&id, key)?)
+}
+
+#[derive(Serialize)]
+pub struct KeyInfo {
+    /// The key in use (the choice, or the one found automatically).
+    key: Option<String>,
+    choice: jay_study::KeyChoice,
+}
+
+/// The key an exam uses now.
+#[tauri::command]
+pub fn materials_key(library: State<Library>, id: String) -> Result<KeyInfo, Failure> {
+    let m = library.store.material(&id)?;
+    Ok(KeyInfo { key: library.store.key_for(&id), choice: m.key })
 }
 
 #[tauri::command]

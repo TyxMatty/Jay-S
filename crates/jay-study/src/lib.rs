@@ -4,6 +4,7 @@
 pub mod ai;
 pub mod cards;
 pub mod classify;
+pub mod doc;
 pub mod exam;
 pub mod explain;
 pub mod extract;
@@ -11,7 +12,8 @@ pub mod generate;
 pub mod id;
 pub mod records;
 pub mod store;
+pub mod view;
 
 pub use classify::{Classification, MaterialKind};
 pub use extract::{ExtractError, Extracted, Format, Warning};
-pub use store::{Material, Store};
+pub use store::{KeyChoice, Material, Store};

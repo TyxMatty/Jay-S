@@ -27,7 +27,7 @@
         "default-src": "'self'",
         "script-src": "'self'",
         "style-src": "'self' 'unsafe-inline'",
-        "img-src": "'self' data: blob:",
+        "img-src": "'self' data: blob: jays: http://jays.localhost",
         "connect-src": "'self' ipc: http://ipc.localhost",
         "font-src": "'self' data:"
       },

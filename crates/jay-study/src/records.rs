@@ -310,7 +310,7 @@ impl Store {
             // Every exam's questions in one pool, each with its own key (found among the materials).
             let mut all: Vec<Question> = vec![];
             for exam_id in &exams {
-                let key = if exams.len() == 1 { plan.key.clone() } else { None }.or_else(|| self.best_key(exam_id));
+                let key = if exams.len() == 1 { plan.key.clone() } else { None }.or_else(|| self.key_for(exam_id));
                 all.extend(self.material_questions(exam_id, key.as_deref())?);
                 materials.push(exam_id.clone());
                 materials.extend(key);
@@ -769,6 +769,36 @@ e) {}
         // A sum-type key does fit the UEPG exam.
         let key_uepg = write("Gabarito-Grupo-3-2025.txt", (1..=10).map(|n| format!("{n:02} 21\n")).collect());
         assert_eq!(store.best_key(&uepg.id), Some(key_uepg.id));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn the_students_key_choice_wins() {
+        use crate::store::KeyChoice;
+        let (store, root) = temp_store();
+        let write = |name: &str, text: String| {
+            std::fs::write(root.join(name), text).unwrap();
+            store.import(&root.join(name)).unwrap()
+        };
+        let exam = write("prova.txt", (1..=10).map(|n| format!("Questão {n}\nQuanto é {n}?\na) um\nb) dois\nc) três\nd) quatro\ne) cinco\n")).collect());
+        let key_a = write("gab-a.txt", (1..=10).map(|n| format!("{n} A\n")).collect());
+        let key_b = write("gab-b.txt", (1..=10).map(|n| format!("{n} B\n")).collect());
+        // Two keys fit and the names don't tell: automatic picks none.
+        assert_eq!(store.key_for(&exam.id), None);
+        store.set_key(&exam.id, KeyChoice::Material(key_b.id.clone())).unwrap();
+        assert_eq!(store.key_for(&exam.id), Some(key_b.id.clone()));
+        let qs = store.material_questions(&exam.id, store.key_for(&exam.id).as_deref()).unwrap();
+        assert!(qs.iter().all(|q| q.answer.as_deref() == Some("B")));
+        // "None": Jay-AI answers, even though keys exist.
+        store.set_key(&exam.id, KeyChoice::None).unwrap();
+        assert_eq!(store.key_for(&exam.id), None);
+        // Only a key can be chosen as a key.
+        assert!(matches!(store.set_key(&exam.id, KeyChoice::Material(exam.id.clone())), Err(StoreError::NotFound)));
+        assert!(matches!(store.set_key(&exam.id, KeyChoice::Material("../x".into())), Err(StoreError::NotFound)));
+        // A chosen key that's deleted counts as none.
+        store.set_key(&exam.id, KeyChoice::Material(key_a.id.clone())).unwrap();
+        store.delete(&key_a.id).unwrap();
+        assert_eq!(store.key_for(&exam.id), None);
         std::fs::remove_dir_all(root).unwrap();
     }
 
