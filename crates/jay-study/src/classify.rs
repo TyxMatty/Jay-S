@@ -13,6 +13,8 @@ pub enum MaterialKind {
     Exam,
     /// Content with exercises (a handout, a book chapter with a question list).
     Both,
+    /// An answer key ("46 C", "17 21"): it goes with an exam.
+    Key,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -60,7 +62,8 @@ pub fn choice_letter(line: &str) -> Option<char> {
     // "A Curitiba": a capital, one space, then text (ENEM). Not "a casa" (an article in prose).
     let enem = letter.is_ascii_uppercase() && rest.starts_with(' ') && after.chars().next().is_some_and(|c| !c.is_ascii_punctuation());
     let rest_ok = |s: &str| s.trim_start_matches([')', '.', '-', '–', '—']).trim().chars().count() >= 1;
-    ((marked && rest_ok(after)) || (enem && after.len() >= 2)).then_some(letter.to_ascii_lowercase())
+    // "a)" alone on its line is an option whose text (a formula, a picture) comes on the next lines.
+    ((marked && (rest_ok(after) || after == ")")) || (enem && after.len() >= 2)).then_some(letter.to_ascii_lowercase())
 }
 
 /// The sum-type proposition a line starts with: `01)`, `02.`, `04 -`, `08 –`, `16)`, `32`, `64`.
@@ -73,7 +76,10 @@ pub fn sum_proposition(line: &str) -> Option<u32> {
     let n: u32 = digits.parse().ok()?;
     let after = t[2..].trim_start();
     let marked = after.starts_with([')', '.', '-', '–', '—']) || after.chars().next().is_some_and(char::is_alphabetic);
-    ([1, 2, 4, 8, 16, 32, 64].contains(&n) && marked && after.trim_start_matches([')', '.', '-', '–', '—']).trim().chars().count() >= 3).then_some(n)
+    // Short answers are fine ("01) 12."): only runs 01→02→04 count (classify, exam), never one line.
+    // "16)" alone: its text (a formula) comes on the next lines.
+    let text_ok = !after.trim_start_matches([')', '.', '-', '–', '—']).trim().is_empty() || after == ")";
+    ([1, 2, 4, 8, 16, 32, 64].contains(&n) && marked && text_ok).then_some(n)
 }
 
 /// "Questão 3", "QUESTÃO 03", "Exercício 2", "Question 4".
@@ -91,13 +97,13 @@ pub fn is_question_header(line: &str) -> bool {
 fn runs(lines: &[&str]) -> (Vec<usize>, Vec<usize>) {
     let mut choice_runs = vec![];
     let mut sum_runs = vec![];
-    // Choices: a, b, c, d in order, each within 12 lines of the one before.
+    // Choices: a, b, c, d in order, each within 25 lines of the one before.
     let (mut expect, mut last_line, mut start) = ('a', 0usize, 0usize);
     for (i, line) in lines.iter().enumerate() {
         if let Some(letter) = choice_letter(line) {
             if letter == 'a' {
                 (expect, start) = ('b', i);
-            } else if letter == expect && i - last_line <= 12 {
+            } else if letter == expect && i - last_line <= 25 {
                 expect = (expect as u8 + 1) as char;
                 if expect == 'e' {
                     choice_runs.push(start);
@@ -108,13 +114,13 @@ fn runs(lines: &[&str]) -> (Vec<usize>, Vec<usize>) {
             last_line = i;
         }
     }
-    // Propositions: 01, 02, 04 in order, each within 12 lines.
+    // Propositions: 01, 02, 04 in order, each within 25 lines.
     let (mut expect, mut last_line, mut start) = (1u32, 0usize, 0usize);
     for (i, line) in lines.iter().enumerate() {
         if let Some(n) = sum_proposition(line) {
             if n == 1 {
                 (expect, start) = (2, i);
-            } else if n == expect && i - last_line <= 12 {
+            } else if n == expect && i - last_line <= 25 {
                 expect *= 2;
                 if expect == 8 {
                     sum_runs.push(start);
@@ -129,6 +135,9 @@ fn runs(lines: &[&str]) -> (Vec<usize>, Vec<usize>) {
 }
 
 pub fn classify(text: &str) -> Classification {
+    if crate::exam::parse_answer_key(text).is_some() {
+        return Classification { kind: MaterialKind::Key, sure: true, choice_questions: 0, sum_questions: 0, headers: 0 };
+    }
     let lines: Vec<&str> = text.split(['\n', '\x0c']).collect();
     let (choice_runs, sum_runs) = runs(&lines);
     let headers = lines.iter().filter(|l| is_question_header(l)).count() as u32;
@@ -191,6 +200,12 @@ mod tests {
         assert!(is_question_header("Questão nº 12"));
         assert!(is_question_header("Exercício 4:"));
         assert!(!is_question_header("Questões sociais do século XX"));
+    }
+
+    #[test]
+    fn an_answer_key() {
+        let key: String = (46..=90).map(|n| format!("{n} {}\n", ["A", "B", "C", "D", "E"][n as usize % 5])).collect();
+        assert_eq!(classify(&format!("Gabarito 2023\nQUESTÃO GABARITO\n{key}")).kind, MaterialKind::Key);
     }
 
     #[test]

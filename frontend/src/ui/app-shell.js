@@ -118,22 +118,6 @@ function createSettingsPanel() {
   );
 }
 
-/** A section that arrives in a later stage (docs/ARQUITETURA.md, section 8): its icon and what it will do. */
-function comingPanel(icon, title, text, stage) {
-  return h(
-    'section',
-    { class: 'app-panel' },
-    h('h1', {}, title),
-    h(
-      'fieldset',
-      { class: 'empty-state' },
-      h('span', { class: 'card-icon', html: icon, 'aria-hidden': 'true' }),
-      h('p', {}, text),
-      h('p', { class: 'hint' }, t('Arrives in stage {n}.', { n: stage })),
-    ),
-  );
-}
-
 /** Jay-C's server pill, here for Jay-AI: not installed, off, loading, ready or working. Clicking it opens the Jay-AI section. */
 function createStatusPill(onClick) {
   const pill = h('button', { type: 'button', class: 'status-pill', 'data-state': 'offline', onClick }, isTauri ? t('Jay-AI not installed') : t('Only in the app.'));
@@ -176,17 +160,17 @@ export function mountApp(root) {
     {
       key: 'exams',
       label: tabLabel(icons.exam, t('Exams')),
-      panel: comingPanel(icons.exam, t('Exams'), t('A new exam from your content in the style you pick (ENEM, UEPG, UEM…), or the questions of your exam mixed with your content. Answer it right here, and see the result at the end or each answer at once in learning mode.'), 3),
+      panel: lazyPanel(() => import('./exams.js').then((m) => m.createExamsPanel())),
     },
     {
       key: 'mock',
       label: tabLabel(icons.timer, t('Mock test')),
-      panel: comingPanel(icons.timer, t('Mock test'), t('Take an exam against the clock, as long as you want, then see what you got right and what to review.'), 4),
+      panel: lazyPanel(() => import('./mock.js').then((m) => m.createMockPanel())),
     },
     {
       key: 'flashcards',
       label: tabLabel(icons.cards, t('Flashcards')),
-      panel: comingPanel(icons.cards, t('Flashcards'), t('Cards from your content that adapt to you: short and direct or longer, and more of what you missed.'), 5),
+      panel: lazyPanel(() => import('./flashcards.js').then((m) => m.createFlashcardsPanel())),
     },
     {
       key: 'jayai',

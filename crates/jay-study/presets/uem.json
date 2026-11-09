@@ -1,0 +1,9 @@
+{
+  "id": "uem",
+  "name": "UEM (somatória)",
+  "kind": "sum",
+  "options": 5,
+  "scoring": "sum_partial",
+  "description": "Propositions 01, 02, 04, 08 and 16 like UEPG; marking a false one makes the question worth zero.",
+  "prompt": "Estilo UEM (somatória): enunciado com um contexto e o comando 'assinale o que for correto.'; cinco proposições numeradas 01, 02, 04, 08 e 16, afirmações completas e independentes; de UMA a CINCO verdadeiras; as falsas com um erro preciso e verificável."
+}

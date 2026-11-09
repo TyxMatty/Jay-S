@@ -10,9 +10,10 @@ const KINDS = () => [
   ['content', t('Content')],
   ['exam', t('Exam')],
   ['both', t('Content and exam')],
+  ['key', t('Answer key')],
 ];
 
-const ICON = { content: icons.book, exam: icons.exam, both: icons.cards };
+const ICON = { content: icons.book, exam: icons.exam, both: icons.cards, key: icons.check };
 
 /** A failure from Rust (`{ code, detail }`) in the student's language. */
 export function failureText(error) {

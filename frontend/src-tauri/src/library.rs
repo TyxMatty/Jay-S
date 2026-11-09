@@ -26,6 +26,12 @@ impl Library {
     pub fn new(store: Store) -> Self {
         Self { store, write: Mutex::new(()) }
     }
+
+    /// Held by every command that changes a file: Tauri runs commands in parallel, and two quick
+    /// answers would otherwise read and write the same attempt at once and lose one.
+    pub fn writing(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.write.lock().unwrap_or_else(|e| e.into_inner())
+    }
 }
 
 /// An error the page can translate: a code and, for some, a detail.

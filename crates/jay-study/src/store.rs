@@ -37,6 +37,9 @@ pub struct Material {
     /// What the rules said; `kind` differs when the student changed it.
     pub detected: Classification,
     pub warnings: Vec<Warning>,
+    /// SHA-256 of the attached file: the same file attached again gives the existing material.
+    #[serde(default)]
+    pub sha256: Option<String>,
 }
 
 #[derive(Debug)]
@@ -160,6 +163,11 @@ impl Store {
     }
 
     pub fn import_bytes(&self, name: &str, format: Format, bytes: Vec<u8>) -> Result<Material, StoreError> {
+        use sha2::Digest;
+        let sha256 = id::hex(&sha2::Sha256::digest(&bytes));
+        if let Some(existing) = self.materials().into_iter().find(|m| m.sha256.as_deref() == Some(sha256.as_str())) {
+            return Ok(existing);
+        }
         let new = id::new_id();
         let dir = self.material_dir(&new)?;
         std::fs::create_dir_all(&dir)?;
@@ -181,6 +189,7 @@ impl Store {
                 kind: detected.kind,
                 detected,
                 warnings: extracted.warnings,
+                sha256: Some(sha256),
             };
             // meta.json last: until it exists, the folder isn't listed.
             write_json(&dir.join("meta.json"), &material)?;
@@ -238,6 +247,9 @@ mod tests {
         let m = store.import(&file).unwrap();
         assert_eq!((m.name.as_str(), m.format, m.kind), ("prova.txt", Format::Text, MaterialKind::Exam));
         assert_eq!(store.materials(), vec![m.clone()]);
+        // The same file again: the same material, no copy.
+        assert_eq!(store.import(&file).unwrap().id, m.id);
+        assert_eq!(store.materials().len(), 1);
         assert_eq!(store.text(&m.id, 9).unwrap(), "Questão 1");
         let changed = store.set_kind(&m.id, MaterialKind::Both).unwrap();
         assert_eq!((changed.kind, changed.detected.kind), (MaterialKind::Both, MaterialKind::Exam));

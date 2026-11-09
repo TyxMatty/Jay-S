@@ -1,0 +1,9 @@
+{
+  "id": "uepg",
+  "name": "UEPG (somatória)",
+  "kind": "sum",
+  "options": 5,
+  "scoring": "sum_partial",
+  "description": "Propositions 01, 02, 04, 08 and 16; one to five are true and the answer is their sum. Partial credit if no false one is marked.",
+  "prompt": "Estilo UEPG (somatória): um enunciado curto que termine com 'assinale o que for correto.'; cinco proposições numeradas 01, 02, 04, 08 e 16, cada uma uma afirmação completa que pode ser verdadeira ou falsa; de UMA a CINCO verdadeiras (varie: nem sempre duas ou três); as falsas devem ter um erro preciso (um dado trocado, uma relação invertida), não absurdos."
+}

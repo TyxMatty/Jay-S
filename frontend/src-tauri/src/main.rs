@@ -6,6 +6,7 @@
 
 mod ai;
 mod library;
+mod study;
 #[cfg(windows)]
 mod taskbar_icon;
 
@@ -28,6 +29,7 @@ fn main() {
             let root = app.path().app_data_dir()?;
             app.manage(ai::Ai::new(&root));
             app.manage(library::Library::new(jay_study::Store::open(root)?));
+            app.manage(study::Jobs::default());
             ai::spawn_idle_watch(app.handle().clone());
             let args: Vec<String> = std::env::args().collect();
             let cwd = std::env::current_dir().unwrap_or_default();
@@ -69,6 +71,27 @@ fn main() {
             ai::ai_remove_model,
             ai::ai_stop,
             ai::ai_test,
+            study::styles_list,
+            study::exam_material_info,
+            study::exam_build,
+            study::exams_list,
+            study::exam_delete,
+            study::attempt_start,
+            study::attempt_resume,
+            study::attempt_answer,
+            study::attempt_finish,
+            study::attempt_analyze,
+            study::attempts_list,
+            study::attempt_result,
+            study::attempt_delete,
+            study::profile_get,
+            study::decks_list,
+            study::deck_build,
+            study::deck_due,
+            study::card_review,
+            study::card_vote,
+            study::deck_delete,
+            study::job_cancel,
             #[cfg(windows)]
             taskbar_icon::set_taskbar_icon
         ])

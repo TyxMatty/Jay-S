@@ -1,0 +1,9 @@
+{
+  "id": "enem",
+  "name": "ENEM",
+  "kind": "choice",
+  "options": 5,
+  "scoring": "single",
+  "description": "Five choices (A–E), one right; a base text with the situation, then the command.",
+  "prompt": "Estilo ENEM: comece com um texto-base curto (uma situação, um trecho, um dado) que contextualize o assunto; depois um comando claro que dependa do texto-base; cinco alternativas (A a E) com apenas UMA correta; as erradas devem ser plausíveis (erros comuns de quem estudou pouco), sem 'todas as anteriores' nem 'nenhuma das anteriores'. Linguagem do ENEM: interpretação e aplicação, não decoreba."
+}

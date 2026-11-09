@@ -2,9 +2,13 @@
 //! attached files, telling content from exams. Tested with `cargo test` here.
 
 pub mod ai;
+pub mod cards;
 pub mod classify;
+pub mod exam;
 pub mod extract;
+pub mod generate;
 pub mod id;
+pub mod records;
 pub mod store;
 
 pub use classify::{Classification, MaterialKind};

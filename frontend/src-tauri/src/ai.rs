@@ -103,6 +103,17 @@ impl Ai {
         result
     }
 
+    /// The chosen model and the runtime are downloaded.
+    pub fn ready(&self) -> bool {
+        self.paths.runtime_ready() && self.paths.model_ready(*lock(&self.choice))
+    }
+
+    /// Stops a download and the reply in progress.
+    pub fn cancel(&self) {
+        self.cancel_download.store(true, Ordering::Relaxed);
+        self.cancel_request.store(true, Ordering::Relaxed);
+    }
+
     /// Stops the server (its memory comes back at once).
     pub fn stop(&self, app: &AppHandle) {
         let _busy = lock(&self.busy);
@@ -223,14 +234,15 @@ pub fn ai_install(app: AppHandle, ai: State<Ai>) -> Result<(), Failure> {
             Err(e) => DownloadEvent::Error { error: e.into() },
         });
         let _ = app.emit(STATUS_EVENT, ai.status());
+        // Results finished before Jay-AI was downloaded go to it now.
+        crate::study::analyze_pending(&app);
     });
     Ok(())
 }
 
 #[tauri::command]
 pub fn ai_cancel(ai: State<Ai>) {
-    ai.cancel_download.store(true, Ordering::Relaxed);
-    ai.cancel_request.store(true, Ordering::Relaxed);
+    ai.cancel();
 }
 
 #[tauri::command]
