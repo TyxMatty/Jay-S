@@ -7,7 +7,7 @@ use jay_study::ai::{AiError, AiPaths, ModelChoice, Server};
 use jay_study::store::{read_json, write_json};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -43,6 +43,8 @@ pub struct Ai {
     downloading: AtomicBool,
     cancel_download: Arc<AtomicBool>,
     cancel_request: Arc<AtomicBool>,
+    /// How many times Stop was pressed: a request that waited for its turn sees one it missed.
+    cancels: AtomicUsize,
 }
 
 impl Ai {
@@ -60,6 +62,7 @@ impl Ai {
             downloading: AtomicBool::new(false),
             cancel_download: Arc::new(AtomicBool::new(false)),
             cancel_request: Arc::new(AtomicBool::new(false)),
+            cancels: AtomicUsize::new(0),
         }
     }
 
@@ -83,8 +86,17 @@ impl Ai {
     /// Runs `f` with the server, starting it if needed. One request at a time; the idle timer starts
     /// over when it ends.
     pub fn with_server<T>(&self, app: &AppHandle, f: impl FnOnce(&Server, &AtomicBool) -> Result<T, AiError>) -> Result<T, AiError> {
+        let cancels = self.cancels.load(Ordering::Relaxed);
         let _busy = lock(&self.busy);
         self.cancel_request.store(false, Ordering::Relaxed);
+        // Stop pressed while this request waited behind another one is for it too: it used to be
+        // forgotten here, and the request ran whole. (After the reset, so a Stop right now isn't
+        // lost either: it either changed the count or set the flag after.)
+        // shortcut: Stop is one for everything, the running request and the waiting ones; upgrade to
+        // one flag per request if the screens ever need to stop only their own.
+        if self.cancels.load(Ordering::Relaxed) != cancels {
+            return Err(AiError::Cancelled);
+        }
         let mut server = lock(&self.server);
         // A server that died (crash, killed from outside) is started again, instead of failing
         // every request until the idle watch lets go of it.
@@ -93,7 +105,11 @@ impl Ai {
         }
         if server.is_none() {
             self.set_state(app, ServerState::Loading);
-            match Server::start(&self.paths, *lock(&self.choice)) {
+            // Read before the `match`: a lock taken in its head is held to its end, the whole load.
+            // `status()` wants the same lock, so the window froze while the model loaded (measured:
+            // 2 s, every command waiting) and a failed start locked itself in `set_state` below.
+            let choice = *lock(&self.choice);
+            match Server::start(&self.paths, choice) {
                 Ok(s) => *server = Some(s),
                 Err(e) => {
                     self.set_state(app, ServerState::Off);
@@ -116,6 +132,7 @@ impl Ai {
     /// Stops a download and the reply in progress.
     pub fn cancel(&self) {
         self.cancel_download.store(true, Ordering::Relaxed);
+        self.cancels.fetch_add(1, Ordering::Relaxed);
         self.cancel_request.store(true, Ordering::Relaxed);
     }
 

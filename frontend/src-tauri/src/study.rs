@@ -81,16 +81,14 @@ fn spawn_job(app: &AppHandle, kind: &'static str, work: impl FnOnce(&AppHandle) 
     emit_job(app, JobEvent::Progress { kind, step: BuildStep::Reading });
     let app = app.clone();
     std::thread::spawn(move || {
-        // On drop, so a job that panics doesn't leave every later one answering "busy" until the
-        // app restarts.
-        struct Free(AppHandle);
-        impl Drop for Free {
-            fn drop(&mut self) {
-                self.0.state::<Jobs>().running.store(false, Ordering::Relaxed);
-            }
+        // A job that panics still ends for the page (it waited forever, and `job_status` kept
+        // showing its last progress) and frees the app (every later job answered "busy").
+        if let Err(panic) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| work(&app))) {
+            let said = panic.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| panic.downcast_ref::<String>().cloned());
+            let detail: String = said.as_deref().unwrap_or("panic").chars().take(200).collect();
+            emit_job(&app, JobEvent::Error { kind, id: None, error: Failure::new("panic", Some(detail)) });
         }
-        let free = Free(app);
-        work(&free.0);
+        app.state::<Jobs>().running.store(false, Ordering::Relaxed);
     });
     Ok(())
 }

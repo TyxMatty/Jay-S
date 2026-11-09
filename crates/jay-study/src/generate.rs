@@ -146,7 +146,8 @@ pub fn parse_question(style: &Style, reply: &Value, number: u32, material: &str)
     let explanation = field(reply, "explanation", 1000)?.to_owned();
     let (stem, passage, options, answer) = match style.kind {
         QuestionKind::Choice => {
-            let items: Vec<(String, bool)> = reply["options"].as_array().ok_or_else(|| AiError::BadReply("no options".into()))?.iter().filter_map(|o| Some((strip_label(o["text"].as_str()?), o["correct"].as_bool()?))).collect();
+            let items: Vec<(String, bool)> = reply["options"].as_array().ok_or_else(|| AiError::BadReply("no options".into()))?.iter().filter_map(|o| Some((o["text"].as_str()?.to_owned(), o["correct"].as_bool()?))).collect();
+            let items = strip_labels(items);
             let texts: Vec<String> = items.iter().map(|(t, _)| t.clone()).collect();
             check_options(&texts, n)?;
             if items.iter().filter(|(_, c)| *c).count() != 1 {
@@ -165,7 +166,7 @@ pub fn parse_question(style: &Style, reply: &Value, number: u32, material: &str)
         }
         QuestionKind::Sum => {
             let props = reply["propositions"].as_array().ok_or_else(|| AiError::BadReply("no propositions".into()))?;
-            let mut items: Vec<(String, bool)> = props.iter().filter_map(|p| Some((strip_label(p["text"].as_str()?), p["true"].as_bool()?))).collect();
+            let mut items: Vec<(String, bool)> = strip_labels(props.iter().filter_map(|p| Some((p["text"].as_str()?.to_owned(), p["true"].as_bool()?))).collect());
             check_options(&items.iter().map(|(t, _)| t.clone()).collect::<Vec<_>>(), n)?;
             if !items.iter().any(|(_, t)| *t) {
                 return Err(AiError::BadReply("no true proposition".into()));
@@ -197,6 +198,20 @@ pub fn parse_question(style: &Style, reply: &Value, number: u32, material: &str)
         explanation: Some(explanation),
         source: Some(Source { material: material.to_owned(), number: None }),
     })
+}
+
+/// The options without the labels the model put in their text. A letter and a dot ("c. …") is a
+/// label only at its own place (A first, B second…) and when another option has a label too: a lone
+/// "E. coli é uma bactéria" is the text itself (it was losing its "E.").
+fn strip_labels(items: Vec<(String, bool)>) -> Vec<(String, bool)> {
+    let labeled = items.iter().filter(|(t, _)| strip_label(t) != t.trim()).count();
+    let strip = |(i, (t, correct)): (usize, (String, bool))| {
+        let inner = t.trim().trim_start_matches('(').as_bytes();
+        let dotted = inner.len() > 1 && inner[0].is_ascii_alphabetic() && inner[1] == b'.';
+        let own_place = labeled > 1 && inner[0].to_ascii_uppercase() == b'A'.wrapping_add(i as u8);
+        (if dotted && !own_place { t.trim().to_owned() } else { strip_label(&t) }, correct)
+    };
+    items.into_iter().enumerate().map(strip).collect()
 }
 
 /// An option without a label the model put in its text: "A) …", "(B) …", "c. …", "01) …", "08 – …".
@@ -337,6 +352,12 @@ mod tests {
         assert_eq!(strip_label("A fotossíntese ocorre"), "A fotossíntese ocorre");
         assert_eq!(strip_label("CO2 aumenta"), "CO2 aumenta");
         assert_eq!(strip_label("E) "), "E)");
+        let texts = |options: &[&str]| strip_labels(options.iter().map(|o| (o.to_string(), false)).collect()).into_iter().map(|(t, _)| t).collect::<Vec<_>>();
+        assert_eq!(texts(&["a. um", "B. dois", " c. três"]), ["um", "dois", "três"]);
+        assert_eq!(texts(&["A) um", "dois"]), ["um", "dois"]);
+        // A species name is not a label: alone, or beside another one.
+        assert_eq!(texts(&["O vírus da gripe", "E. coli é uma bactéria"]), ["O vírus da gripe", "E. coli é uma bactéria"]);
+        assert_eq!(texts(&["E. coli", "S. aureus", "C) fungo"]), ["E. coli", "S. aureus", "fungo"]);
     }
 
     #[test]
