@@ -227,6 +227,7 @@ Cada etapa termina com algo testável; ao fim de cada uma, commit, resumo e a pe
 - **Servidor** (`cargo test -- --ignored server`, com o modelo de verdade): sem a chave, **401**; com ela, a resposta segue o esquema JSON ("Curitiba").
 - **No app** (`scripts/test-jayai.js`): carregou em 2,0–3,0 s e respondeu em 1,1–1,4 s; a pílula passa por carregando → pronto; **2 min ocioso, o processo some**.
 - **Memória:** o servidor, de 3,4 GB para ~1 GB de RAM com `--load-mode none` (seção 5); ~2,7 GB na GPU. A interface (WebView2) com o Vite de dev e a depuração ligada: ~206 MB privados, acima da meta de 150 MB do RNF-1. *Falta: medir no build de release.*
+- **RAM no release (medido depois):** a árvore do app (Rust + WebView2) com 189 MB privados, 93 deles do processo de GPU do WebView2; com `--disable-gpu` na janela (`tauri.conf.json`, `additionalBrowserArgs`), **110 MB**: o Jay-S é texto, sem vídeo, e o Jay-AI usa a GPU pelo processo dele. RNF-1 (abaixo de 150 MB) cumprido.
 - **Não visto:** o botão "Baixar" do app com o modelo leve (o download foi testado pelo exemplo `ai_setup`, mesmo código), o Parar no meio de um download.
 
 ## 9. Riscos e spikes
