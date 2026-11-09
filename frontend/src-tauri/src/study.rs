@@ -81,8 +81,16 @@ fn spawn_job(app: &AppHandle, kind: &'static str, work: impl FnOnce(&AppHandle) 
     emit_job(app, JobEvent::Progress { kind, step: BuildStep::Reading });
     let app = app.clone();
     std::thread::spawn(move || {
-        work(&app);
-        app.state::<Jobs>().running.store(false, Ordering::Relaxed);
+        // On drop, so a job that panics doesn't leave every later one answering "busy" until the
+        // app restarts.
+        struct Free(AppHandle);
+        impl Drop for Free {
+            fn drop(&mut self) {
+                self.0.state::<Jobs>().running.store(false, Ordering::Relaxed);
+            }
+        }
+        let free = Free(app);
+        work(&free.0);
     });
     Ok(())
 }

@@ -2518,6 +2518,17 @@ textarea.input {
   min-width: 0;
 }
 
+.chat-body fieldset {
+  display: grid;
+  gap: var(--space-4);
+  justify-items: start;
+}
+
+.chat-body fieldset > .segmented,
+.chat-body fieldset > .chat-pick {
+  justify-self: stretch;
+}
+
 .chat-pick {
   display: grid;
   gap: var(--space-2);
@@ -2525,9 +2536,17 @@ textarea.input {
   overflow-y: auto;
 }
 
+.chat-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+
 .chat-title {
   margin: 0;
   font-size: 16px;
+  overflow-wrap: anywhere;
 }
 
 .chat-log {
@@ -2548,6 +2567,7 @@ textarea.input {
   padding: var(--space-3) var(--space-4);
   border-radius: var(--radius) var(--radius) 4px var(--radius);
   background: var(--accent-soft);
+  line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -2555,29 +2575,85 @@ textarea.input {
 .chat-reply {
   display: grid;
   gap: var(--space-3);
-  max-width: 92%;
+  justify-self: start;
+  max-width: min(92%, 760px);
   padding: var(--space-5);
   border: 1px solid var(--border);
   border-radius: var(--radius) var(--radius) var(--radius) 4px;
   background: var(--surface);
 }
 
-.chat-sentence {
+.chat-reply-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 14px;
+}
+
+.chat-reply-head .badge {
+  margin-left: var(--space-1);
+}
+
+.chat-avatar {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent-text, var(--accent));
+}
+
+.chat-avatar svg {
+  width: 16px;
+  height: 16px;
+}
+
+.chat-answer {
   margin: 0;
-  line-height: 1.6;
+  line-height: 1.7;
   overflow-wrap: anywhere;
 }
 
-.chat-sentence.is-unconfirmed {
+.chat-answer .badge {
+  padding: 1px 8px;
+  vertical-align: 1px;
+}
+
+.chat-unconfirmed {
   color: var(--text-muted);
   text-decoration: underline dotted var(--text-muted);
   text-underline-offset: 3px;
 }
 
 .chat-chip {
-  margin-left: 2px;
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  margin-left: 4px;
+  padding: 0 5px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent-soft);
   color: var(--accent-text, var(--accent));
+  font: inherit;
+  font-size: 11px;
   font-weight: 700;
+  line-height: 1;
+  vertical-align: 2px;
+  text-decoration: none;
+}
+
+button.chat-chip {
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+button.chat-chip:hover {
+  background: var(--accent);
+  color: var(--surface);
 }
 
 .chat-banner {
@@ -2585,16 +2661,46 @@ textarea.input {
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-sm);
   background: var(--surface-2);
+  font-size: 14px;
   font-weight: 600;
 }
 
 .chat-sources {
+  padding-top: var(--space-3);
+  border-top: 1px dashed var(--border);
+}
+
+.chat-sources summary {
+  width: fit-content;
+  padding: var(--space-1) var(--space-2);
+  margin-left: calc(-1 * var(--space-2));
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.chat-sources summary:hover {
+  color: var(--text);
+}
+
+.chat-sources ol {
   display: grid;
   gap: var(--space-3);
-  margin: var(--space-2) 0 0;
-  padding: var(--space-4) 0 0;
-  border-top: 1px dashed var(--border);
+  margin: var(--space-3) 0 0;
+  padding: 0;
   list-style: none;
+}
+
+.chat-sources li {
+  border-radius: var(--radius-sm);
+}
+
+/* Reached from a source chip in the answer. */
+.chat-sources li:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 6px;
 }
 
 .chat-source-label {
@@ -2606,6 +2712,11 @@ textarea.input {
   font-weight: 700;
 }
 
+.chat-source-label .chat-chip {
+  margin-left: 0;
+  vertical-align: 0;
+}
+
 .chat-sources blockquote {
   margin: var(--space-2) 0 0;
   padding: var(--space-2) var(--space-3);
@@ -2613,6 +2724,7 @@ textarea.input {
   border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
   background: var(--surface-2);
   font-size: 14px;
+  line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -2621,9 +2733,96 @@ textarea.input {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  margin: var(--space-3) 0 0;
+}
+
+.chat-waiting {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
   margin: 0;
 }
 
+.chat-dots {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.chat-dots i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: chat-dot 1.2s ease-in-out infinite;
+}
+
+.chat-dots i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.chat-dots i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes chat-dot {
+  0%,
+  60%,
+  100% {
+    opacity: 0.3;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+
+[data-motion='reduced'] .chat-dots i {
+  animation: none;
+  opacity: 0.6;
+}
+
+/* One box: the question and its buttons. Stays in reach while the conversation scrolls. */
+.chat-composer {
+  position: sticky;
+  /* 8px above the edge of the panel (its padding is 20px), so no answer peeks out underneath. */
+  bottom: -12px;
+  z-index: 2;
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: 0 -8px 24px -12px rgb(0 0 0 / 0.35);
+  transition: border-color 0.15s ease;
+}
+
+.chat-composer:focus-within {
+  border-color: var(--accent);
+}
+
 .chat-input {
-  resize: vertical;
+  width: 100%;
+  max-height: 160px;
+  padding: var(--space-1) 0;
+  border: 0;
+  outline: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  line-height: 1.5;
+  resize: none;
+}
+
+.chat-composer-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.chat-composer-row .hint {
+  flex: 1;
+  margin: 0;
+  font-size: 12px;
 }

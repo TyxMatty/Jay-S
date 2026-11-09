@@ -268,7 +268,8 @@ pub fn split_questions(text: &str) -> Vec<Question> {
     let mut draft: Option<Draft> = None;
     // A base text waiting for the questions it names.
     let mut passage: Option<((u32, u32), Vec<String>)> = None;
-    let mut passages: Vec<((u32, u32), String)> = vec![];
+    // With the index (in `out`) of the question that comes right after each.
+    let mut passages: Vec<((u32, u32), String, usize)> = vec![];
     // After the last option, a few continuation lines at most; then text goes to the next question.
     let mut after_options = 0usize;
     let close = |draft: &mut Option<Draft>, out: &mut Vec<Question>| {
@@ -280,7 +281,7 @@ pub fn split_questions(text: &str) -> Vec<Question> {
         if let Some(range) = passage_range(line) {
             close(&mut draft, &mut out);
             if let Some((r, body)) = passage.take() {
-                passages.push((r, body.join(" ")));
+                passages.push((r, body.join(" "), out.len()));
             }
             passage = Some((range, vec![]));
             continue;
@@ -307,7 +308,7 @@ pub fn split_questions(text: &str) -> Vec<Question> {
         if header.is_some() || stem_start.is_some() {
             close(&mut draft, &mut out);
             if let Some((r, body)) = passage.take() {
-                passages.push((r, body.join(" ")));
+                passages.push((r, body.join(" "), out.len()));
             }
             let (number, rest) = match (header, stem_start) {
                 (Some(n), _) => (n, None),
@@ -342,12 +343,13 @@ pub fn split_questions(text: &str) -> Vec<Question> {
     }
     close(&mut draft, &mut out);
     if let Some((r, body)) = passage.take() {
-        passages.push((r, body.join(" ")));
+        passages.push((r, body.join(" "), out.len()));
     }
     // Instructions can hold question-shaped examples ("Suponha a questão hipotética número 65", UEM's
     // "Terá nota ZERO… A) … E)"); they come before the exam's own question 1, and go.
     if let Some(first) = out.iter().position(|q| q.number == 1) {
         out.drain(..first);
+        passages.retain_mut(|p| p.2.checked_sub(first).map(|next| p.2 = next).is_some());
     }
     // ENEM-like stems carry their own base text: keep it apart from the command, which is what's
     // asked (and shown in bold).
@@ -358,8 +360,14 @@ pub fn split_questions(text: &str) -> Vec<Question> {
         }
     }
     // Each base text goes to the questions in its range (or, without one, to the next question).
-    for ((a, b), body) in passages.into_iter().filter(|(_, b)| !b.trim().is_empty()) {
-        for q in out.iter_mut().filter(|q| if a == 0 { false } else { (a..=b).contains(&q.number) }) {
+    for ((a, b), body, next) in passages.into_iter().filter(|p| !p.1.trim().is_empty()) {
+        if a == 0 {
+            if let Some(q) = out.get_mut(next) {
+                q.passage.get_or_insert(body);
+            }
+            continue;
+        }
+        for q in out.iter_mut().filter(|q| (a..=b).contains(&q.number)) {
             q.passage.get_or_insert_with(|| body.clone());
         }
     }
@@ -526,6 +534,13 @@ mod tests {
         assert_eq!(qs[2].stem, "Sabendo que cada letra representa um algarismo, assinale o que for correto.");
         // "MATEMÁTICA" (a section title) didn't end up in question 02's last option.
         assert_eq!(qs[1].options[4].text, "E.");
+    }
+
+    #[test]
+    fn a_base_text_that_names_no_question_goes_to_the_next_one() {
+        let text = "1) Quanto é um mais um?\nA) Um.\nB) Dois.\nC) Três.\nD) Quatro.\nLeia o texto a seguir.\nO rio corre para o mar desde sempre.\n2) Segundo o texto, o rio corre para onde?\nA) O mar.\nB) O lago.\nC) A serra.\nD) O céu.\n3) Quanto é dois mais dois?\nA) Um.\nB) Dois.\nC) Três.\nD) Quatro.\n";
+        let qs = split_questions(text);
+        assert_eq!(qs.iter().map(|q| q.passage.as_deref()).collect::<Vec<_>>(), [None, Some("O rio corre para o mar desde sempre."), None], "{qs:#?}");
     }
 
     #[test]

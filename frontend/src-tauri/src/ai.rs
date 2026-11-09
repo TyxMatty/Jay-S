@@ -86,6 +86,11 @@ impl Ai {
         let _busy = lock(&self.busy);
         self.cancel_request.store(false, Ordering::Relaxed);
         let mut server = lock(&self.server);
+        // A server that died (crash, killed from outside) is started again, instead of failing
+        // every request until the idle watch lets go of it.
+        if server.as_ref().is_some_and(|s| !s.healthy()) {
+            server.take();
+        }
         if server.is_none() {
             self.set_state(app, ServerState::Loading);
             match Server::start(&self.paths, *lock(&self.choice)) {
@@ -137,7 +142,12 @@ pub fn spawn_idle_watch(app: AppHandle) {
             std::thread::sleep(Duration::from_secs(10));
             let ai = app.state::<Ai>();
             // A request in progress holds `busy`: never stop under it.
-            let Ok(_busy) = ai.busy.try_lock() else { continue };
+            // (A poisoned lock is free: skipping it would keep the server loaded forever.)
+            let _busy = match ai.busy.try_lock() {
+                Ok(guard) => guard,
+                Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner(),
+                Err(std::sync::TryLockError::WouldBlock) => continue,
+            };
             let idle = lock(&ai.last_used).elapsed() >= IDLE;
             if idle && lock(&ai.server).take().is_some() {
                 *lock(&ai.state) = ServerState::Off;

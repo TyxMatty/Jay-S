@@ -319,7 +319,6 @@ export default {
     "O modelo que lê seus arquivos e escreve as questões, neste computador. Só fica na memória enquanto trabalha.",
   "Source {n}": "Fonte {n}",
   "Not confirmed": "Não confirmado",
-  "From Jay-AI's general knowledge, with no source: check it in a book or with your teacher.": "Do conhecimento geral do Jay-AI, sem fonte: confira num livro ou com o professor.",
   "Your sources don't answer this. The closest they get:": "Suas fontes não respondem isso. O mais perto que chegam:",
   "Nothing in the sources you chose is about this.": "Nada nas fontes que você escolheu fala disso.",
   "Jay-AI couldn't back this answer with your sources. Read them below.": "O Jay-AI não conseguiu confirmar esta resposta nas suas fontes. Leia os trechos abaixo.",
@@ -348,4 +347,9 @@ export default {
   "Jay-AI is reading your sources and checking the answer…": "O Jay-AI está lendo suas fontes e conferindo a resposta…",
   "Ask your first question below.": "Faça sua primeira pergunta abaixo.",
   "Chat": "Chat",
+  "From your sources": "Das suas fontes",
+  "General knowledge, no source": "Conhecimento geral, sem fonte",
+  "Not in your sources": "Não está nas suas fontes",
+  "Sources ({n})": "Fontes ({n})",
+  "Enter sends · Shift+Enter makes a new line": "Enter envia · Shift+Enter quebra a linha",
 };
