@@ -3,7 +3,6 @@
 // (crates/jay-study/src/chat.rs); this page only shows that, all as text.
 import { h } from './dom.js';
 import { icons } from './icons.js';
-import { cardTitle } from './card-title.js';
 import { invoke, isTauri } from '../core/bridge.js';
 import { t } from '../core/i18n.js';
 import { studyFailureText } from './study-text.js';
@@ -80,43 +79,79 @@ export function createChatPanel() {
     message.textContent = studyFailureText(e);
     message.hidden = false;
   };
-  const picker = h('select', { class: 'input', 'aria-label': t('Conversation') });
-  const removeBtn = h('button', { type: 'button', class: 'icon-btn', 'aria-label': t('Delete this conversation'), title: t('Delete this conversation'), html: icons.trash });
-  const newBtn = h('button', { type: 'button', class: 'btn btn-secondary' }, t('New conversation'));
+  const newBtn = h('button', { type: 'button', class: 'btn btn-secondary' }, h('span', { class: 'btn-icon', html: icons.plus }), t('New conversation'));
+  const list = h('ul', { class: 'chat-list' });
   const body = h('div', { class: 'chat-body' });
   let chat = null;
 
-  async function refresh(select) {
-    const list = await invoke('chats_list').catch(() => []);
-    picker.replaceChildren(...list.map((c) => h('option', { value: c.id, selected: c.id === select }, c.title || t('New conversation'))));
-    picker.hidden = removeBtn.hidden = list.length === 0;
-    return list;
+  /** The list shows where the student is. */
+  const mark = () => {
+    for (const li of list.children) li.firstChild.setAttribute('aria-current', String(li.dataset.id === chat?.id));
+  };
+
+  async function refresh() {
+    const chats = await invoke('chats_list').catch(() => []);
+    list.replaceChildren(
+      ...chats.map((c) =>
+        h(
+          'li',
+          { 'data-id': c.id },
+          h('button', { type: 'button', class: 'chat-item', title: c.title || null, onClick: () => open(c.id) }, c.title || t('New conversation')),
+          h('button', { type: 'button', class: 'icon-btn chat-item-remove', 'aria-label': t('Delete this conversation'), title: t('Delete this conversation'), html: icons.trash, onClick: () => remove(c.id) }),
+        ),
+      ),
+    );
+    list.hidden = chats.length === 0;
+    mark();
+    return chats;
   }
 
-  async function open(id) {
+  /** `first`: a question to ask as soon as the conversation is on screen. */
+  async function open(id, first) {
     message.hidden = true;
-    picker.querySelector('option[value=""]')?.remove();
     try {
       chat = await invoke('chat_get', { id });
-      removeBtn.hidden = false;
-      body.replaceChildren(conversation());
+      mark();
+      body.replaceChildren(conversation(first));
     } catch (e) {
       fail(e);
     }
   }
 
-  /** Choosing what the conversation is about. */
+  async function remove(id) {
+    if (!confirm(t('Delete this conversation?'))) return;
+    try {
+      await invoke('chat_delete', { id });
+      await refresh();
+      // Another conversation was deleted: the one on screen stays.
+      if (id === chat?.id) starter();
+    } catch (e) {
+      fail(e);
+    }
+  }
+
+  /** The pill: the question, what goes with it, the send button. Enter sends; Shift+Enter is a new line. */
+  function composer(ask, ...extra) {
+    const input = h('textarea', { class: 'chat-input', rows: 1, maxlength: 800, id: 'chat-input', placeholder: t('Ask Jay-AI…') });
+    const grow = () => {
+      input.style.height = 'auto';
+      input.style.height = `${Math.min(input.scrollHeight, 160)}px`;
+    };
+    input.addEventListener('input', grow);
+    input.addEventListener('keydown', (e) => e.key === 'Enter' && !e.shiftKey && !e.isComposing && (e.preventDefault(), ask()));
+    const send = h('button', { type: 'button', class: 'chat-send', 'aria-label': t('Send'), title: t('Send'), html: icons.send, onClick: () => ask() });
+    return { input, grow, send, el: h('div', { class: 'chat-composer' }, h('label', { for: 'chat-input', class: 'visually-hidden' }, t('Your question')), input, ...extra, send) };
+  }
+
+  /** A new conversation: the question first, and under it what it is about. It is created on send. */
   async function starter() {
     chat = null;
-    // The picker shows where the student is, and the saved conversations stay one choice away
-    // (with a single one, there was no way back to it).
-    if (picker.options.length && !picker.querySelector('option[value=""]')) picker.prepend(h('option', { value: '' }, t('New conversation')));
-    picker.value = '';
-    removeBtn.hidden = true;
+    mark();
+    message.hidden = true;
     const [materials, attempts] = await Promise.all([invoke('materials_list').catch(() => []), invoke('attempts_list').catch(() => [])]);
     const finished = attempts.filter((a) => a.finished);
     const radio = (value, label, checked) => h('label', {}, h('input', { type: 'radio', name: 'chat-about', value, checked }), label);
-    const about = h('div', { class: 'segmented', role: 'radiogroup', 'aria-label': t('About') }, radio('general', t('Any question'), true), radio('materials', t('My materials')), radio('attempt', t('An exam I took')));
+    const about = h('div', { class: 'chat-scope', role: 'radiogroup', 'aria-label': t('About') }, radio('general', t('Any question'), true), radio('materials', t('My materials')), radio('attempt', t('An exam I took')));
     const boxes = materials.filter((m) => m.kind !== 'key').map((m) => h('label', { class: 'check-row' }, h('input', { type: 'checkbox', value: m.id }), h('span', {}, m.name)));
     const materialsField = h('div', { class: 'chat-pick', hidden: true }, boxes.length ? boxes : h('p', { class: 'hint' }, t('Attach materials first (Materials section).')));
     const attempt = h('select', { class: 'input', 'aria-label': t('Exam') }, finished.map((a) => h('option', { value: a.id }, a.title)));
@@ -135,8 +170,9 @@ export function createChatPanel() {
     };
     about.addEventListener('change', sync);
     sync();
-    const start = h('button', { type: 'button', class: 'btn', disabled: !isTauri }, h('span', { class: 'btn-icon', html: icons.spark }), t('Start'));
-    start.addEventListener('click', async () => {
+    const box = composer(async () => {
+      const q = box.input.value.trim();
+      if (!q || box.send.disabled) return;
       const scope = { materials: [], attempt: null };
       if (kind() === 'materials') {
         scope.materials = boxes.map((b) => b.querySelector('input')).filter((i) => i.checked).map((i) => i.value);
@@ -146,30 +182,33 @@ export function createChatPanel() {
         scope.attempt = attempt.value;
       }
       message.hidden = true;
+      box.send.disabled = true;
       try {
         const c = await invoke('chat_new', { scope });
-        await refresh(c.id);
-        await open(c.id);
+        await refresh();
+        await open(c.id, q);
       } catch (e) {
         fail(e);
       }
+      box.send.disabled = false;
     });
-    body.replaceChildren(h('fieldset', {}, cardTitle(icons.spark, t('What do you want to talk about?')), about, materialsField, attemptField, note, h('div', { class: 'button-row' }, start)));
+    box.send.disabled = !isTauri;
+    body.replaceChildren(h('div', { class: 'chat-hero' }, h('h2', { class: 'chat-greeting' }, t('Where do we start?')), box.el, about, materialsField, attemptField, note));
+    // A long conversation leaves the panel scrolled: the new one starts at its top.
+    body.closest('.app-panels')?.scrollTo({ top: 0 });
+    box.input.focus({ preventScroll: true });
   }
 
-  function conversation() {
+  function conversation(first) {
+    // The conversation this screen was made for: `chat` changes if the student opens another one
+    // while an answer is on its way.
+    const mine = chat;
     const log = h('div', { class: 'chat-log', 'aria-live': 'polite' });
-    const general = !chat.scope.attempt && !chat.scope.materials.length;
+    const general = !mine.scope.attempt && !mine.scope.materials.length;
     const turn = (q, reply) => h('div', { class: 'chat-turn' }, h('p', { class: 'chat-question' }, q), reply);
-    for (const x of chat.turns) log.append(turn(x.question, replyEl(x.reply)));
-    const input = h('textarea', { class: 'chat-input', rows: 1, maxlength: 800, id: 'chat-input', placeholder: t('Ask Jay-AI…') });
-    const grow = () => {
-      input.style.height = 'auto';
-      input.style.height = `${Math.min(input.scrollHeight, 160)}px`;
-    };
-    input.addEventListener('input', grow);
-    const send = h('button', { type: 'button', class: 'btn' }, t('Send'));
+    for (const x of mine.turns) log.append(turn(x.question, replyEl(x.reply)));
     const stop = h('button', { type: 'button', class: 'btn btn-secondary', hidden: true, onClick: () => invoke('job_cancel') }, t('Stop'));
+    const { input, grow, send, el } = composer(ask, stop);
     async function ask() {
       const q = input.value.trim();
       if (!q || send.disabled) return;
@@ -177,18 +216,17 @@ export function createChatPanel() {
       stop.hidden = false;
       input.value = '';
       grow();
-      empty?.remove();
       const waiting = h('p', { class: 'hint chat-waiting' }, h('span', { class: 'chat-dots', 'aria-hidden': 'true' }, h('i'), h('i'), h('i')), general ? t('Jay-AI is thinking…') : t('Jay-AI is reading your sources and checking the answer…'));
       const item = turn(q, waiting);
       log.append(item);
       item.scrollIntoView({ block: 'nearest' });
       try {
-        const x = await invoke('chat_ask', { id: chat.id, question: q });
-        chat.turns.push(x);
+        const x = await invoke('chat_ask', { id: mine.id, question: q });
+        mine.turns.push(x);
         const reply = replyEl(x.reply);
         waiting.replaceWith(reply);
         reply.scrollIntoView({ block: 'nearest' });
-        if (chat.turns.length === 1) refresh(chat.id);
+        if (mine.turns.length === 1) refresh();
       } catch (e) {
         waiting.replaceWith(h('p', { class: 'hint', 'data-tone': 'error' }, studyFailureText(e)));
         input.value = q;
@@ -198,35 +236,17 @@ export function createChatPanel() {
       stop.hidden = true;
       input.focus();
     }
-    send.addEventListener('click', ask);
-    // Enter sends; Shift+Enter is a new line.
-    input.addEventListener('keydown', (e) => e.key === 'Enter' && !e.shiftKey && !e.isComposing && (e.preventDefault(), ask()));
-    const empty = chat.turns.length ? null : h('p', { class: 'hint' }, t('Ask your first question below.'));
-    const head = h('div', { class: 'chat-head' }, h('span', { class: 'badge' }, chat.scope.attempt ? t('An exam I took') : general ? t('Any question') : t('My materials')), chat.title ? h('h2', { class: 'chat-title' }, chat.title) : null);
-    const composer = h(
-      'div',
-      { class: 'chat-composer' },
-      h('label', { for: 'chat-input', class: 'visually-hidden' }, t('Your question')),
-      input,
-      h('div', { class: 'chat-composer-row' }, h('span', { class: 'hint' }, t('Enter sends · Shift+Enter makes a new line')), stop, send),
-    );
-    return h('div', { class: 'chat' }, head, empty, log, composer);
+    const head = h('div', { class: 'chat-head' }, h('span', { class: 'badge' }, mine.scope.attempt ? t('An exam I took') : general ? t('Any question') : t('My materials')), mine.title ? h('h2', { class: 'chat-title' }, mine.title) : null);
+    if (first) {
+      input.value = first;
+      ask();
+    }
+    // The pill and its hint stay in reach while the conversation scrolls.
+    return h('div', { class: 'chat' }, head, log, h('div', { class: 'chat-dock' }, el, h('p', { class: 'hint' }, t('Enter sends · Shift+Enter makes a new line'))));
   }
 
-  picker.addEventListener('change', () => picker.value && open(picker.value));
   newBtn.addEventListener('click', starter);
-  removeBtn.addEventListener('click', async () => {
-    if (!chat || !confirm(t('Delete this conversation?'))) return;
-    try {
-      await invoke('chat_delete', { id: chat.id });
-      const list = await refresh(null);
-      if (list.length) open(list[0].id);
-      else starter();
-    } catch (e) {
-      fail(e);
-    }
-  });
-
-  refresh(null).then((list) => (list.length ? open(list[0].id) : starter()));
-  return h('div', { class: 'chat-panel' }, h('div', { class: 'button-row chat-bar' }, picker, removeBtn, newBtn), message, body);
+  refresh();
+  starter();
+  return h('div', { class: 'chat-panel' }, h('nav', { class: 'chat-side', 'aria-label': t('Conversations') }, newBtn, list), h('div', { class: 'chat-main' }, message, body));
 }
