@@ -19,6 +19,24 @@ pub const JOB_EVENT: &str = "study-job";
 #[derive(Default)]
 pub struct Jobs {
     running: AtomicBool,
+    /// The running job's last progress, for a screen opened (or rebuilt) after it started.
+    last: std::sync::Mutex<Option<JobEvent>>,
+}
+
+/// Tells the page about the job, and remembers its progress while it runs.
+fn emit_job(app: &AppHandle, event: JobEvent) {
+    let jobs = app.state::<Jobs>();
+    *jobs.last.lock().unwrap_or_else(|e| e.into_inner()) = matches!(event, JobEvent::Progress { .. }).then(|| event.clone());
+    let _ = app.emit(JOB_EVENT, event);
+}
+
+/// What the running job is doing (its last progress), or nothing.
+#[tauri::command]
+pub fn job_status(jobs: State<Jobs>) -> Option<JobEvent> {
+    if !jobs.running.load(Ordering::Relaxed) {
+        return None;
+    }
+    jobs.last.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
 impl From<BuildError> for Failure {
@@ -47,17 +65,20 @@ impl From<AnswerError> for Failure {
 
 #[derive(Clone, Serialize)]
 #[serde(tag = "state", rename_all = "lowercase")]
-enum JobEvent {
+pub enum JobEvent {
     Progress { kind: &'static str, step: BuildStep },
     Done { kind: &'static str, id: String },
     Error { kind: &'static str, id: Option<String>, error: Failure },
 }
 
 /// Runs `work` on a thread as the one job; `Err(busy)` when another is running.
-fn spawn_job(app: &AppHandle, work: impl FnOnce(&AppHandle) + Send + 'static) -> Result<(), Failure> {
+fn spawn_job(app: &AppHandle, kind: &'static str, work: impl FnOnce(&AppHandle) + Send + 'static) -> Result<(), Failure> {
     if app.state::<Jobs>().running.swap(true, Ordering::Relaxed) {
         return Err(Failure::new("busy", None));
     }
+    // "Starting" at once: Jay-AI can take seconds to load before the job's own first step, and a
+    // screen opened then must still see the job (it didn't: the builder came back blank).
+    emit_job(app, JobEvent::Progress { kind, step: BuildStep::Reading });
     let app = app.clone();
     std::thread::spawn(move || {
         work(&app);
@@ -98,11 +119,11 @@ pub fn exam_material_info(library: State<Library>, id: String) -> Result<ExamMat
 
 #[tauri::command]
 pub fn exam_build(app: AppHandle, plan: BuildPlan) -> Result<(), Failure> {
-    spawn_job(&app, move |app| {
+    spawn_job(&app, "exam", move |app| {
         let library = app.state::<Library>();
         let ai = app.state::<Ai>();
         let emit = |step| {
-            let _ = app.emit(JOB_EVENT, JobEvent::Progress { kind: "exam", step });
+            emit_job(app, JobEvent::Progress { kind: "exam", step });
         };
         let mut progress = emit;
         // Jay-AI when it's downloaded (new questions, answers for questions without a key, topics);
@@ -116,7 +137,7 @@ pub fn exam_build(app: AppHandle, plan: BuildPlan) -> Result<(), Failure> {
         } else {
             library.store.build_exam(&plan, None, &mut progress, &AtomicBool::new(false)).map_err(Failure::from)
         };
-        let _ = app.emit(JOB_EVENT, match result {
+        emit_job(app, match result {
             Ok(exam) => JobEvent::Done { kind: "exam", id: exam.id },
             Err(error) => JobEvent::Error { kind: "exam", id: None, error },
         });
@@ -192,17 +213,17 @@ pub fn analyze_pending(app: &AppHandle) {
     if !app.state::<Ai>().ready() {
         return;
     }
-    let _ = spawn_job(app, |app| {
+    let _ = spawn_job(app, "analysis", |app| {
         let library = app.state::<Library>();
         let ai = app.state::<Ai>();
         let pending: Vec<String> = library.store.attempts().into_iter().filter(|a| a.result.is_some() && a.analysis.is_none()).map(|a| a.id).collect();
         for id in pending {
-            let _ = app.emit(JOB_EVENT, JobEvent::Progress { kind: "analysis", step: BuildStep::Reading });
+            emit_job(app, JobEvent::Progress { kind: "analysis", step: BuildStep::Reading });
             let result = ai.with_server(app, |server, cancel| library.store.analyze(&id, server, cancel).map_err(|e| match e {
                 BuildError::Ai(e) => e,
                 other => AiError::Io(format!("{other:?}")),
             }));
-            let _ = app.emit(JOB_EVENT, match result {
+            emit_job(app, match result {
                 Ok(_) => JobEvent::Done { kind: "analysis", id },
                 Err(e) => JobEvent::Error { kind: "analysis", id: Some(id), error: e.into() },
             });
@@ -284,19 +305,19 @@ pub fn deck_build(app: AppHandle, title: String, materials: Vec<String>, count: 
     if !app.state::<Ai>().ready() {
         return Err(AiError::NotInstalled.into());
     }
-    spawn_job(&app, move |app| {
+    spawn_job(&app, "deck", move |app| {
         let library = app.state::<Library>();
         let ai = app.state::<Ai>();
         let result = ai.with_server(app, |server, cancel| {
             let mut progress = |done, total| {
-                let _ = app.emit(JOB_EVENT, JobEvent::Progress { kind: "deck", step: BuildStep::Writing { done, total } });
+                emit_job(app, JobEvent::Progress { kind: "deck", step: BuildStep::Writing { done, total } });
             };
             library.store.build_deck(&title, &materials, count, server, &mut progress, cancel).map_err(|e| match e {
                 BuildError::Ai(e) => e,
                 other => AiError::Io(format!("{other:?}")),
             })
         });
-        let _ = app.emit(JOB_EVENT, match result {
+        emit_job(app, match result {
             Ok(deck) => JobEvent::Done { kind: "deck", id: deck.id },
             Err(e) => JobEvent::Error { kind: "deck", id: None, error: e.into() },
         });
@@ -349,19 +370,19 @@ pub fn explain_build(app: AppHandle, id: String, language: String, level: jay_st
     if jay_study::explain::clean_language(&language).is_none() {
         return Err(Failure::new("bad_language", None));
     }
-    spawn_job(&app, move |app| {
+    spawn_job(&app, "explain", move |app| {
         let library = app.state::<Library>();
         let ai = app.state::<Ai>();
         let result = ai.with_server(app, |server, cancel| {
             let mut progress = |done, total| {
-                let _ = app.emit(JOB_EVENT, JobEvent::Progress { kind: "explain", step: BuildStep::Writing { done, total } });
+                emit_job(app, JobEvent::Progress { kind: "explain", step: BuildStep::Writing { done, total } });
             };
             library.store.explain(&id, &language, level, focus.as_deref(), server, &mut progress, cancel).map_err(|e| match e {
                 BuildError::Ai(e) => e,
                 other => AiError::Io(format!("{other:?}")),
             })
         });
-        let _ = app.emit(JOB_EVENT, match result {
+        emit_job(app, match result {
             Ok(_) => JobEvent::Done { kind: "explain", id },
             Err(e) => JobEvent::Error { kind: "explain", id: Some(id), error: e.into() },
         });

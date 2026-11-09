@@ -2202,3 +2202,21 @@ textarea.input {
 @media (max-width: 600px) {
   .explain-sheet { padding: var(--space-5) var(--space-4); }
 }
+
+/* A checklist row with a note under the name (the exams to reuse: questions found, answer key). */
+.check-row:has(.check-text) {
+  align-items: flex-start;
+}
+
+.check-row:has(.check-text) input {
+  margin-top: 4px;
+}
+
+.check-text {
+  display: grid;
+  gap: 2px;
+}
+
+.check-note:empty {
+  display: none;
+}

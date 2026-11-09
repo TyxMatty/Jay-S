@@ -5,7 +5,7 @@
 import { h } from './dom.js';
 import { icons } from './icons.js';
 import { cardTitle } from './card-title.js';
-import { invoke, listen } from '../core/bridge.js';
+import { invoke, listenJobs } from '../core/bridge.js';
 import { aiReady } from '../core/ai.js';
 import { t, language } from '../core/i18n.js';
 import { studyFailureText } from './study-text.js';
@@ -53,9 +53,12 @@ export function createExplainView(material, onBack) {
     }
   });
 
-  job = listen('study-job', async (e) => {
+  job = listenJobs(async (e) => {
     if (e.kind !== 'explain' || (e.id && e.id !== material.id)) return;
     if (e.state === 'progress') {
+      go.disabled = true;
+      stop.hidden = false;
+      progress.hidden = false;
       const { done, total } = e.step;
       progress.max = total || 1;
       progress.value = done;

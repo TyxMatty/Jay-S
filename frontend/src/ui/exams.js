@@ -4,7 +4,7 @@
 import { h } from './dom.js';
 import { icons } from './icons.js';
 import { cardTitle } from './card-title.js';
-import { invoke, listen, isTauri } from '../core/bridge.js';
+import { invoke, listen, listenJobs, isTauri } from '../core/bridge.js';
 import { aiReady } from '../core/ai.js';
 import { t, language } from '../core/i18n.js';
 import { createRunner, createResult } from './runner.js';
@@ -46,9 +46,10 @@ function builder({ onBuilt, onError }) {
     'div',
     { class: 'segmented', role: 'radiogroup', 'aria-label': t('How') },
     h('label', {}, h('input', { type: 'radio', name: 'exam-mode', value: 'new', checked: true }), t('New, from my content')),
-    h('label', {}, h('input', { type: 'radio', name: 'exam-mode', value: 'reuse' }), t('Reuse an exam')),
+    h('label', {}, h('input', { type: 'radio', name: 'exam-mode', value: 'reuse' }), t('Reuse exams')),
   );
-  const examSelect = h('select', { class: 'input', id: 'exam-source' });
+  // Several exams at once: each with what Jay-S found in it (questions, its own answer key).
+  const examList = h('div', { class: 'check-list', role: 'group', 'aria-label': t('Exams to reuse') });
   const examInfo = h('p', { class: 'hint' });
   const reuse = h('input', { class: 'input', type: 'number', id: 'exam-reuse', min: 1, max: 200, value: 10 });
   const fresh = h('input', { class: 'input', type: 'number', id: 'exam-new', min: 0, max: 50, value: 10 });
@@ -57,12 +58,22 @@ function builder({ onBuilt, onError }) {
   const message = h('p', { class: 'hint', role: 'status' });
   const build = h('button', { type: 'button', class: 'btn' }, h('span', { class: 'btn-icon', html: icons.spark }), t('Build the exam'));
   const stop = h('button', { type: 'button', class: 'btn btn-secondary', hidden: true, onClick: () => invoke('job_cancel') }, t('Stop'));
-  const reuseFields = h('div', { class: 'field', hidden: true }, h('label', { for: 'exam-source' }, t('Exam to reuse')), examSelect, examInfo, h('label', { for: 'exam-reuse' }, t('How many of its questions')), reuse);
+  const reuseFields = h(
+    'div',
+    { class: 'field', hidden: true },
+    h('span', { class: 'field-label' }, t('Exams to reuse (one or more)')),
+    examList,
+    examInfo,
+    h('label', { for: 'exam-reuse' }, t('How many of their questions, in all')),
+    reuse,
+  );
   let styles = [];
   let materials = [];
-  let info = null;
+  /** exam id → what exam_material_info said. */
+  const infos = new Map();
 
   const currentMode = () => mode.querySelector('input:checked').value;
+  const chosenExams = () => [...examList.querySelectorAll('input:checked')].map((i) => i.value);
   const render = () => {
     reuseFields.hidden = currentMode() !== 'reuse';
     const s = styles.find((x) => x.id === style.value);
@@ -71,33 +82,46 @@ function builder({ onBuilt, onError }) {
   mode.addEventListener('change', render);
   style.addEventListener('change', render);
 
-  async function loadInfo() {
-    info = null;
-    examInfo.textContent = '';
-    if (!examSelect.value) return;
-    try {
-      info = await invoke('exam_material_info', { id: examSelect.value });
-      const key = info.key ? materials.find((m) => m.id === info.key)?.name : null;
-      examInfo.textContent = [
-        t('{n} questions found', { n: info.questions }),
-        key ? t('answer key: {name}', { name: key }) : t('no answer key: Jay-AI answers them (marked as such)'),
-      ].join(' · ');
-      reuse.value = Math.min(info.questions, 20) || 1;
-      reuse.max = info.questions || 1;
-      if (info.sum > info.questions / 2) style.value = 'uepg';
-      else if (info.questions) style.value = 'enem';
-      render();
-    } catch (e) {
-      examInfo.textContent = studyFailureText(e);
-    }
+  /** The questions of the checked exams, in all, and the style most of them have. */
+  function summarize() {
+    const picked = chosenExams().map((id) => infos.get(id)).filter(Boolean);
+    const total = picked.reduce((n, i) => n + i.questions, 0);
+    const sums = picked.reduce((n, i) => n + i.sum, 0);
+    examInfo.textContent = picked.length ? t('{n} questions in all from {exams} exams', { n: total, exams: picked.length }) : '';
+    reuse.max = total || 1;
+    reuse.value = Math.min(total, Math.max(Number(reuse.value) || 0, 10)) || 1;
+    if (total) style.value = sums > total / 2 ? 'uepg' : 'enem';
+    render();
   }
-  examSelect.addEventListener('change', loadInfo);
+
+  async function describe(row, id) {
+    const line = row.querySelector('.check-note');
+    try {
+      const info = await invoke('exam_material_info', { id });
+      infos.set(id, info);
+      const key = info.key ? materials.find((m) => m.id === info.key)?.name : null;
+      line.textContent = [t('{n} questions found', { n: info.questions }), key ? t('answer key: {name}', { name: key }) : t('no answer key: Jay-AI answers them (marked as such)')].join(' · ');
+    } catch (e) {
+      line.textContent = studyFailureText(e);
+    }
+    summarize();
+  }
 
   async function refresh() {
     [styles, materials] = await Promise.all([invoke('styles_list'), invoke('materials_list')]);
     style.replaceChildren(...styles.map((s) => h('option', { value: s.id }, s.name)));
     const exams = materials.filter((m) => m.kind === 'exam' || m.kind === 'both');
-    examSelect.replaceChildren(h('option', { value: '' }, exams.length ? t('Pick one') : t('Attach an exam in Materials first')), ...exams.map((m) => h('option', { value: m.id }, m.name)));
+    infos.clear();
+    examList.replaceChildren(
+      ...(exams.length
+        ? exams.map((m) => {
+            const input = h('input', { type: 'checkbox', value: m.id });
+            const row = h('label', { class: 'check-row' }, input, h('span', { class: 'check-text' }, h('span', {}, m.name), h('span', { class: 'check-note hint' })));
+            input.addEventListener('change', () => (input.checked && !infos.has(m.id) ? describe(row, m.id) : summarize()));
+            return row;
+          })
+        : [h('p', { class: 'hint' }, t('Attach an exam in Materials first'))]),
+    );
     const contents = materials.filter((m) => m.kind === 'content' || m.kind === 'both');
     contentList.replaceChildren(
       ...(contents.length
@@ -107,6 +131,12 @@ function builder({ onBuilt, onError }) {
     render();
   }
 
+  function running(on) {
+    build.disabled = on;
+    stop.hidden = !on;
+    progress.hidden = !on;
+  }
+
   build.addEventListener('click', async () => {
     message.textContent = '';
     const reusing = currentMode() === 'reuse';
@@ -114,33 +144,35 @@ function builder({ onBuilt, onError }) {
       title: title.value.trim() || t('My exam'),
       style: style.value,
       content: [...contentList.querySelectorAll('input:checked')].map((i) => i.value),
-      exam: reusing ? examSelect.value || null : null,
-      key: reusing ? info?.key ?? null : null,
+      exams: reusing ? chosenExams() : [],
       reuse: reusing ? Number(reuse.value) || 0 : 0,
       new: Math.max(0, Number(fresh.value) || 0),
     };
-    if (reusing && !plan.exam) return (message.textContent = t('Pick the exam to reuse.'));
+    if (reusing && !plan.exams.length) return (message.textContent = t('Check at least one exam to reuse.'));
     if (plan.new > 0 && !plan.content.length) return (message.textContent = t('Pick some content for the new questions, or set them to 0.'));
     if (plan.new > 0 && !aiReady()) return (message.textContent = t('New questions need Jay-AI: download it in the Jay-AI section.'));
     try {
       await invoke('exam_build', { plan });
-      build.disabled = true;
-      stop.hidden = false;
-      progress.hidden = false;
+      running(true);
       progress.removeAttribute('value');
       message.textContent = t('Reading the materials…');
     } catch (e) {
       message.textContent = studyFailureText(e);
+      // Already building (this screen was rebuilt meanwhile): show that job instead.
+      if (e?.code === 'busy') invoke('job_status').then((s) => s && onJob(s));
     }
   });
 
-  listen('study-job', (e) => {
+  function onJob(e) {
     if (e.kind !== 'exam') return;
     if (e.state === 'progress') {
+      running(true);
       const s = e.step;
       if (s.step === 'writing' || s.step === 'solving') {
         progress.max = s.total || 1;
         progress.value = s.done;
+      } else {
+        progress.removeAttribute('value');
       }
       message.textContent = {
         reading: t('Reading the materials…'),
@@ -150,9 +182,7 @@ function builder({ onBuilt, onError }) {
       }[s.step];
       return;
     }
-    build.disabled = false;
-    stop.hidden = true;
-    progress.hidden = true;
+    running(false);
     if (e.state === 'done') {
       message.textContent = t('Ready!');
       onBuilt(e.id);
@@ -160,7 +190,10 @@ function builder({ onBuilt, onError }) {
       message.textContent = studyFailureText(e.error);
       onError?.(e.error);
     }
-  });
+  }
+
+  // A build started before this screen existed (another tab, Back from an exam) shows here too.
+  const stopListening = listenJobs(onJob);
 
   refresh();
   const el = h(
@@ -171,12 +204,13 @@ function builder({ onBuilt, onError }) {
     h('div', { class: 'field' }, h('label', { for: 'exam-style' }, t('Style')), style, styleHint),
     h('div', { class: 'field' }, h('span', { class: 'field-label' }, t('How')), mode),
     reuseFields,
-    h('div', { class: 'field' }, h('span', { class: 'field-label' }, t('Content for new questions')), contentList, h('label', { for: 'exam-new' }, t('How many new questions (Jay-AI writes and checks each one)')), fresh),
+    h('div', { class: 'field' }, h('span', { class: 'field-label' }, t('Content for new questions (one or more)')), contentList, h('label', { for: 'exam-new' }, t('How many new questions (Jay-AI writes and checks each one)')), fresh),
     progress,
     message,
     h('div', { class: 'button-row' }, build, stop),
   );
   el.refresh = refresh;
+  el.dispose = () => stopListening.then((un) => un());
   return el;
 }
 
@@ -188,6 +222,8 @@ export function createExamsPanel() {
     const message = h('p', { class: 'hint', 'data-tone': 'error', role: 'alert' });
     const make = builder({ onBuilt: () => load() });
     make.hidden = true;
+    // A build in progress: open the builder so its progress shows.
+    invoke('job_status').then((j) => j?.kind === 'exam' && (make.hidden = false)).catch(() => {});
     const newButton = h('button', { type: 'button', class: 'btn', disabled: !isTauri, onClick: () => { make.hidden = !make.hidden; if (!make.hidden) make.refresh(); } }, h('span', { class: 'btn-icon', html: icons.exam }), t('New exam'));
 
     async function start(id, mode) {
@@ -246,7 +282,9 @@ export function createExamsPanel() {
     const empty = h('div', { class: 'empty-state' }, h('span', { class: 'card-icon', html: icons.exam, 'aria-hidden': 'true' }), h('p', {}, t('A new exam from your content in the style you pick (ENEM, UEPG, UEM…), or the questions of your exam mixed with your content. Answer it right here, and see the result at the end or each answer at once in learning mode.')), h('p', { class: 'hint' }, isTauri ? t('Start with "New exam".') : t('Only in the app.')));
     const goingBox = h('div', { hidden: true }, h('h2', { class: 'section-title' }, t('In progress')), going);
     load();
-    return h('section', { class: 'app-panel is-single' }, h('div', { class: 'panel-head' }, h('h1', {}, t('Exams')), newButton), message, make, goingBox, empty, list);
+    const section = h('section', { class: 'app-panel is-single' }, h('div', { class: 'panel-head' }, h('h1', {}, t('Exams')), newButton), message, make, goingBox, empty, list);
+    section.dispose = make.dispose;
+    return section;
   }
   views.home();
   return views.host;

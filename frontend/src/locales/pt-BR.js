@@ -282,6 +282,13 @@ export default {
   "Jay-AI summarizes and explains it in the language you choose, then asks you questions to see what stuck.": "O Jay-AI resume e explica na língua que você escolher, e depois faz perguntas para ver o que ficou.",
   "Anything to focus on? (optional)": "Algum foco? (opcional)",
   "Explain": "Explicar",
+  "Reuse exams": "Reaproveitar provas",
+  "Exams to reuse": "Provas para reaproveitar",
+  "Exams to reuse (one or more)": "Provas para reaproveitar (uma ou mais)",
+  "How many of their questions, in all": "Quantas questões delas, no total",
+  "{n} questions in all from {exams} exams": "{n} questões no total, de {exams} provas",
+  "Check at least one exam to reuse.": "Marque pelo menos uma prova para reaproveitar.",
+  "Content for new questions (one or more)": "Conteúdo para as questões novas (um ou mais)",
   "Jay-AI": "Jay-AI",
   "The model that reads your files and writes the questions, on this computer. Loaded only while it works.":
     "O modelo que lê seus arquivos e escreve as questões, neste computador. Só fica na memória enquanto trabalha.",

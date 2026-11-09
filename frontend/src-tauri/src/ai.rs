@@ -114,8 +114,11 @@ impl Ai {
         self.cancel_request.store(true, Ordering::Relaxed);
     }
 
-    /// Stops the server (its memory comes back at once).
+    /// Stops the server (its memory comes back at once). A request in progress is cancelled first,
+    /// and this waits for it to let go: call it off the main thread (`stop_off_main`), or the window
+    /// freezes while a long job finishes (it did: "Liberar a memória" during an exam build).
     pub fn stop(&self, app: &AppHandle) {
+        self.cancel_request.store(true, Ordering::Relaxed);
         let _busy = lock(&self.busy);
         lock(&self.server).take();
         self.set_state(app, ServerState::Off);
@@ -190,15 +193,23 @@ pub fn ai_status(ai: State<Ai>) -> AiStatus {
     ai.status()
 }
 
+/// `Ai::stop` on a worker thread (Tauri runs sync commands on the main thread).
+async fn stop_off_main(app: &AppHandle) {
+    let app = app.clone();
+    let _ = tauri::async_runtime::spawn_blocking(move || app.state::<Ai>().stop(&app)).await;
+}
+
 #[tauri::command]
-pub fn ai_set_choice(app: AppHandle, ai: State<Ai>, choice: ModelChoice) -> Result<AiStatus, Failure> {
-    if *lock(&ai.choice) != choice {
+pub async fn ai_set_choice(app: AppHandle, choice: ModelChoice) -> Result<AiStatus, Failure> {
+    let current = *lock(&app.state::<Ai>().choice);
+    if current != choice {
         // The running server has the other model: stop it, the next request starts the new one.
-        ai.stop(&app);
+        stop_off_main(&app).await;
+        let ai = app.state::<Ai>();
         *lock(&ai.choice) = choice;
         write_json(&ai.prefs_path, &Prefs { model: choice }).map_err(|e| Failure::new("io", Some(e.to_string())))?;
     }
-    Ok(ai.status())
+    Ok(app.state::<Ai>().status())
 }
 
 /// Downloads what's missing for the chosen model (runtime, then model), on a thread; progress and
@@ -246,17 +257,19 @@ pub fn ai_cancel(ai: State<Ai>) {
 }
 
 #[tauri::command]
-pub fn ai_remove_model(app: AppHandle, ai: State<Ai>, choice: ModelChoice) -> Result<AiStatus, Failure> {
-    if *lock(&ai.choice) == choice {
-        ai.stop(&app);
+pub async fn ai_remove_model(app: AppHandle, choice: ModelChoice) -> Result<AiStatus, Failure> {
+    if *lock(&app.state::<Ai>().choice) == choice {
+        stop_off_main(&app).await;
     }
+    let ai = app.state::<Ai>();
     ai.paths.remove_model(choice).map_err(|e| Failure::new("io", Some(e.to_string())))?;
     Ok(ai.status())
 }
 
+/// "Free the memory now": cancels what Jay-AI is doing and stops the server, off the main thread.
 #[tauri::command]
-pub fn ai_stop(app: AppHandle, ai: State<Ai>) {
-    ai.stop(&app);
+pub async fn ai_stop(app: AppHandle) {
+    stop_off_main(&app).await;
 }
 
 #[derive(Serialize)]

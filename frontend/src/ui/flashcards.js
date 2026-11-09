@@ -3,7 +3,7 @@
 import { h } from './dom.js';
 import { icons } from './icons.js';
 import { cardTitle } from './card-title.js';
-import { invoke, listen, isTauri } from '../core/bridge.js';
+import { invoke, listenJobs, isTauri } from '../core/bridge.js';
 import { aiReady } from '../core/ai.js';
 import { t, language } from '../core/i18n.js';
 import { studyFailureText } from './study-text.js';
@@ -186,9 +186,12 @@ export function createFlashcardsPanel() {
       }
     });
 
-    const stopListening = listen('study-job', (e) => {
+    const stopListening = listenJobs((e) => {
       if (e.kind !== 'deck') return;
       if (e.state === 'progress') {
+        build.disabled = true;
+        stop.hidden = false;
+        progress.hidden = false;
         progress.max = e.step.total || 1;
         progress.value = e.step.done;
         message.textContent = t('Jay-AI is writing the cards… {done} of {total}', { done: e.step.done, total: e.step.total });

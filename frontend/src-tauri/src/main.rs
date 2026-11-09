@@ -92,6 +92,7 @@ fn main() {
             study::card_vote,
             study::deck_delete,
             study::job_cancel,
+            study::job_status,
             study::explain_get,
             study::explain_build,
             study::explain_check,

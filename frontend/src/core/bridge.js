@@ -24,3 +24,13 @@ export async function onDragOver(callback) {
   const { getCurrentWebview } = await import('@tauri-apps/api/webview');
   await getCurrentWebview().onDragDropEvent((event) => callback(event.payload.type === 'enter' || event.payload.type === 'over'));
 }
+
+/**
+ * `callback(event)` for every study job event, and at once for the job already running (its last
+ * progress), so a screen built after a job started still shows it. Returns the unlisten promise.
+ */
+export function listenJobs(callback) {
+  const stop = listen('study-job', callback);
+  if (isTauri) invoke('job_status').then((s) => s && callback(s)).catch(() => {});
+  return stop;
+}

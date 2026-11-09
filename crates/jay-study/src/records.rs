@@ -148,10 +148,13 @@ pub struct BuildPlan {
     /// Content materials for new questions.
     #[serde(default)]
     pub content: Vec<String>,
-    /// An exam material to reuse questions from.
+    /// Exam materials to reuse questions from (several at once: their questions go into one pool).
+    #[serde(default)]
+    pub exams: Vec<String>,
+    /// One exam (the single-exam form, still accepted).
     #[serde(default)]
     pub exam: Option<String>,
-    /// Its answer key (a material of kind `key`).
+    /// That one exam's answer key; with several exams, each one's key is found by itself.
     #[serde(default)]
     pub key: Option<String>,
     /// How many questions to reuse (0 = none; more than there are = all).
@@ -264,23 +267,34 @@ impl Store {
         Ok(questions)
     }
 
-    /// The answer key among the materials that fits `material`'s questions best (most numbers in
-    /// common, at least 80%).
+    /// The answer key among the materials that is this exam's. Numbers alone don't tell (almost every
+    /// exam has questions 1, 2, 3…: a UEPG exam once got the ENEM key), so a key must also answer at
+    /// least 80% of the questions in a way that fits their kind (a letter among the choices, a
+    /// possible sum), must not name another year in its file name, and, when two keys fit, the one
+    /// whose file name shares more with the exam's wins; a tie picks none (Jay-AI answers instead).
     pub fn best_key(&self, material: &str) -> Option<String> {
-        let numbers: std::collections::BTreeSet<u32> = exam::split_questions(&self.text(material, usize::MAX).ok()?).iter().map(|q| q.number).collect();
-        if numbers.is_empty() {
+        let exam_name = self.material(material).ok()?.name;
+        let questions = exam::split_questions(&self.text(material, usize::MAX).ok()?);
+        if questions.is_empty() {
             return None;
         }
-        self.materials()
+        let mut fits: Vec<(usize, String)> = self
+            .materials()
             .into_iter()
-            .filter(|m| m.kind == MaterialKind::Key)
+            .filter(|m| m.kind == MaterialKind::Key && !years_differ(&exam_name, &m.name))
             .filter_map(|m| {
                 let key = exam::parse_answer_key(&self.text(&m.id, usize::MAX).ok()?)?;
-                let common = numbers.iter().filter(|n| key.contains_key(n)).count();
-                (common * 5 >= numbers.len() * 4).then_some((common, m.id))
+                let mut probe = questions.clone();
+                let answered = exam::apply_answer_key(&mut probe, &key);
+                (answered * 5 >= questions.len() * 4).then(|| (shared_name_tokens(&exam_name, &m.name), m.id))
             })
-            .max()
-            .map(|(_, id)| id)
+            .collect();
+        fits.sort_by(|a, b| b.0.cmp(&a.0));
+        match fits.as_slice() {
+            [] => None,
+            [(_, only)] => Some(only.clone()),
+            [(best, id), (second, _), ..] => (best > second).then(|| id.clone()),
+        }
     }
 
     /// Builds an exam (stage 3). `server`: Jay-AI, when it's needed (new questions, reused ones
@@ -290,10 +304,18 @@ impl Store {
         progress(BuildStep::Reading);
         let mut questions: Vec<Question> = vec![];
         let mut materials: Vec<String> = vec![];
-        if let Some(exam_id) = plan.exam.as_deref().filter(|_| plan.reuse > 0) {
-            let key = plan.key.clone().or_else(|| self.best_key(exam_id));
-            let all = self.material_questions(exam_id, key.as_deref())?;
-            // A random sample, kept in the exam's order.
+        let mut exams: Vec<String> = plan.exams.iter().chain(&plan.exam).cloned().collect();
+        exams.dedup();
+        if !exams.is_empty() && plan.reuse > 0 {
+            // Every exam's questions in one pool, each with its own key (found among the materials).
+            let mut all: Vec<Question> = vec![];
+            for exam_id in &exams {
+                let key = if exams.len() == 1 { plan.key.clone() } else { None }.or_else(|| self.best_key(exam_id));
+                all.extend(self.material_questions(exam_id, key.as_deref())?);
+                materials.push(exam_id.clone());
+                materials.extend(key);
+            }
+            // A random sample, kept in the exams' order.
             let mut order: Vec<usize> = (0..all.len()).collect();
             for i in (1..order.len()).rev() {
                 order.swap(i, u32::from_le_bytes(id::random_bytes::<4>()) as usize % (i + 1));
@@ -301,8 +323,6 @@ impl Store {
             let mut chosen: Vec<usize> = order.into_iter().take(plan.reuse.min(MAX_QUESTIONS)).collect();
             chosen.sort();
             questions = chosen.into_iter().map(|i| all[i].clone()).collect();
-            materials.push(exam_id.to_owned());
-            materials.extend(key);
             if let Some(server) = server {
                 let missing: Vec<usize> = (0..questions.len()).filter(|&i| questions[i].answer.is_none()).collect();
                 for (done, &i) in missing.iter().enumerate() {
@@ -558,6 +578,25 @@ impl Store {
     }
 }
 
+/// The words of a file name that can tie an exam to its key ("2023", "d1", "cd1", "grupo", "3"),
+/// without the ones every exam or key has.
+fn name_tokens(name: &str) -> std::collections::BTreeSet<String> {
+    const COMMON: [&str; 12] = ["pdf", "docx", "txt", "md", "gabarito", "gb", "prova", "pv", "impresso", "caderno", "vestibular", "key"];
+    let stem = name.rsplit_once('.').map(|(s, _)| s).unwrap_or(name);
+    crate::classify::fold(stem).split(|c: char| !c.is_alphanumeric()).filter(|t| !t.is_empty() && !COMMON.contains(t)).map(str::to_owned).collect()
+}
+
+fn shared_name_tokens(a: &str, b: &str) -> usize {
+    name_tokens(a).intersection(&name_tokens(b)).count()
+}
+
+/// Both names carry a year (19xx/20xx) and they don't share one: different editions.
+fn years_differ(a: &str, b: &str) -> bool {
+    let years = |n: &str| -> std::collections::BTreeSet<String> { name_tokens(n).into_iter().filter(|t| t.len() == 4 && (t.starts_with("19") || t.starts_with("20")) && t.bytes().all(|c| c.is_ascii_digit())).collect() };
+    let (ya, yb) = (years(a), years(b));
+    !ya.is_empty() && !yb.is_empty() && ya.is_disjoint(&yb)
+}
+
 /// The scoring of an exam's style (unknown style: partial credit for sums; choices are always one
 /// right answer).
 fn scoring(e: &Exam) -> exam::Scoring {
@@ -680,16 +719,56 @@ mod tests {
         let g = store.import(&root.join("g.txt")).unwrap();
         assert_eq!(g.kind, MaterialKind::Key);
         assert_eq!(store.best_key(&p.id), Some(g.id.clone()));
-        let plan = BuildPlan { title: "Revisão".into(), style: "enem".into(), content: vec![], exam: Some(p.id.clone()), key: None, reuse: 4, new: 0 };
+        let plan = BuildPlan { title: "Revisão".into(), style: "enem".into(), content: vec![], exams: vec![], exam: Some(p.id.clone()), key: None, reuse: 4, new: 0 };
         let e = store.build_exam(&plan, None, &mut |_| {}, &AtomicBool::new(false)).unwrap();
         assert_eq!(e.questions.len(), 4);
         assert!(e.questions.iter().all(|q| q.answer.as_deref() == Some("A") && !q.answer_by_ai));
         assert_eq!(e.questions.iter().map(|q| q.number).collect::<Vec<_>>(), [1, 2, 3, 4]);
         assert_eq!(store.exams().len(), 1);
+        // Two exams together: the questions of both, each answered by its own key.
+        let exam2: String = (1..=10).map(|n| format!("Questão {n}
+Qual é o dobro de {n}?
+a) {}
+b) {}
+c) {}
+d) {}
+e) {}
+", n * 2, n + 7, n + 8, n + 9, n + 10)).collect();
+        std::fs::write(root.join("p2.txt"), exam2).unwrap();
+        let p2 = store.import(&root.join("p2.txt")).unwrap();
+        let both = BuildPlan { exams: vec![p.id.clone(), p2.id.clone()], exam: None, reuse: 20, ..plan.clone() };
+        let e2 = store.build_exam(&both, None, &mut |_| {}, &AtomicBool::new(false)).unwrap();
+        assert_eq!(e2.questions.len(), 20);
+        assert_eq!(e2.questions.iter().filter(|q| q.source.as_ref().unwrap().material == p2.id).count(), 10);
+        assert!(e2.questions.iter().all(|q| q.answer.as_deref() == Some("A")));
+        assert!(e2.materials.contains(&p2.id) && e2.materials.contains(&g.id));
         // New questions without Jay-AI: refused, nothing saved.
         let plan = BuildPlan { new: 3, content: vec![p.id], ..plan };
         assert!(matches!(store.build_exam(&plan, None, &mut |_| {}, &AtomicBool::new(false)), Err(BuildError::Ai(AiError::NotInstalled))));
-        assert_eq!(store.exams().len(), 1);
+        assert_eq!(store.exams().len(), 2, "the refused build saved nothing");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn keys_go_with_their_own_exam() {
+        let (store, root) = temp_store();
+        let write = |name: &str, text: String| {
+            std::fs::write(root.join(name), text).unwrap();
+            store.import(&root.join(name)).unwrap()
+        };
+        let choice = |tag: &str| (1..=10).map(|n| format!("Questão {n}\n{tag} {n}?\na) um\nb) dois\nc) três\nd) quatro\ne) cinco\n")).collect::<String>();
+        let sums: String = (1..=10).map(|n| format!("{n:02}– Sobre {n}, assinale o que for correto.\n01) Um.\n02) Dois.\n04) Quatro.\n08) Oito.\n16) Dezesseis.\n")).collect();
+        let enem23 = write("2023_PV_D1.txt", choice("ENEM 2023"));
+        let enem22 = write("2022_PV_D1.txt", choice("ENEM 2022"));
+        let uepg = write("Grupo-3-2025.txt", sums);
+        let key23 = write("2023_GB_D1.txt", (1..=10).map(|n| format!("{n} C\n")).collect());
+        // The 2023 key: its own exam, not 2022's (another year) nor UEPG's (sums, not letters).
+        assert_eq!(store.best_key(&enem23.id), Some(key23.id.clone()));
+        assert_eq!(store.best_key(&enem22.id), None);
+        assert_eq!(store.best_key(&uepg.id), None);
+        // A sum-type key does fit the UEPG exam.
+        let key_uepg = write("Gabarito-Grupo-3-2025.txt", (1..=10).map(|n| format!("{n:02} 21\n")).collect());
+        assert_eq!(store.best_key(&uepg.id), Some(key_uepg.id));
         std::fs::remove_dir_all(root).unwrap();
     }
 
