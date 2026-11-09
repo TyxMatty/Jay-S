@@ -1,0 +1,28 @@
+# Jay-S — contexto para o Claude
+
+App de estudos da linha Jay (Tauri v2 + Vanilla JS): provas, simulados e flashcards gerados a partir do material do estudante por um modelo local (o Jay-AI, `llama-server` do llama.cpp num processo filho).
+- **Arquitetura, decisões, segurança e etapas:** [docs/ARQUITETURA.md](docs/ARQUITETURA.md). A tabela da seção 8 marca o que está feito (✅).
+- **Base:** copiada do Jay-H (estilos, tema, idioma, ícone da janela) e do Jay-A (navegação lateral, cards). Lições e armadilhas da linha estão no `CLAUDE.md` do Jay-C (`../JayC/JayC/CLAUDE.md`), seção "Fatos técnicos".
+
+## Como trabalhar com o usuário
+
+- **Idioma:** responda no idioma da última mensagem dele. Docs e commits em português; código e comentários em inglês.
+- **Commits:** **nunca** inclua `Co-Authored-By: Claude` nem outra atribuição. Assunto + corpo com o quê, por quê e o que foi verificado.
+- **Ritmo:** uma etapa por vez, cada uma terminando em algo testável. Ao fim: commit, resumo e pergunta se segue.
+- **Verificação:** prove com medição. Se um teste não prova nada, diga.
+- **Segurança:** toda mudança que possa pôr dados do estudante em risco (anexos, pasta de dados, saída do modelo, `llama-server`, downloads, IPC) passa pelos 10 pontos da seção 7 da arquitetura, mesmo sendo tudo local. Registre o resultado na seção 7 e escreva os testes adversariais.
+- **README e docs:** o `README.md` é em inglês (com o `README.pt-BR.md` ao lado), e tudo o que ele linka precisa ter versão em inglês (`*.en.md`). Mudou um doc em português? Atualize o `.en.md` junto.
+- **Pouca RAM:** é requisito (RNF-1). Meça a memória da árvore do app antes de dizer que algo é leve.
+
+## Build e execução (Windows)
+
+```bash
+npm install
+npm run dev          # app Tauri, Vite em :5178
+npm run web          # só a interface no navegador
+npm test             # node:test
+```
+
+- **Rust fora do OneDrive:** `.cargo/config.toml` (local, fora do git) aponta o `target-dir` para `C:/Users/<você>/.cargo-target/jay-s`.
+- **Portas:** Vite 5178, depuração remota 9227 (Jay-C 5173/9222, Jay-A 5175, Jay-H 5176, Jay-E 5177/9226).
+- **Regras que vieram da linha:** `[hidden] { display: none !important }` global; texto de arquivo ou do modelo só por `textContent` (o `h()` de `ui/dom.js`), nunca `innerHTML`; a página nunca manda caminho de arquivo; dados do estudante em arquivos do Rust (o `localStorage` do WebView2 vai ao disco com atraso e se perde se o app for morto).

@@ -1,0 +1,36 @@
+[package]
+name = "jay-s"
+version = "0.0.1"
+description = "Jay-S — study app of the Jay line"
+authors = ["TyxMatty"]
+license = "MIT"
+edition = "2024"
+rust-version = "1.90"
+
+[build-dependencies]
+tauri-build = { version = "2.7.4", features = [] }
+
+[dependencies]
+tauri = { version = "2.12.5", features = [] }
+tauri-plugin-single-instance = "2"
+
+[target.'cfg(windows)'.dependencies]
+# The same versions Tauri uses: the taskbar icon (taskbar_icon.rs) and the WebView2 settings (main.rs).
+webview2-com = "0.39"
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Storage_EnhancedStorage",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Variant",
+    "Win32_UI_Shell_PropertiesSystem",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[profile.release]
+# Smaller, leaner binaries (same as Jay-C).
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true
