@@ -188,6 +188,10 @@ Os 10 pontos de novo, sobre o que essas etapas acrescentaram (2026-11-09):
 - **7 (corridas):** achado e corrigido nesta revisão: o Tauri roda comandos em paralelo, e dois cliques rápidos (proposições da somatória) liam e gravavam a mesma tentativa ao mesmo tempo, perdendo uma resposta; o mesmo com o perfil (terminar uma prova e votar num cartão). Todo comando que muda arquivo agora passa pela mesma trava (`Library::writing`). Uma tarefa longa (montar prova, baralho, análise) por vez.
 - **5, 6, 8, 9:** nada novo: nenhum segredo, conta, dependência nova nem rede além do Jay-AI local.
 
+### Explicar um material (depois da etapa 6)
+
+Em Materiais, **Explicar**: o Jay-AI resume e explica o material na língua que o aluno escolher (qualquer uma: a lista ou "Outra…"), bem simples, equilibrado ou aprofundado, com um foco opcional; depois **faz perguntas** ao aluno, uma de cada vez, confere a resposta (certa, quase, errada) e, se não estiver certa, faz uma pergunta menor que leva até ela; o aluno também pergunta o que quiser. Materiais longos são lidos em até 10 partes espalhadas (notas de cada uma, depois a explicação), para caber em 8k de contexto. Medido: a apostila de teste em português explicada em inglês em 35 s. Segurança (os 10 pontos): as entradas novas (língua, foco, resposta, pergunta) têm tamanho máximo; a língua só passa se for um nome (letras, espaço, hífen, parênteses: "English. Ignore the rules" é recusado); resposta e pergunta vão entre marcas e o pedido diz que são dados; tudo volta à tela como texto.
+
 ## 8. Etapas
 
 Cada etapa termina com algo testável; ao fim de cada uma, commit, resumo e a pergunta se segue para a próxima.

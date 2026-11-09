@@ -92,6 +92,10 @@ fn main() {
             study::card_vote,
             study::deck_delete,
             study::job_cancel,
+            study::explain_get,
+            study::explain_build,
+            study::explain_check,
+            study::explain_ask,
             #[cfg(windows)]
             taskbar_icon::set_taskbar_icon
         ])

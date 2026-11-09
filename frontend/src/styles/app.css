@@ -1866,17 +1866,339 @@ fieldset > h3 {
   to { opacity: 0.7; }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .flip-inner,
-  .runner-option,
-  .rating { transition: none; }
-  .flip-card.is-dealt,
-  .runner-feedback,
-  .runner-timer[data-tone='low'] { animation: none; }
-}
-
 @media (max-width: 600px) {
   .card-ratings { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .exam-sheet { padding: 20px 14px 16px 30px; }
   .score-hero { flex-direction: column; text-align: center; }
+}
+
+/* ---------- Spacing: one scale for the whole app (4/8 px steps) ---------- */
+
+:root {
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+}
+
+/* Cards breathe on every side: the old 4 px at the bottom let buttons touch the edge. */
+.app-panel > fieldset,
+.app-panel > * > fieldset {
+  margin: 0 0 var(--space-5);
+  padding: var(--space-5);
+}
+
+.app-panel fieldset > h3,
+.app-panel fieldset > .card-title {
+  margin-bottom: var(--space-4);
+}
+
+.app-panel > h1,
+.panel-head {
+  margin-bottom: var(--space-5);
+}
+
+.field {
+  gap: var(--space-2);
+  margin-bottom: var(--space-5);
+}
+
+.field:last-child {
+  margin-bottom: 0;
+}
+
+/* A hint is a line of its own: space before what follows it (a label, a list, a button). */
+.app-panel fieldset > .hint,
+.field > .hint {
+  margin-bottom: var(--space-3);
+}
+
+.field > .hint {
+  margin-top: calc(var(--space-1) * -1);
+}
+
+.button-row {
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+.material-list {
+  gap: var(--space-3);
+}
+
+.material-row {
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+}
+
+.material-actions {
+  gap: var(--space-2);
+}
+
+.check-list {
+  gap: var(--space-2);
+  padding: var(--space-3);
+}
+
+.empty-state {
+  gap: var(--space-3);
+  padding: var(--space-6) var(--space-4);
+}
+
+.runner-nav {
+  gap: var(--space-2);
+  margin-bottom: var(--space-5);
+}
+
+.runner-options {
+  gap: var(--space-3);
+  margin-bottom: var(--space-5);
+}
+
+.runner-stem {
+  margin-bottom: var(--space-5);
+}
+
+.runner-passage {
+  margin-bottom: var(--space-5);
+  padding: var(--space-4) var(--space-5);
+}
+
+.runner-meta {
+  margin-bottom: var(--space-4);
+}
+
+.runner-actions {
+  margin-top: var(--space-4);
+}
+
+.ai-models {
+  gap: var(--space-3);
+  margin: var(--space-4) 0;
+}
+
+.ai-test {
+  margin-top: var(--space-4);
+  padding: var(--space-4);
+}
+
+.topic-bars,
+.review-list {
+  gap: var(--space-3);
+}
+
+/* The pile leans 12 px down and right: room for it before the buttons. */
+.card-pile {
+  margin: var(--space-4) auto var(--space-6);
+  padding-bottom: var(--space-2);
+}
+
+.review-progress {
+  margin-bottom: var(--space-3);
+}
+
+.review-actions {
+  gap: var(--space-4);
+}
+
+/* ---------- Flip: the card lifts, turns and settles ---------- */
+
+.flip-inner {
+  transition: transform 0.6s cubic-bezier(0.34, 1.3, 0.5, 1);
+}
+
+.flip-card.is-flipping {
+  animation: card-lift 0.6s ease-in-out;
+}
+
+@keyframes card-lift {
+  0% { transform: translateY(0) scale(1); }
+  45% { transform: translateY(-10px) scale(1.04); }
+  100% { transform: translateY(0) scale(1); }
+}
+
+/* The shadow under the card grows while it's in the air. */
+.flip-card.is-flipping .flip-face {
+  box-shadow: 0 30px 60px -20px color-mix(in srgb, var(--accent) 45%, transparent), var(--shadow);
+}
+
+/* ---------- Animations off (Settings › Appearance), as in the rest of the line ---------- */
+
+[data-motion='reduced'] .flip-inner,
+[data-motion='reduced'] .runner-option,
+[data-motion='reduced'] .rating {
+  transition: none;
+}
+
+[data-motion='reduced'] .flip-card.is-dealt,
+[data-motion='reduced'] .flip-card.is-flipping,
+[data-motion='reduced'] .runner-feedback,
+[data-motion='reduced'] .runner-timer[data-tone='low'] {
+  animation: none;
+}
+
+/* ---------- Explain (Materials › Explain) ---------- */
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+textarea.input {
+  height: auto;
+  min-height: 72px;
+  padding: var(--space-3);
+  line-height: 1.5;
+  resize: vertical;
+  font: inherit;
+}
+
+.explain-result {
+  display: grid;
+  gap: 0;
+}
+
+.explain-sheet {
+  position: relative;
+  margin-bottom: var(--space-5);
+  padding: var(--space-6) var(--space-6) var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background:
+    radial-gradient(90% 60% at 100% 0%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 70%),
+    var(--surface);
+  box-shadow: var(--shadow-sm), 0 22px 44px -28px color-mix(in srgb, var(--accent) 55%, transparent);
+  overflow: hidden;
+}
+
+.explain-sheet::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 4px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2, var(--accent)));
+}
+
+.explain-sheet h2 {
+  margin: 0 0 var(--space-4);
+  font-size: 24px;
+  line-height: 1.25;
+}
+
+.explain-sheet h3 {
+  margin: var(--space-6) 0 var(--space-3);
+  font-size: 15px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.explain-paragraph {
+  margin: 0 0 var(--space-4);
+  font-size: 16px;
+  line-height: 1.7;
+}
+
+.key-points {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.key-points li {
+  position: relative;
+  padding: var(--space-3) var(--space-4) var(--space-3) var(--space-6);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  line-height: 1.5;
+}
+
+.key-points li::before {
+  content: '✓';
+  position: absolute;
+  left: var(--space-3);
+  font-weight: 800;
+  color: var(--accent-text, var(--accent));
+}
+
+.concepts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr));
+  gap: var(--space-3);
+}
+
+.concept {
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-top: 3px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.concept h4 {
+  margin: 0 0 var(--space-2);
+  font-size: 15px;
+}
+
+.concept p {
+  margin: 0 0 var(--space-2);
+  line-height: 1.55;
+}
+
+.concept-example {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  font-size: 14px;
+}
+
+.quiz-question {
+  margin: var(--space-2) 0 var(--space-4);
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.quiz-question.is-follow-up {
+  padding-left: var(--space-3);
+  border-left: 3px solid var(--warning);
+}
+
+.quiz .runner-feedback {
+  margin-top: var(--space-4);
+}
+
+.ask-answers {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+.ask-item {
+  padding: var(--space-4);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.ask-q {
+  margin: 0 0 var(--space-2);
+  font-weight: 700;
+}
+
+.ask-a {
+  margin: 0;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 600px) {
+  .explain-sheet { padding: var(--space-5) var(--space-4); }
 }

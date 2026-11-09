@@ -62,7 +62,7 @@ function metaLine(m) {
   return parts.join(' · ');
 }
 
-function materialCard(m, { onDeleted, onError }) {
+function materialCard(m, { onDeleted, onError, onExplain }) {
   const select = h(
     'select',
     { class: 'input material-kind', 'aria-label': t('What it is') },
@@ -91,6 +91,7 @@ function materialCard(m, { onDeleted, onError }) {
       h(
         'div',
         { class: 'material-actions' },
+        m.kind === 'key' ? null : h('button', { type: 'button', class: 'btn', onClick: () => onExplain(m) }, h('span', { class: 'btn-icon', html: icons.spark }), t('Explain')),
         textButton,
         h('button', { type: 'button', class: 'icon-btn', 'aria-label': t('Delete {name}', { name: m.name }), title: t('Delete'), html: icons.trash, onClick: remove }),
       ),
@@ -159,7 +160,15 @@ export function createMaterialsPanel() {
     message.hidden = false;
   };
   const refreshEmpty = () => (empty.hidden = list.children.length > 0);
-  const handlers = { onDeleted: refreshEmpty, onError: showError };
+  const handlers = {
+    onDeleted: refreshEmpty,
+    onError: showError,
+    // The explanation takes the section's place; Back puts the same list back (its state kept).
+    onExplain: async (m) => {
+      const { createExplainView } = await import('./explain.js');
+      host.replaceChildren(createExplainView(m, () => host.replaceChildren(section)));
+    },
+  };
   /** token → the card shown while that file is read. */
   const reading = new Map();
 
@@ -207,7 +216,7 @@ export function createMaterialsPanel() {
       .catch((e) => showError(failureText(e)));
   }
 
-  return h(
+  const section = h(
     'section',
     { class: 'app-panel is-single materials-panel' },
     h('div', { class: 'panel-head' }, h('h1', {}, t('Materials')), attach),
@@ -216,4 +225,6 @@ export function createMaterialsPanel() {
     list,
     dropHint,
   );
+  const host = h('div', { class: 'lazy-panel' }, section);
+  return host;
 }

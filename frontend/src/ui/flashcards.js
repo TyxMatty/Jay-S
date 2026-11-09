@@ -72,6 +72,10 @@ function review(deck, cards, onDone) {
   function flip(to = !flipped) {
     if (to === flipped) return;
     flipped = to;
+    // The lift is an animation of its own (styles/app.css .is-flipping), restarted on every flip.
+    card.classList.remove('is-flipping');
+    void card.offsetWidth;
+    card.classList.add('is-flipping');
     card.dataset.flipped = String(flipped);
     card.setAttribute('aria-pressed', String(flipped));
     card.querySelector('.flip-back').setAttribute('aria-hidden', String(!flipped));

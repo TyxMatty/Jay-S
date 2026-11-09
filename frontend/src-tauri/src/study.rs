@@ -334,3 +334,69 @@ pub fn deck_delete(library: State<Library>, id: String) -> Result<(), Failure> {
 pub fn job_cancel(ai: State<Ai>) {
     ai.cancel();
 }
+
+#[tauri::command]
+pub fn explain_get(library: State<Library>, id: String) -> Result<Option<jay_study::explain::Explanation>, Failure> {
+    Ok(library.store.explanation(&id)?)
+}
+
+/// Summarizes and explains a material (a job: progress over the parts read, then `done`).
+#[tauri::command]
+pub fn explain_build(app: AppHandle, id: String, language: String, level: jay_study::explain::Level, focus: Option<String>) -> Result<(), Failure> {
+    if !app.state::<Ai>().ready() {
+        return Err(AiError::NotInstalled.into());
+    }
+    if jay_study::explain::clean_language(&language).is_none() {
+        return Err(Failure::new("bad_language", None));
+    }
+    spawn_job(&app, move |app| {
+        let library = app.state::<Library>();
+        let ai = app.state::<Ai>();
+        let result = ai.with_server(app, |server, cancel| {
+            let mut progress = |done, total| {
+                let _ = app.emit(JOB_EVENT, JobEvent::Progress { kind: "explain", step: BuildStep::Writing { done, total } });
+            };
+            library.store.explain(&id, &language, level, focus.as_deref(), server, &mut progress, cancel).map_err(|e| match e {
+                BuildError::Ai(e) => e,
+                other => AiError::Io(format!("{other:?}")),
+            })
+        });
+        let _ = app.emit(JOB_EVENT, match result {
+            Ok(_) => JobEvent::Done { kind: "explain", id },
+            Err(e) => JobEvent::Error { kind: "explain", id: Some(id), error: e.into() },
+        });
+    })
+}
+
+/// Runs one quick Jay-AI request off the main thread (it waits its turn behind a running job).
+async fn quick<T: Send + 'static>(app: AppHandle, work: impl FnOnce(&Library, &jay_study::ai::Server, &AtomicBool) -> Result<T, BuildError> + Send + 'static) -> Result<T, Failure> {
+    if !app.state::<Ai>().ready() {
+        return Err(AiError::NotInstalled.into());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let library = app.state::<Library>();
+        let ai = app.state::<Ai>();
+        let mut out = None;
+        let result = ai.with_server(&app, |server, cancel| {
+            out = Some(work(&library, server, cancel));
+            Ok(())
+        });
+        match (result, out) {
+            (Err(e), _) => Err(e.into()),
+            (Ok(()), Some(r)) => r.map_err(Failure::from),
+            (Ok(()), None) => Err(Failure::new("io", None)),
+        }
+    })
+    .await
+    .map_err(|e| Failure::new("io", Some(e.to_string())))?
+}
+
+#[tauri::command]
+pub async fn explain_check(app: AppHandle, id: String, question: String, answer: String, language: String) -> Result<jay_study::explain::Check, Failure> {
+    quick(app, move |library, server, cancel| library.store.check_answer(&id, &question, &answer, &language, server, cancel)).await
+}
+
+#[tauri::command]
+pub async fn explain_ask(app: AppHandle, id: String, question: String, language: String) -> Result<String, Failure> {
+    quick(app, move |library, server, cancel| library.store.ask(&id, &question, &language, server, cancel)).await
+}

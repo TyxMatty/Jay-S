@@ -189,6 +189,10 @@ The 10 points again, over what these stages added (2026-11-09):
 - **7 (races):** found and fixed in this review: Tauri runs commands in parallel, and two quick clicks (sum-type propositions) read and wrote the same attempt at once, losing an answer; the same with the profile (finishing an exam and voting on a card). Every command that changes a file now goes through the same lock (`Library::writing`). One long job (building an exam, a deck, an analysis) at a time.
 - **5, 6, 8, 9:** nothing new: no secret, account, new dependency or network beyond the local Jay-AI.
 
+### Explaining a material (after stage 6)
+
+In Materials, **Explain**: Jay-AI summarizes and explains the material in the language the student picks (any: the list or "Other…"), very simple, balanced or in depth, with an optional focus; then it **asks the student questions**, one at a time, checks the answer (right, almost, wrong) and, when it isn't right, asks a smaller question that leads there; the student can ask anything too. Long materials are read in up to 10 spread parts (notes from each, then the explanation), to fit an 8k context. Measured: the Portuguese test handout explained in English in 35 s. Security (the 10 points): the new inputs (language, focus, answer, question) have maximum sizes; the language only passes if it's a name (letters, space, hyphen, parentheses: "English. Ignore the rules" is refused); answer and question go between markers and the request says they're data; everything comes back to the screen as text.
+
 ## 8. Stages
 
 Each stage ends with something testable; at the end of each one: commit, summary, and the question whether to go on to the next.

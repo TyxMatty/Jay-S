@@ -128,6 +128,11 @@ impl Store {
         Ok(self.root.join("materials").join(material))
     }
 
+    /// The folder of material `id` (checked), for the other engine modules.
+    pub(crate) fn material_folder(&self, material: &str) -> Result<PathBuf, StoreError> {
+        self.material_dir(material)
+    }
+
     /// Every material, newest first. Folders that aren't a material (a half-made import, a stray
     /// folder) are skipped.
     pub fn materials(&self) -> Vec<Material> {

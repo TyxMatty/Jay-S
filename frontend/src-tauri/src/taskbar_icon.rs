@@ -27,8 +27,10 @@ use windows::Win32::UI::WindowsAndMessaging::{CreateIcon, DestroyIcon, HICON, IC
 use windows::core::PWSTR;
 
 /// The window's own app ID: not the Start menu shortcut's (`io.github.tyxmatty.jays`, set by the
-/// installer), or Windows ties them again.
-const WINDOW_APP_ID: &str = "io.github.tyxmatty.jays.window";
+/// installer), or Windows ties them again. Dev and release get different IDs: Explorer caches the
+/// relaunch icon per ID, and a dev build sharing the release's ID showed a blank page on the
+/// taskbar (measured in Jay-S, 2026-11-09).
+const WINDOW_APP_ID: &str = if cfg!(debug_assertions) { "io.github.tyxmatty.jays.window.dev" } else { "io.github.tyxmatty.jays.window" };
 
 /// `rgba`: `size` x `size` pixels, 4 bytes each (straight alpha), as from a canvas.
 #[tauri::command]
@@ -68,6 +70,13 @@ pub fn set_taskbar_icon(window: tauri::WebviewWindow, rgba: Vec<u8>, size: u32) 
         }
     }
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    // The app ID and relaunch icon only untie the installed app from its Start menu shortcut. Run
+    // from anywhere else (dev, a build folder) Windows doesn't load the relaunch icon and the button
+    // shows a blank page (measured in Jay-S on Windows 11 26300, even with a plain red icon), while
+    // ICON_BIG alone shows the picture.
+    if !installed(&exe) {
+        return Ok(());
+    }
     relaunch_with_icon(hwnd, &exe, &ico_path).map_err(|e| format!("taskbar properties: {e}"))?;
     let raw = hwnd.0 as isize; // HWND isn't Send
     let main = window.clone();
@@ -82,12 +91,20 @@ pub fn set_taskbar_icon(window: tauri::WebviewWindow, rgba: Vec<u8>, size: u32) 
     Ok(())
 }
 
+/// Where the installer (NSIS, current user) puts the app: `%LOCALAPPDATA%\Jay-S\jay-s.exe`.
+fn installed(exe: &Path) -> bool {
+    let Some(local) = std::env::var_os("LOCALAPPDATA") else { return false };
+    exe.parent().is_some_and(|dir| dir.as_os_str().eq_ignore_ascii_case(Path::new(&local).join("Jay-S").as_os_str()))
+}
+
 /// The relaunch properties, and the app ID cleared (set again by `set_app_id`).
 fn relaunch_with_icon(hwnd: HWND, exe: &Path, ico_path: &Path) -> windows::core::Result<()> {
     let store: IPropertyStore = unsafe { SHGetPropertyStoreForWindow(hwnd)? };
     set_text(&store, &PKEY_AppUserModel_RelaunchCommand, &format!("\"{}\"", exe.display()))?;
     set_text(&store, &PKEY_AppUserModel_RelaunchDisplayNameResource, "Jay-S")?;
-    set_text(&store, &PKEY_AppUserModel_RelaunchIconResource, &ico_path.display().to_string())?;
+    // "file,index", as the property is documented: a bare path showed a blank page on the taskbar
+    // (measured in Jay-S, 2026-11-09).
+    set_text(&store, &PKEY_AppUserModel_RelaunchIconResource, &format!("{},0", ico_path.display()))?;
     unsafe {
         store.SetValue(&PKEY_AppUserModel_ID, &PROPVARIANT::default())?;
         store.Commit()

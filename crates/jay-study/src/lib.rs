@@ -5,6 +5,7 @@ pub mod ai;
 pub mod cards;
 pub mod classify;
 pub mod exam;
+pub mod explain;
 pub mod extract;
 pub mod generate;
 pub mod id;

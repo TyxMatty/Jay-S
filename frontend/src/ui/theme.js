@@ -1,6 +1,7 @@
 import { settings } from '../store/settings.js';
 import { resolveStyle } from '../core/style.js';
 import { updateWindowIcon } from './window-icon.js';
+import { resolveMotion } from '../core/motion.js';
 
 const darkQuery = matchMedia('(prefers-color-scheme: dark)');
 const isTauri = '__TAURI_INTERNALS__' in window;
@@ -24,6 +25,9 @@ function applyTheme() {
   }
 }
 
+/** <html data-motion="full|reduced"> from Settings › Appearance › Animations. */
+const applyMotion = () => (document.documentElement.dataset.motion = resolveMotion(settings.get().motion));
+
 function applyStyle() {
   document.documentElement.dataset.style = resolveStyle(settings.get().style);
   updateWindowIcon();
@@ -33,7 +37,9 @@ export function initTheme() {
   document.documentElement.dataset.theme = ''; // force the first applyTheme() to sync the title bar
   applyTheme();
   applyStyle();
+  applyMotion();
   settings.subscribe((next, prev) => {
+    if (next.motion !== prev.motion) applyMotion();
     if (next.theme !== prev.theme) applyTheme();
     if (next.style !== prev.style) applyStyle();
   });
