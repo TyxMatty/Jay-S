@@ -421,3 +421,33 @@ pub async fn explain_check(app: AppHandle, id: String, question: String, answer:
 pub async fn explain_ask(app: AppHandle, id: String, question: String, language: String) -> Result<String, Failure> {
     quick(app, move |library, server, cancel| library.store.ask(&id, &question, &language, server, cancel)).await
 }
+
+// The Jay-AI chat (jay_study::chat): grounded, checked answers about materials or a finished exam.
+
+#[tauri::command]
+pub fn chats_list(library: State<Library>) -> Vec<jay_study::chat::ChatSummary> {
+    library.store.chats()
+}
+
+#[tauri::command]
+pub fn chat_get(library: State<Library>, id: String) -> Result<jay_study::chat::Chat, Failure> {
+    Ok(library.store.chat(&id)?)
+}
+
+#[tauri::command]
+pub fn chat_new(library: State<Library>, scope: jay_study::chat::Scope) -> Result<jay_study::chat::Chat, Failure> {
+    let _writing = library.writing();
+    Ok(library.store.new_chat(scope)?)
+}
+
+#[tauri::command]
+pub fn chat_delete(library: State<Library>, id: String) -> Result<(), Failure> {
+    let _writing = library.writing();
+    Ok(library.store.delete_chat(&id)?)
+}
+
+#[tauri::command]
+pub async fn chat_ask(app: AppHandle, id: String, question: String) -> Result<jay_study::chat::Turn, Failure> {
+    // One Jay-AI request at a time (quick waits its turn), so two questions never write the chat at once.
+    quick(app, move |library, server, cancel| library.store.chat_ask(&id, &question, server, cancel)).await
+}

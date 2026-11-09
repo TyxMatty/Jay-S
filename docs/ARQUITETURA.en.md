@@ -158,6 +158,7 @@ Side navigation like Jay-A: **Materials**, **Exams**, **Mock test**, **Flashcard
 ├─ exams\<id>.json                 # built exam: style, questions, answer key, origin of each question
 ├─ attempts\<id>.json              # attempt: answers, times, result per topic (saved on every answer)
 ├─ decks\<id>.json                 # cards + SM-2 state
+├─ chats\<id>.json                 # Jay-AI conversations: chosen sources and checked turns
 ├─ profile.json                    # student profile (preferred length/tone, weak topics)
 └─ ai\                             # downloaded llama-server and model
 ```
@@ -198,6 +199,36 @@ In Materials, **Explain**: Jay-AI summarizes and explains the material in the la
 Materials has three tabs: **Content**, **Exams** and **Answer keys**, each with a count. The kind is chosen when attaching: the file (from the button or dropped on the window) gets the kind of the open tab. In Answer keys you can say which exam it belongs to; on an exam's card, "Attach its answer key…" does the same. Each exam picks its key: **Automatic** (the closest one, with stricter rules: 80% of the questions answered, year and file name checked, a tie = none), **None** (Jay-AI answers) or a key from the list. **View** shows the material as it is, with Jay-E's viewer: PDF pages drawn in Rust (only those near the screen, with zoom), DOCX as a page, photos; or the extracted text. Measured: the ENEM exam (32 pages) opens with 1 page drawn; ENEM gets the right key by itself and the UEPG exams get none (before, they got ENEM's).
 
 Security (the 10 points): **1/4** new inputs: the kind and exam chosen when attaching (the kind is a serde enum; the exam is a checked `id`; a key can only be a material of kind Answer key) and the viewer's `jays://` protocol, which only accepts `pdf/<id>/<page>/<width>`, `docimg/<id>/<n>` and `file/<id>`, with the `id` checked as in item 2 and width up to 3000 px (~25 Mpx per page), drawing under `catch_unwind`. The DOCX HTML comes from Jay-E's writer (all text escaped, links only http(s)/mailto); the page also removes any image that isn't `docimg/` and stops links from navigating, and the CSP allows no script. **9** the CSP opened `img-src` only to `jays:`/`http://jays.localhost`. **2, 3, 5, 6, 8**: nothing new (copying Jay-E's viewer brought no dependency). **7** drawing runs on its own thread; saving the key goes through the same lock.
+
+### Grounded, validated answers (the Jay-AI chat)
+
+In the Jay-AI section, **Chat** tab, the student talks about **any question**, **their materials** (they pick which) or **an exam they took** (finished). A 4B model invents easily, and a tutor's worst mistake is teaching something wrong with confidence. So the answer isn't trusted to the model: it is **grounded** in the material and **validated** in Rust before it reaches the screen (`crates/jay-study/src/chat.rs`).
+
+```mermaid
+flowchart LR
+  P["question"] --> R["1. sources<br/>(Rust picks the passages)"]
+  R -- "nothing about it" --> N["not in your material<br/>(the model isn't asked)"]
+  R --> G["2. reply with a schema<br/>each sentence: passage + literal quote"]
+  G --> V["3. checked in Rust<br/>quote, numbers, key, what the student did"]
+  V -- "half or more failed" --> RT["4. one retry<br/>with the problems listed"] --> V
+  V --> J["5. second reading<br/>yes/no per sentence"]
+  J --> T["6. screen: confirmed with its source<br/>or Not confirmed"]
+```
+
+1. **Sources first.** Rust picks up to 5 passages (≈4,800 characters): pieces of the chosen materials and, for an exam, each question with its stem, options, **key**, what the student marked and whether they got it (graded by Rust), plus the result by topic. Questions the student names ("number 12") come first; the rest by shared words. When there are sources and no passage is about the subject, the answer is "not in your material", **without asking the model**: there's nothing to invent from.
+2. **Reply with a schema.** Up to 8 sentences; each says which passage it came from and **copies from it, letter by letter, the words that prove it**. Temperature 0.2. Passages, conversation and question go between markers, as data.
+3. **Checked in Rust** (deterministic, tested): the quote must be in the passage word for word (ignoring accents, case and punctuation), with at least 12 letters; every number in the sentence must be in the passage or the question; "the right one is C" must match the key; "you marked…" and "you got it right/wrong" must match what Rust graded. The kind of answer (from the material / not found) is decided by Rust, from what passed, not by the model.
+4. **One retry** when half or more of the sentences failed, with the list of problems; the better of the two is kept.
+5. **Second reading.** Jay-AI, as a reviewer (temperature 0), says yes or no for each confirmed sentence, looking at the quote and the passage. Asking for "the list of bad sentences" made the 4B model list all of them; one verdict per sentence doesn't.
+6. **Honest screen.** A confirmed sentence shows its source ([1], [2]); one that didn't pass is shown dimmed, underlined and tagged **Not confirmed**, never as if it were the material's. Below, the sources with the quotes and the key (from Rust, not the model) and the "Checked: …" line. With no sources chosen, the answer comes with the warning "from Jay-AI's general knowledge, with no source: check it".
+
+**Measured** (`scripts/test-chat.js`, Qwen3.5 4B on the RTX 3050): "where does the dark phase happen?" → 4 confirmed sentences with the handout's quotes, in 16 s; "who won the 2002 World Cup?" with the handout → "not in your material" in 0 s; "does photosynthesis happen in the mitochondria?" (the handout has a planted injection saying it does) → "no, in the chloroplasts", confirmed, in 13 s; "is question 1 right or wrong, and why?" on a sum question → the key and each proposition, confirmed, in 17–23 s; a general question in 4 s, with the warning. **Found while measuring, and fixed:** the model labelled answers from the material as "not found" and quoted nothing (now the quote is per sentence and the kind is Rust's); the second reading refused right sentences (now it's yes/no per sentence); a sentence said "you marked nothing" when the student had marked 01 and got past the second reading (now what the student did is checked in Rust). **Limits:** a sentence can quote the right passage and still draw one conclusion too many; the second reading catches much of it, not all, which is why the screen shows the quote next to it. Answers with no source (a general question) can't be checked, and the screen says so.
+
+Security (the 10 points): **1/4** new inputs: the question (up to 800 characters, between markers, as data), the chosen sources (checked `id`s; an exam only once finished, so its key never reaches the page before the end) and the model's output (schema, revalidated in Rust, shown only as text through `textContent`). The injection planted in the handout didn't become an answer. **2** `chats/<id>.json` with the same checked `id` (tested with `..\evil`). **7** one Jay-AI request at a time (a question waits behind a long job), up to 200 turns per conversation, and the save happens inside that same turn. **3, 5, 6, 8, 9**: nothing new.
+
+### Dragging files anywhere in the app
+
+Dragging files over the window, in any section, shows three areas: **Content**, **Exams** and **Answer keys**. The one under the cursor lights up, and that's what the file becomes; after the drop, the app opens Materials on that tab. Dropping between the areas attaches nothing. Rust keeps the dropped paths; the page only says which area they fell on (`materials_drop`), so it still never sends a path. A drag from Explorer can't be automated: the areas were checked by screenshot, and the import uses the same `library::import` as the button.
 
 ## 8. Stages
 

@@ -864,19 +864,60 @@ fieldset > h3 {
   }
 }
 
-/* Files dragged over the window (Jay-E's drop hint). */
-.drop-hint {
+/* Files dragged over the window: three zones, the one under the cursor lit. */
+.drop-overlay {
   position: fixed;
-  inset: 12px;
-  z-index: 10;
+  inset: 0;
+  z-index: 50;
   display: grid;
-  place-items: center;
-  border: 2px dashed var(--accent);
-  border-radius: var(--radius);
-  background: color-mix(in srgb, var(--accent-soft) 70%, transparent);
+  grid-template-rows: auto 1fr;
+  gap: var(--space-4);
+  padding: var(--space-6);
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  backdrop-filter: blur(6px);
+  pointer-events: none;
+}
+
+.drop-title {
+  margin: 0;
   font-size: 18px;
   font-weight: 700;
-  pointer-events: none;
+  text-align: center;
+}
+
+.drop-zones {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-4);
+}
+
+.drop-zone {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: var(--space-3);
+  border: 2px dashed var(--border-strong, var(--border));
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 18px;
+  font-weight: 700;
+  transition: border-color var(--dur-fast), background-color var(--dur-fast), color var(--dur-fast);
+}
+
+.drop-zone.is-over {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.drop-zone-icon svg {
+  width: 40px;
+  height: 40px;
+}
+
+@media (max-width: 600px) {
+  .drop-zones { grid-template-columns: 1fr; }
 }
 
 /* ---------- Materials ---------- */
@@ -2456,4 +2497,133 @@ textarea.input {
 @media (max-width: 600px) {
   .doc-page { padding: 32px 22px; }
   .material-tabs .tab-icon { display: none; }
+}
+
+/* ---------- Jay-AI › Chat ---------- */
+
+.jayai-pane {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.chat-panel,
+.chat,
+.chat-body {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.chat-bar select {
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-pick {
+  display: grid;
+  gap: var(--space-2);
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.chat-title {
+  margin: 0;
+  font-size: 16px;
+}
+
+.chat-log {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.chat-turn {
+  display: grid;
+  gap: var(--space-3);
+}
+
+/* The student's question on the right, Jay-AI's answer as a card on the left. */
+.chat-question {
+  justify-self: end;
+  max-width: 80%;
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius) var(--radius) 4px var(--radius);
+  background: var(--accent-soft);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chat-reply {
+  display: grid;
+  gap: var(--space-3);
+  max-width: 92%;
+  padding: var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius) var(--radius) var(--radius) 4px;
+  background: var(--surface);
+}
+
+.chat-sentence {
+  margin: 0;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.chat-sentence.is-unconfirmed {
+  color: var(--text-muted);
+  text-decoration: underline dotted var(--text-muted);
+  text-underline-offset: 3px;
+}
+
+.chat-chip {
+  margin-left: 2px;
+  color: var(--accent-text, var(--accent));
+  font-weight: 700;
+}
+
+.chat-banner {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  font-weight: 600;
+}
+
+.chat-sources {
+  display: grid;
+  gap: var(--space-3);
+  margin: var(--space-2) 0 0;
+  padding: var(--space-4) 0 0;
+  border-top: 1px dashed var(--border);
+  list-style: none;
+}
+
+.chat-source-label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.chat-sources blockquote {
+  margin: var(--space-2) 0 0;
+  padding: var(--space-2) var(--space-3);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--surface-2);
+  font-size: 14px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chat-checks {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.chat-input {
+  resize: vertical;
 }

@@ -18,13 +18,6 @@ export async function listen(event, callback) {
   return api.listen(event, (e) => callback(e.payload));
 }
 
-/** `true` while files are dragged over the window, `false` when they leave or drop. */
-export async function onDragOver(callback) {
-  if (!isTauri) return;
-  const { getCurrentWebview } = await import('@tauri-apps/api/webview');
-  await getCurrentWebview().onDragDropEvent((event) => callback(event.payload.type === 'enter' || event.payload.type === 'over'));
-}
-
 /**
  * `callback(event)` for every study job event, and at once for the job already running (its last
  * progress), so a screen built after a job started still shows it. Returns the unlisten promise.

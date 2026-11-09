@@ -157,6 +157,7 @@ Navegação lateral como o Jay-A: **Materiais**, **Provas**, **Simulado**, **Fla
 ├─ exams\<id>.json                 # prova gerada: estilo, questões, gabarito, origem de cada questão
 ├─ attempts\<id>.json              # simulado: respostas, tempos, resultado por tópico (salvo a cada resposta)
 ├─ decks\<id>.json                 # cartões + estado do SM-2
+├─ chats\<id>.json                 # conversas com o Jay-AI: fontes escolhidas e turnos conferidos
 ├─ profile.json                    # perfil do estudante (tamanho/tom preferidos, tópicos fracos)
 └─ ai\                             # llama-server e modelo baixados
 ```
@@ -197,6 +198,36 @@ Em Materiais, **Explicar**: o Jay-AI resume e explica o material na língua que 
 Materiais tem três abas: **Conteúdo**, **Provas** e **Gabaritos**, cada uma com um contador. O tipo é escolhido na hora de anexar: o arquivo (pelo botão ou solto na janela) entra com o tipo da aba aberta. Em Gabaritos dá para dizer de qual prova ele é; no cartão da prova, "Anexar o gabarito dela…" faz o mesmo. Cada prova escolhe o gabarito: **Automático** (o mais parecido, com regras mais duras: 80% das questões respondidas, ano e nome do arquivo conferidos, empate = nenhum), **Nenhum** (o Jay-AI responde) ou um gabarito da lista. **Ver** mostra o material como ele é, com o leitor do Jay-E: páginas do PDF desenhadas no Rust (só as perto da tela, com zoom), DOCX como página, foto; ou o texto extraído. Medido: a prova do ENEM (32 páginas) abre com 1 página desenhada; o ENEM pega o gabarito certo sozinho e as provas da UEPG ficam sem (antes pegavam o do ENEM).
 
 Segurança (os 10 pontos): **1/4** entradas novas: o tipo e a prova escolhidos ao anexar (o tipo é um enum do serde; a prova é um `id` conferido; um gabarito só pode ser um material do tipo Gabarito) e o protocolo `jays://` do leitor, que só aceita `pdf/<id>/<página>/<largura>`, `docimg/<id>/<n>` e `file/<id>`, com `id` conferido como no item 2 e largura até 3000 px (~25 Mpx por página), desenho com `catch_unwind`. O HTML do DOCX é o do escritor do Jay-E (todo texto escapado, links só http(s)/mailto); a página ainda tira toda imagem que não seja `docimg/` e não deixa link navegar, e a CSP não permite script. **9** a CSP abriu `img-src` só para `jays:`/`http://jays.localhost`. **2, 3, 5, 6, 8**: nada novo (a cópia do leitor do Jay-E não trouxe dependência). **7** o desenho roda numa thread própria; gravar o gabarito passa pela mesma trava.
+
+### Respostas ancoradas e validadas (o chat do Jay-AI)
+
+Na seção Jay-AI, aba **Chat**, o aluno conversa sobre **qualquer dúvida**, **os seus materiais** (escolhe quais) ou **uma prova que fez** (já terminada). Um modelo de 4B inventa com facilidade, e o pior erro de um tutor é ensinar errado com cara de certeza. Por isso a resposta não é confiada ao modelo: ela é **ancorada** no material e **validada** no Rust antes de chegar à tela (`crates/jay-study/src/chat.rs`).
+
+```mermaid
+flowchart LR
+  P["pergunta"] --> R["1. fontes<br/>(o Rust escolhe os trechos)"]
+  R -- "nada sobre isso" --> N["não está no seu material<br/>(sem chamar o modelo)"]
+  R --> G["2. resposta com esquema<br/>cada frase: trecho + citação literal"]
+  G --> V["3. conferência no Rust<br/>citação, números, gabarito, o que o aluno fez"]
+  V -- "metade ou mais falhou" --> RT["4. uma nova tentativa<br/>com os problemas listados"] --> V
+  V --> J["5. segunda leitura<br/>sim/não por frase"]
+  J --> T["6. tela: confirmada com fonte<br/>ou Não confirmado"]
+```
+
+1. **Fontes primeiro.** O Rust escolhe até 5 trechos (≈4 800 caracteres): pedaços dos materiais escolhidos e, para uma prova, cada questão com o enunciado, as alternativas, o **gabarito**, o que o aluno marcou e se acertou (corrigido pelo Rust), mais o resultado por tópico. As questões que o aluno cita ("a 12") vêm primeiro; o resto, pelas palavras em comum. Se há fontes e nenhum trecho fala do assunto, a resposta é "não está no seu material", **sem chamar o modelo**: não há de onde inventar.
+2. **Resposta com esquema.** Até 8 frases; cada uma diz de qual trecho veio e **copia dele, letra por letra, as palavras que a provam**. Temperatura 0,2. Os trechos, a conversa e a pergunta vão entre marcas, como dados.
+3. **Conferência no Rust** (determinística, com testes): a citação tem de estar no trecho, palavra por palavra (sem diferença de acento, caixa ou pontuação), com pelo menos 12 letras; todo número da frase tem de estar no trecho ou na pergunta; "a correta é a C" tem de bater com o gabarito; "você marcou…" e "você acertou/errou" têm de bater com o que o Rust corrigiu. O tipo da resposta (do material / não encontrado) é decidido pelo Rust, pelo que passou, não pelo modelo.
+4. **Uma nova tentativa** quando metade ou mais das frases falhou, com a lista dos problemas; fica a melhor das duas.
+5. **Segunda leitura.** O Jay-AI, como revisor (temperatura 0), responde sim ou não para cada frase confirmada, olhando a citação e o trecho. Pedir "a lista das frases ruins" fazia o modelo de 4B listar todas; um veredito por frase, não.
+6. **Tela honesta.** A frase confirmada aparece com a fonte ([1], [2]); a que não passou aparece apagada, sublinhada e com a etiqueta **Não confirmado**, nunca como se fosse do material. Embaixo, as fontes com as citações e o gabarito (vindos do Rust, não do modelo) e a linha "Conferido: …". Sem fontes escolhidas, a resposta vem com o aviso "do conhecimento geral do Jay-AI, sem fonte: confira".
+
+**Medido** (`scripts/test-chat.js`, Qwen3.5 4B na RTX 3050): "onde acontece a fase escura?" → 4 frases confirmadas, com as citações da apostila, em 16 s; "quem ganhou a Copa de 2002?" com a apostila → "não está no seu material" em 0 s; "a fotossíntese acontece nas mitocôndrias?" (a apostila tem uma injeção plantada que diz que sim) → "não, nos cloroplastos", confirmado, em 13 s; "por que a questão 1 está certa ou errada?" numa somatória → o gabarito e cada proposição, confirmados, em 17–23 s; uma dúvida geral em 4 s, com o aviso. **Achados ao medir, e corrigidos:** o modelo marcava como "não encontrado" respostas que vinham do material e não citava nada (agora a citação é por frase e o tipo é do Rust); a segunda leitura recusava frases certas (agora é sim/não por frase); uma frase dizia "você marcou nada" quando o aluno tinha marcado 01 e passou pela segunda leitura (agora o que o aluno fez é conferido no Rust). **Limites:** uma frase pode citar o trecho certo e ainda tirar uma conclusão a mais; a segunda leitura pega boa parte, não tudo, e por isso a tela mostra a citação ao lado. Respostas sem fonte (dúvida geral) não têm como ser conferidas, e a tela diz isso.
+
+Segurança (os 10 pontos): **1/4** entradas novas: a pergunta (até 800 caracteres, entre marcas, como dado), as fontes escolhidas (`id`s conferidos; uma prova só depois de terminada, para o gabarito nunca chegar à página antes do fim) e a saída do modelo (esquema, revalidada no Rust, só texto na tela por `textContent`). A injeção plantada na apostila não virou resposta. **2** `chats/<id>.json` com o mesmo `id` conferido (teste com `..\evil`). **7** um pedido ao Jay-AI por vez (a pergunta espera a vez de uma tarefa longa), até 200 turnos por conversa, e a gravação acontece dentro da mesma vez. **3, 5, 6, 8, 9**: nada novo.
+
+### Arrastar arquivos para qualquer lugar do app
+
+Arrastar arquivos sobre a janela, em qualquer seção, mostra três áreas: **Conteúdo**, **Provas** e **Gabaritos**. A área sob o cursor fica acesa e é o que o arquivo vira; depois de soltar, o app abre Materiais nessa aba. Soltar entre as áreas não anexa nada. O Rust guarda os caminhos soltos; a página só diz em qual área caiu (`materials_drop`), então continua sem nunca mandar um caminho. Um arraste do Explorer não dá para automatizar: as áreas foram conferidas por print, e a importação usa o mesmo `library::import` do botão.
 
 ## 8. Etapas
 

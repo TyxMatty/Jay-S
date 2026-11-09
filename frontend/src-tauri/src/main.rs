@@ -55,10 +55,10 @@ fn main() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            // A drop on the window: Rust gets the paths, the page only hears about the materials.
+            // A drop on the window: Rust keeps the paths; the page, which sees where it fell, says
+            // what they are (materials_drop) and only hears about the materials.
             if let WindowEvent::DragDrop(DragDropEvent::Drop { paths, .. }) = event {
-                let target = window.app_handle().state::<library::Library>().drop_target.lock().unwrap_or_else(|e| e.into_inner()).clone();
-                library::import(window.app_handle(), paths.clone(), target);
+                *window.app_handle().state::<library::Library>().dropped.lock().unwrap_or_else(|e| e.into_inner()) = paths.clone();
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -67,7 +67,7 @@ fn main() {
             library::materials_set_kind,
             library::materials_text,
             library::materials_delete,
-            library::materials_drop_target,
+            library::materials_drop,
             library::materials_set_key,
             library::materials_key,
             view::materials_view,
@@ -104,6 +104,11 @@ fn main() {
             study::explain_build,
             study::explain_check,
             study::explain_ask,
+            study::chats_list,
+            study::chat_get,
+            study::chat_new,
+            study::chat_delete,
+            study::chat_ask,
             #[cfg(windows)]
             taskbar_icon::set_taskbar_icon
         ])

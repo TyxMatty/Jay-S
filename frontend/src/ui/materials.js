@@ -4,7 +4,8 @@
 import { h } from './dom.js';
 import { icons } from './icons.js';
 import { createTabs } from './tabs.js';
-import { invoke, listen, onDragOver, isTauri } from '../core/bridge.js';
+import { invoke, listen, isTauri } from '../core/bridge.js';
+import { drops } from './drop.js';
 import { t, language } from '../core/i18n.js';
 
 const KINDS = () => [
@@ -166,7 +167,6 @@ function materialCard(m, { onDeleted, onError, onExplain, onView, onChanged, key
 export function createMaterialsPanel() {
   const message = h('p', { class: 'hint', 'data-tone': 'error', role: 'alert', hidden: true });
   const note = h('p', { class: 'hint', role: 'status' });
-  const dropHint = h('div', { class: 'drop-hint', hidden: true, 'aria-hidden': 'true' }, t('Drop to attach'));
   const attach = h('button', { type: 'button', class: 'btn', disabled: !isTauri }, h('span', { class: 'btn-icon', html: icons.attach }), t('Attach files'));
   // In Answer keys: the exam the key being attached belongs to.
   const forExam = h('select', { class: 'input for-exam', 'aria-label': t('For the exam') });
@@ -216,8 +216,8 @@ export function createMaterialsPanel() {
       pane.empty.hidden = pane.list.children.length > 0;
       tabLabels[pane.key].textContent = mine.length ? String(mine.length) : '';
     }
-    forExam.replaceChildren(h('option', { value: '' }, t('Find it by itself')), ...all.filter((m) => m.kind === 'exam' || m.kind === 'both').map((m) => h('option', { value: m.id }, m.name)));
-    tellRust();
+    const chosen = forExam.value;
+    forExam.replaceChildren(h('option', { value: '' }, t('Find it by itself')), ...all.filter((m) => m.kind === 'exam' || m.kind === 'both').map((m) => h('option', { value: m.id, selected: m.id === chosen }, m.name)));
   }
 
   const tabLabels = {};
@@ -234,7 +234,6 @@ export function createMaterialsPanel() {
       attach.lastChild.textContent = tab.attach;
       forExamField.hidden = key !== 'key';
       note.textContent = '';
-      tellRust();
     },
   });
 
@@ -243,9 +242,8 @@ export function createMaterialsPanel() {
     const kind = tabs.current ?? 'content';
     return { kind, exam: kind === 'key' ? forExam.value || null : null };
   }
-  // Files dropped on the window go where the student is looking.
-  const tellRust = () => isTauri && invoke('materials_drop_target', { attach: attachChoice() }).catch(() => {});
-  forExam.addEventListener('change', tellRust);
+  // A key dropped on its zone goes with the exam picked here (in Answer keys).
+  drops.examFor = () => (tabs.current === 'key' ? forExam.value || null : null);
 
   attach.addEventListener('click', () => {
     message.hidden = true;
@@ -286,7 +284,6 @@ export function createMaterialsPanel() {
       else current().list.prepend(error);
     }
   });
-  onDragOver((over) => (dropHint.hidden = !over));
 
   if (isTauri) {
     // After the listener: listing also attaches the files Jay-S was opened with.
@@ -299,7 +296,7 @@ export function createMaterialsPanel() {
       .catch((e) => showError(failureText(e)));
   }
 
-  tabs.select('content');
+  tabs.select(drops.kind ?? 'content');
   const section = h(
     'section',
     { class: 'app-panel is-single materials-panel' },
@@ -308,8 +305,12 @@ export function createMaterialsPanel() {
     message,
     note,
     ...panes.map((p) => p.panel),
-    dropHint,
   );
   const host = h('div', { class: 'lazy-panel' }, section);
+  // Files dropped on a zone: back to the list, on that zone's tab.
+  drops.onDrop = (kind) => {
+    host.replaceChildren(section);
+    tabs.select(kind);
+  };
   return host;
 }

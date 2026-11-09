@@ -3,6 +3,7 @@
 
 pub mod ai;
 pub mod cards;
+pub mod chat;
 pub mod classify;
 pub mod doc;
 pub mod exam;

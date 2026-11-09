@@ -48,7 +48,7 @@ pub fn chunks(text: &str, max_chars: usize) -> Vec<String> {
 }
 
 /// Words that say what a text is about (lowercase, no accents, 5+ letters).
-fn words(text: &str) -> std::collections::HashSet<String> {
+pub(crate) fn words(text: &str) -> std::collections::HashSet<String> {
     crate::classify::fold(text).split(|c: char| !c.is_alphanumeric()).filter(|w| w.chars().count() >= 5).map(str::to_owned).collect()
 }
 

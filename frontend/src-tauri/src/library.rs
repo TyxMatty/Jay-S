@@ -30,13 +30,13 @@ pub struct Library {
     /// One writer at a time: imports run in order, and a change never races a delete
     /// (docs/ARQUITETURA.md, section 7, item 7).
     write: Mutex<()>,
-    /// Where a file dropped on the window goes (the Materials tab open, as the page tells).
-    pub drop_target: Mutex<Attach>,
+    /// Files just dropped on the window, waiting for the page to say which zone they fell on.
+    pub dropped: Mutex<Vec<PathBuf>>,
 }
 
 impl Library {
     pub fn new(store: Store) -> Self {
-        Self { store, write: Mutex::new(()), drop_target: Mutex::new(Attach::default()) }
+        Self { store, write: Mutex::new(()), dropped: Mutex::new(Vec::new()) }
     }
 
     /// Held by every command that changes a file: Tauri runs commands in parallel, and two quick
@@ -154,10 +154,15 @@ pub async fn materials_pick(app: AppHandle, attach: Option<Attach>) {
     import(&app, picked.into_iter().filter_map(|p| p.into_path().ok()).collect(), attach.unwrap_or_default());
 }
 
-/// The Materials tab the page shows: files dropped on the window take its kind.
+/// The files just dropped on the window, attached as the zone they fell on says (the page knows
+/// where the drop was, never which files).
 #[tauri::command]
-pub fn materials_drop_target(library: State<Library>, attach: Attach) {
-    *library.drop_target.lock().unwrap_or_else(|e| e.into_inner()) = attach;
+pub fn materials_drop(app: AppHandle, library: State<Library>, attach: Option<Attach>) {
+    let paths = std::mem::take(&mut *library.dropped.lock().unwrap_or_else(|e| e.into_inner()));
+    // None: the drop fell between the zones, and nothing is attached.
+    if let Some(attach) = attach {
+        import(&app, paths, attach);
+    }
 }
 
 /// Which answer key goes with an exam (automatic, none, or a key material).

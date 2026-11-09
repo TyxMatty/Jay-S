@@ -210,5 +210,12 @@ export function mountApp(root) {
   });
 
   root.replaceChildren(header, h('div', { class: 'app-body' }, tabs.list, h('div', { class: 'app-panels' }, items.map((i) => i.panel))), h('p', { class: 'app-version' }, `Jay-S ${__APP_VERSION__}`));
+  // Files dragged in from anywhere: the zones, then Materials on the zone's tab.
+  import('./drop.js').then(({ mountDropZones, drops }) =>
+    mountDropZones(root, (kind) => {
+      tabs.select('materials');
+      drops.onDrop?.(kind);
+    }),
+  );
   tabs.select('materials');
 }

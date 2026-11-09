@@ -353,10 +353,15 @@ impl Server {
     /// A chat completion. `schema`: the JSON schema the reply must follow (the server turns it into a
     /// grammar, so the model can't answer anything else). `on_token(chars_so_far)` while it writes.
     pub fn chat(&self, messages: &[Value], schema: Option<&Value>, max_tokens: u32, on_token: &mut dyn FnMut(usize), cancel: &AtomicBool) -> Result<String, AiError> {
+        self.chat_at(0.6, messages, schema, max_tokens, on_token, cancel)
+    }
+
+    /// `chat` at a chosen temperature: low where the answer must stick to the sources.
+    pub fn chat_at(&self, temperature: f32, messages: &[Value], schema: Option<&Value>, max_tokens: u32, on_token: &mut dyn FnMut(usize), cancel: &AtomicBool) -> Result<String, AiError> {
         let mut body = json!({
             "messages": messages,
             "max_tokens": max_tokens,
-            "temperature": 0.6,
+            "temperature": temperature,
             "top_p": 0.9,
             "stream": true,
         });

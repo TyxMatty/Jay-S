@@ -3,6 +3,7 @@
 import { h } from './dom.js';
 import { icons } from './icons.js';
 import { cardTitle } from './card-title.js';
+import { createTabs } from './tabs.js';
 import { invoke, listen, isTauri } from '../core/bridge.js';
 import { onAiStatus, aiReady, setAiStatus } from '../core/ai.js';
 import { t, language } from '../core/i18n.js';
@@ -141,10 +142,9 @@ export function createJayAiPanel() {
   });
   onAiStatus(render);
 
-  return h(
-    'section',
-    { class: 'app-panel' },
-    h('h1', {}, t('Jay-AI')),
+  const modelPane = h(
+    'div',
+    { class: 'jayai-pane' },
     h(
       'fieldset',
       {},
@@ -164,4 +164,18 @@ export function createJayAiPanel() {
       testOut,
     ),
   );
+  // Chat first: the model is set up once, the conversation is what the section is for.
+  const chatPane = h('div', { class: 'jayai-pane' });
+  const tabs = createTabs({
+    idPrefix: 'jayai',
+    label: t('Jay-AI'),
+    className: 'material-tabs',
+    items: [
+      { key: 'chat', label: h('span', { class: 'tab-label' }, h('span', { class: 'tab-icon', html: icons.spark }), t('Chat')), panel: chatPane },
+      { key: 'model', label: h('span', { class: 'tab-label' }, h('span', { class: 'tab-icon', html: icons.settings }), t('Model')), panel: modelPane },
+    ],
+    onSelect: (key) => key === 'chat' && !chatPane.firstChild && import('./chat.js').then((m) => chatPane.replaceChildren(m.createChatPanel())),
+  });
+  tabs.select('chat');
+  return h('section', { class: 'app-panel is-single' }, h('h1', {}, t('Jay-AI')), tabs.list, chatPane, modelPane);
 }
