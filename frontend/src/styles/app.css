@@ -2670,6 +2670,35 @@ textarea.input {
   letter-spacing: -0.02em;
 }
 
+.chat-starters {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-2);
+}
+
+.chat-starter {
+  min-height: 32px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background-color var(--dur-fast), color var(--dur-fast);
+}
+
+.chat-starter:hover {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.chat-starter:focus-visible {
+  outline: 3px solid var(--focus-ring);
+}
+
 .chat-scope {
   display: flex;
   flex-wrap: wrap;
@@ -2763,6 +2792,10 @@ textarea.input {
 .chat-reply {
   display: grid;
   gap: var(--space-3);
+}
+
+.chat-go {
+  justify-self: start;
 }
 
 .chat-reply-head {

@@ -22,7 +22,7 @@ const SCOPED: [&str; 10] = [
     "Voltando ao começo: qual foi a definição de intervalo de confiança que você me deu?",
 ];
 
-const GENERAL: [&str; 2] = ["Como anexo um PDF?", "Quanto é (1,96 * 10 / 4)^2?"];
+const GENERAL: [&str; 3] = ["Como anexo um PDF?", "Quanto é (1,96 * 10 / 4)^2?", "Como faço flashcards de uma prova que fiz?"];
 
 /// A conversation a student really had, in a chat with no sources: a nickname for Jay-AI, then a
 /// correction when it was misread.
@@ -38,7 +38,9 @@ fn main() {
     // PROBE_PERSONAL=1: only the third conversation (for repeated runs).
     let only_personal = std::env::var_os("PROBE_PERSONAL").is_some();
     let chats = [(Scope { materials, attempt: None }, &SCOPED[..]), (Scope::default(), &GENERAL[..]), (Scope::default(), &PERSONAL[..])];
-    for (scope, questions) in chats.into_iter().skip(if only_personal { 2 } else { 0 }) {
+    // PROBE_GENERAL=1: only the second one (the questions with no sources).
+    let only_general = std::env::var_os("PROBE_GENERAL").is_some();
+    for (scope, questions) in chats.into_iter().skip(if only_personal { 2 } else if only_general { 1 } else { 0 }).take(if only_general { 1 } else { 3 }) {
         let chat = store.new_chat(scope).expect("chat");
         println!("=== chat: {}", if chat.title.is_empty() { "(no sources)" } else { &chat.title });
         for q in questions {
@@ -46,7 +48,7 @@ fn main() {
             match store.chat_ask(&chat.id, q, &server, &cancel) {
                 Ok(turn) => {
                     let r = &turn.reply;
-                    println!("\n> {q}\n  kind={:?} list={} time={:.1}s retried={} second_reading={} sources={}", r.kind, r.list, t.elapsed().as_secs_f32(), r.checks.retried, r.checks.second_reading, r.sources.iter().map(|s| s.label.as_str()).collect::<Vec<_>>().join(" | "));
+                    println!("\n> {q}\n  kind={:?} go={:?} list={} time={:.1}s retried={} second_reading={} sources={}", r.kind, r.go, r.list, t.elapsed().as_secs_f32(), r.checks.retried, r.checks.second_reading, r.sources.iter().map(|s| s.label.as_str()).collect::<Vec<_>>().join(" | "));
                     for s in &r.sentences {
                         println!("  [{:?} {:?}] {}", s.status, s.sources, s.text);
                     }

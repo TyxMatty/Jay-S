@@ -7,6 +7,9 @@ import { invoke, isTauri } from '../core/bridge.js';
 import { t } from '../core/i18n.js';
 import { studyFailureText } from './study-text.js';
 
+/** Fixed questions offered on an empty new conversation (English keys of `t()`). */
+export const STARTERS = ['What can you do?', 'How do I make a mock test?', 'How do I attach a PDF?'];
+
 /** The answer as one paragraph, or a list when asked; each run of unconfirmed sentences starts with its label (never color alone). */
 function answerEl(sentences, showSource, list) {
   // Not `chat-list`: that is the conversations sidebar.
@@ -34,24 +37,41 @@ function answerEl(sentences, showSource, list) {
   return p;
 }
 
-function replyEl(r) {
+/** The badge and the banner of a reply, from what Rust decided. `app` speaks of the guide, never of "your sources". */
+export function replyNotes(r) {
   const confirmed = r.sentences.some((s) => s.status === 'confirmed');
-  // From the sources or from the app's guide: both are checked against quotes.
-  const grounded = r.kind === 'material' || r.kind === 'app';
   const badge = {
     material: confirmed ? ['ok', t('From your sources')] : ['check', t('Not confirmed')],
     general: ['check', t('General knowledge, no source')],
     unknown: [null, t('Not in your sources')],
-    app: ['ok', t('From the Jay-S guide')],
+    app: confirmed ? ['ok', t('From the Jay-S guide')] : ['check', t('Not confirmed')],
     calc: ['check', t('Computed by the app')],
   }[r.kind];
-  const head = h('div', { class: 'chat-reply-head' }, h('span', { class: 'chat-avatar', html: icons.spark, 'aria-hidden': 'true' }), h('strong', {}, 'Jay-AI'), badge ? h('span', { class: 'badge', 'data-status': badge[0] }, badge[1]) : null);
-  const parts = [head];
   // Unknown with plain sentences and no source: Jay-AI answered from what it knows, not the material.
   const outside = r.sentences.length > 0 && !r.sources.length && r.sentences.every((s) => s.status !== 'unconfirmed' && !s.sources.length);
-  if (r.kind === 'unknown') parts.push(h('p', { class: 'chat-banner' }, outside ? t("Nothing in your sources is about this. This is Jay-AI's general knowledge, with no source: check it.") : r.sources.length ? t("Your sources don't answer this. The closest they get:") : t("Nothing in the sources you chose is about this.")));
+  let banner = null;
+  if (r.kind === 'unknown') banner = outside ? t("Nothing in your sources is about this. This is Jay-AI's general knowledge, with no source: check it.") : r.sources.length ? t("Your sources don't answer this. The closest they get:") : t("Nothing in the sources you chose is about this.");
+  if (r.kind === 'app' && !confirmed) banner = t("Jay-S's guide doesn't explain this. The closest it gets:");
+  return { confirmed, badge, banner };
+}
+
+// The sections a guide answer may take the student to: the page accepts only its own keys, whatever Rust (or a stored chat file) says.
+const GO_LABELS = { materials: 'Materials', exams: 'Exams', mock: 'Mock test', flashcards: 'Flashcards', settings: 'Settings' };
+
+/** The section key of an app reply's "open" button, or null (also for anything that isn't one of ours). */
+export function goTarget(r) {
+  return r.kind === 'app' && typeof r.go === 'string' && Object.hasOwn(GO_LABELS, r.go) ? r.go : null;
+}
+
+function replyEl(r) {
+  const { confirmed, badge, banner } = replyNotes(r);
+  // From the sources or from the app's guide: both are checked against quotes.
+  const grounded = r.kind === 'material' || r.kind === 'app';
+  const head = h('div', { class: 'chat-reply-head' }, h('span', { class: 'chat-avatar', html: icons.spark, 'aria-hidden': 'true' }), h('strong', {}, 'Jay-AI'), badge ? h('span', { class: 'badge', 'data-status': badge[0] }, badge[1]) : null);
+  const parts = [head];
+  if (banner) parts.push(h('p', { class: 'chat-banner' }, banner));
   if (r.kind === 'calc') parts.push(h('p', { class: 'chat-banner' }, t('The numbers were computed by Jay-S; the formula was chosen by Jay-AI: check it against your material.')));
-  if (grounded && !confirmed) parts.push(h('p', { class: 'chat-banner', 'data-tone': 'warning' }, t("Jay-AI couldn't back this answer with your sources. Read them below.")));
+  if (r.kind === 'material' && !confirmed) parts.push(h('p', { class: 'chat-banner', 'data-tone': 'warning' }, t("Jay-AI couldn't back this answer with your sources. Read them below.")));
   let sources = null;
   // A source chip opens the sources and takes the reader to its quote.
   const showSource = (n) => {
@@ -60,6 +80,8 @@ function replyEl(r) {
     sources.querySelector(`[data-n="${n}"]`)?.focus();
   };
   if (r.sentences.length) parts.push(answerEl(r.sentences, showSource, r.list === true));
+  const go = goTarget(r);
+  if (go) parts.push(h('button', { type: 'button', class: 'btn btn-secondary chat-go', onClick: () => window.dispatchEvent(new CustomEvent('jay-s:go', { detail: go })) }, t('Open {section}', { section: t(GO_LABELS[go]) })));
   if (r.sources.length) {
     const done = [t('quotes found in the text'), t('numbers and keys checked')];
     if (r.checks.second_reading) done.push(t('second reading'));
@@ -175,7 +197,7 @@ export function createChatPanel() {
     const note = h('p', { class: 'hint' });
     const notes = {
       general: t("Jay-AI answers from what it knows and says so: no source to check it against."),
-      materials: t('Jay-AI answers only from these materials, quoting them; what it can\'t back is marked.'),
+      materials: t("Jay-AI answers from these materials and quotes them; what they don't cover it answers from what it knows, and says so."),
       attempt: t('Ask about any question ("why is 12 wrong?"): Jay-AI sees the official key, your marks and your result.'),
     };
     const kind = () => about.querySelector('input:checked').value;
@@ -209,7 +231,20 @@ export function createChatPanel() {
       box.send.disabled = false;
     });
     box.send.disabled = !isTauri;
-    body.replaceChildren(h('div', { class: 'chat-hero' }, h('h2', { class: 'chat-greeting' }, t('Where do we start?')), box.el, about, materialsField, attemptField, note));
+    // Same as typing the text with "Any question" selected and pressing Enter; the send button
+    // is disabled while a send is on its way, so a click then does nothing.
+    const starters = h('div', { class: 'chat-starters' }, STARTERS.map((text) => h('button', {
+      type: 'button',
+      class: 'chat-starter',
+      onClick: () => {
+        const general = about.querySelector('input[value="general"]');
+        general.checked = true;
+        general.dispatchEvent(new Event('change', { bubbles: true }));
+        box.input.value = t(text);
+        box.send.click();
+      },
+    }, t(text))));
+    body.replaceChildren(h('div', { class: 'chat-hero' }, h('h2', { class: 'chat-greeting' }, t('Where do we start?')), box.el, starters, about,materialsField, attemptField, note));
     // A long conversation leaves the panel scrolled: the new one starts at its top.
     body.closest('.app-panels')?.scrollTo({ top: 0 });
     box.input.focus({ preventScroll: true });
