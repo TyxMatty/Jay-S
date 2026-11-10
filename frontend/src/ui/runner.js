@@ -29,6 +29,8 @@ export function createRunner(started, onFinished, onLeave) {
   let current = Math.max(0, answers.findIndex((a) => a == null));
   let shownAt = performance.now();
   let finished = false;
+  // Learning mode: what is marked on the open question and not checked yet.
+  let pending = null;
 
   const status = h('p', { class: 'hint', role: 'status' });
   const timer = h('span', { class: 'runner-timer', hidden: !attempt.time_limit });
@@ -38,7 +40,10 @@ export function createRunner(started, onFinished, onLeave) {
   const next = h('button', { type: 'button', class: 'btn btn-secondary', onClick: () => go(current + 1) }, t('Next'));
   const finish = h('button', { type: 'button', class: 'btn', onClick: () => end(false) }, t('Finish'));
   // Answers are saved as they are given, so leaving loses nothing: the attempt waits in "In progress".
-  const leave = h('button', { type: 'button', class: 'btn btn-secondary runner-leave', title: t('Your answers are kept: continue later from Exams.'), onClick: () => onLeave?.() }, t('Leave'));
+  const leave = h('button', { type: 'button', class: 'btn btn-secondary runner-leave', title: t('Your answers are kept: continue later from Exams.'), onClick: async () => {
+    await keepPending();
+    onLeave?.();
+  } }, t('Leave'));
 
   function elapsed() {
     const ms = performance.now() - shownAt;
@@ -56,7 +61,14 @@ export function createRunner(started, onFinished, onLeave) {
     );
   }
 
+  /** Learning mode: a marked answer counts when the student moves on, without pressing Check. */
+  async function keepPending() {
+    if (learn && pending != null && graded[current] == null) await save(current, pending);
+    pending = null;
+  }
+
   async function save(i, marked) {
+    pending = null;
     try {
       const g = await invoke('attempt_answer', { id: attempt.id, index: i, marked, ms: elapsed() });
       answers[i] = marked;
@@ -106,6 +118,7 @@ export function createRunner(started, onFinished, onLeave) {
       );
       options.addEventListener('change', (e) => {
         if (learn) {
+          pending = e.target.value;
           confirm.disabled = false;
         } else {
           save(current, e.target.value);
@@ -134,6 +147,7 @@ export function createRunner(started, onFinished, onLeave) {
           input.addEventListener('change', () => {
             input.checked ? chosen.add(v) : chosen.delete(v);
             showSum();
+            if (learn) pending = chosen.size ? String(sumOf(chosen)).padStart(2, '0') : null;
             if (!learn) save(current, chosen.size ? String(sumOf(chosen)).padStart(2, '0') : null);
           });
           const mark = g && ((right & v) && (Number(g.marked) & v) ? 'right' : right & v ? 'missed' : Number(g.marked) & v ? 'wrong' : null);
@@ -156,8 +170,9 @@ export function createRunner(started, onFinished, onLeave) {
     renderNav();
   }
 
-  function go(i) {
+  async function go(i) {
     if (i < 0 || i >= questions.length) return;
+    await keepPending();
     // Time on a question counts when it's answered; moving away without answering drops it.
     elapsed();
     current = i;
@@ -167,6 +182,7 @@ export function createRunner(started, onFinished, onLeave) {
 
   async function end(timeUp) {
     if (finished) return;
+    await keepPending();
     const open = answers.filter((a) => a == null).length;
     if (!timeUp && open && !confirm(t('{n} questions are still blank. Finish anyway?', { n: open }))) return;
     finished = true;
