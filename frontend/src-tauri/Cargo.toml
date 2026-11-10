@@ -1,6 +1,6 @@
 [package]
 name = "jay-s"
-version = "0.1.0"
+version = "0.1.1"
 description = "Jay-S — study app of the Jay line"
 authors = ["TyxMatty"]
 license = "MIT"

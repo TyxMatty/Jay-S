@@ -1,6 +1,6 @@
 [package]
 name = "jay-study"
-version = "0.1.0"
+version = "0.1.1"
 description = "Jay-S's engine: reading materials, telling content from exams, storing a student's data, without Tauri"
 authors = ["TyxMatty"]
 license = "MIT"
