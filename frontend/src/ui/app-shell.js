@@ -204,6 +204,11 @@ export function mountApp(root) {
     createThemeToggle(),
   );
 
+  // The chat's "Open …" button: only a section we have.
+  window.addEventListener('jay-s:go', (e) => {
+    if (items.some((i) => i.key === e.detail)) tabs.select(e.detail, { focus: true });
+  });
+
   // A new language applies on a fresh page.
   settings.subscribe((next, prev) => {
     if (next.language !== prev.language) location.reload();

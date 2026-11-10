@@ -2765,6 +2765,10 @@ textarea.input {
   gap: var(--space-3);
 }
 
+.chat-go {
+  justify-self: start;
+}
+
 .chat-reply-head {
   display: flex;
   flex-wrap: wrap;

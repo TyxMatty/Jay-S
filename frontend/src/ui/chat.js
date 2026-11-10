@@ -52,6 +52,14 @@ export function replyNotes(r) {
   return { confirmed, badge, banner };
 }
 
+// The sections a guide answer may take the student to: the page accepts only its own keys, whatever Rust (or a stored chat file) says.
+const GO_LABELS = { materials: 'Materials', exams: 'Exams', mock: 'Mock test', flashcards: 'Flashcards', settings: 'Settings' };
+
+/** The section key of an app reply's "open" button, or null (also for anything that isn't one of ours). */
+export function goTarget(r) {
+  return r.kind === 'app' && typeof r.go === 'string' && Object.hasOwn(GO_LABELS, r.go) ? r.go : null;
+}
+
 function replyEl(r) {
   const { confirmed, badge, banner } = replyNotes(r);
   // From the sources or from the app's guide: both are checked against quotes.
@@ -69,6 +77,8 @@ function replyEl(r) {
     sources.querySelector(`[data-n="${n}"]`)?.focus();
   };
   if (r.sentences.length) parts.push(answerEl(r.sentences, showSource, r.list === true));
+  const go = goTarget(r);
+  if (go) parts.push(h('button', { type: 'button', class: 'btn btn-secondary chat-go', onClick: () => window.dispatchEvent(new CustomEvent('jay-s:go', { detail: go })) }, t('Open {section}', { section: t(GO_LABELS[go]) })));
   if (r.sources.length) {
     const done = [t('quotes found in the text'), t('numbers and keys checked')];
     if (r.checks.second_reading) done.push(t('second reading'));
