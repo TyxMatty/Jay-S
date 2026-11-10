@@ -526,6 +526,20 @@ Cada etapa termina com algo testável; ao fim de cada uma, commit, resumo e a pe
 - **Testes:** os 89 do motor passam (1 ignorado); os dois novos estão na seção 7. `npm test`: 18.
 - **O que isso não prova:** das 385 questões separadas, 5 foram conferidas. O teste automático não roda o OCR. O simulado de uma dessas provas não foi aberto no app. A qualidade do OCR em números e fórmulas não foi medida, só vista (linhas perdidas).
 
+**Etapa 8, revisão da parte (c) (2026-11-10): o que limita a comparação:**
+- **Por que rever:** depois do OCR e das letras, a árvore passou das regras em 9 das 11 divisões. O `ml/review.py` (saída em `ml/review.txt`) olha arquivo por arquivo, nas mesmas 11 divisões, com os mesmos sinais, modelos e dobras do `ml/train.py`. Roda como ele (`python -I`, só lê o `ml/signals.csv`, não grava nada, 4 s, a mesma saída a cada rodada).
+- **De onde vem a vantagem da árvore:** em 31 arquivos o rótulo certo não dá nada para o app rodar: 25 do Wikilivros e 1 do REAMAT com exercícios abertos, 4 gabaritos em imagem e a prova do ENEM escaneada. As regras acertam 1 deles. Nos outros 339 arquivos: regras 329; árvore de 323 a 332, acima das regras em 3 divisões e abaixo em 8; logística de 319 a 326, abaixo nas 11.
+- **O que se repete de uma divisão para outra:** a árvore acerta em 9 divisões ou mais 12 arquivos que as regras erram. Quatro são os gabaritos em imagem, achados pelo tamanho; os outros 8 são 5 conteúdos que as regras chamam de `both`, 2 `both` e 1 prova de somatória. Ela erra em 9 ou mais 6 que as regras acertam (5 conteúdos e a prova escaneada). Outros 11 arquivos mudam de resposta conforme a divisão, e as regras acertam 9 deles. A logística: 9 e 6, e 10 que mudam.
+- **`both` segue sem solução:** regras 9 de 29; árvore 11 a 12; logística 11 a 13. Com estes 7 sinais ninguém separa bem a apostila com exercícios do conteúdo e da prova.
+- **As limitações, juntas:**
+  1. A comparação favorece as regras num ponto: os limiares delas (os 20 cabeçalhos, os layouts de gabarito) foram escolhidos olhando os 370 arquivos, e os modelos são medidos em arquivos que não viram.
+  2. E favorece os modelos em outro: os 31 arquivos acima, onde acertar é achado de tamanho e não muda o que o app faz.
+  3. Os rótulos vêm de uma leitura só, e `both` depende de um critério (três questões ou mais).
+  4. O conjunto tem poucas fontes onde mais importa: 24 dos 29 `both` vêm de duas (16 capítulos do Wikilivros e 8 livros do ENCCEJA); as provas curtas são duas edições do ENCCEJA; não há prova curta de alternativas feita por professor.
+  5. A árvore muda muito com pouco: de 328 a 337 conforme a divisão, e, quando 19 linhas do `ml/signals.csv` mudaram (o OCR e as letras), a faixa dela foi de 293–321 para 328–337.
+  6. Um modelo no app não dispensa as regras: o parser de gabarito e a regra dos cabeçalhos continuariam decidindo. E falta a ele o "sem certeza" que mostra o aviso "Confira": teria de sair de uma probabilidade, que não foi medida.
+- **Leitura:** nos arquivos em que a resposta muda o que o app faz, nenhum modelo passa das regras de forma repetida. A proposta é manter a parte (c) fechada com as regras. O que melhoraria a classificação é o `both`, com mais sinais ou mais exemplos de fontes diferentes, não outro modelo.
+
 ## 9. Riscos e spikes
 
 | # | Risco | Como reduzir |

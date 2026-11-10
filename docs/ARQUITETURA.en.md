@@ -527,6 +527,20 @@ Each stage ends with something testable; at the end of each one: commit, summary
 - **Tests:** the 89 engine tests pass (1 ignored); the two new ones are in section 7. `npm test`: 18.
 - **What this does not prove:** of the 385 questions split, 5 were checked. The automatic test does not run the OCR. A mock exam from one of these exams was not opened in the app. The OCR quality on numbers and formulas was not measured, only seen (lost lines).
 
+**Stage 8, review of part (c) (2026-11-10): what limits the comparison:**
+- **Why review:** after the OCR and the letters, the tree passed the rules in 9 of the 11 splits. `ml/review.py` (output in `ml/review.txt`) looks file by file, over the same 11 splits, with the same signals, models and folds as `ml/train.py`. It runs like it (`python -I`, only reads `ml/signals.csv`, saves nothing, 4 s, the same output every run).
+- **Where the tree's lead comes from:** in 31 files the right label gives the app nothing to run: 25 from Wikibooks and 1 from REAMAT with open exercises, 4 answer keys that are images and the scanned ENEM exam. The rules get 1 of them right. On the other 339 files: rules 329; tree 323 to 332, above the rules in 3 splits and below in 8; logistic 319 to 326, below in all 11.
+- **What repeats from split to split:** the tree gets right, in 9 splits or more, 12 files the rules get wrong. Four are the image keys, found by size; the other 8 are 5 contents the rules call `both`, 2 `both` and 1 sum-type exam. It gets wrong, in 9 or more, 6 the rules get right (5 contents and the scanned exam). Another 11 files change answer with the split, and the rules get 9 of them right. The logistic: 9 and 6, and 10 that change.
+- **`both` is still unsolved:** rules 9 of 29; tree 11 to 12; logistic 11 to 13. With these 7 signals nobody tells a handout with exercises from content and from an exam well.
+- **The limits, together:**
+  1. The comparison favours the rules on one point: their thresholds (the 20 headers, the key layouts) were chosen looking at the 370 files, and the models are measured on files they have not seen.
+  2. And it favours the models on another: the 31 files above, where being right is a matter of size and does not change what the app does.
+  3. The labels come from a single reading, and `both` depends on a criterion (three questions or more).
+  4. The set has few sources where it matters most: 24 of the 29 `both` come from two (16 Wikibooks chapters and 8 ENCCEJA books); the short exams are two ENCCEJA editions; there is no short multiple-choice test made by a teacher.
+  5. The tree changes a lot with little: 328 to 337 depending on the split, and, when 19 lines of `ml/signals.csv` changed (the OCR and the letters), its range went from 293–321 to 328–337.
+  6. A model in the app does not dispense with the rules: the key parser and the headers rule would keep deciding. And it lacks the "unsure" that shows the "Check this" badge: that would have to come from a probability, which was not measured.
+- **Reading:** on the files where the answer changes what the app does, no model passes the rules repeatedly. The proposal is to keep part (c) closed with the rules. What would improve the classification is `both`, with more signals or more examples from different sources, not another model.
+
 ## 9. Risks and spikes
 
 | # | Risk | How to reduce it |

@@ -1,0 +1,23 @@
+370 files, 11 splits by edition (seeds [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 8])
+nothing for the app to run in 31 files: encceja-2018 key x4, enem-2024 exam x1, reamat both x1, wikibooks both x16, wikibooks exam x9
+rules: 330 right; on the other 339 files, 329
+
+logistic + key parser
+  all files: 325 to 332 right (rules 330); above the rules in 1 splits, level in 5, below in 5
+  the 339 files with something to run: 319 to 326 right (rules 329); above the rules in 0 splits, level in 0, below in 11
+  right in 9+ splits where the rules are wrong: 9 files, 3 with something to run
+    apostila both x1, encceja-2018 key (nothing to run) x4, encceja-livro both x1, uem-2020 exam_sum x1, wikibooks both (nothing to run) x1, wikibooks exam (nothing to run) x1
+  wrong in 9+ splits where the rules are right: 6 files, 5 with something to run
+    banco exam x1, enem-2024 exam (nothing to run) x1, uenp-2025 exam x1, wikibooks content x3
+  answer changes with the split (right in 3 to 8): 10 files, 8 of them right by the rules
+  both: 11 to 13 of 29 right (rules 9)
+
+tree + key parser
+  all files: 328 to 337 right (rules 330); above the rules in 9 splits, level in 1, below in 1
+  the 339 files with something to run: 323 to 332 right (rules 329); above the rules in 3 splits, level in 0, below in 8
+  right in 9+ splits where the rules are wrong: 12 files, 8 with something to run
+    apostila both x1, apostila content x1, encceja-2018 key (nothing to run) x4, encceja-livro both x1, encceja-livro content x1, uem-2020 exam_sum x1, uepg-2026 content x1, unesp-2014 content x1, wikibooks content x1
+  wrong in 9+ splits where the rules are right: 6 files, 5 with something to run
+    enem-2024 exam (nothing to run) x1, uepg-2020 content x1, wikibooks content x3, wikipedia content x1
+  answer changes with the split (right in 3 to 8): 11 files, 9 of them right by the rules
+  both: 11 to 12 of 29 right (rules 9)
