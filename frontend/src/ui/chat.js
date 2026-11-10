@@ -29,17 +29,20 @@ function answerEl(sentences, showSource) {
 
 function replyEl(r) {
   const confirmed = r.sentences.some((s) => s.status === 'confirmed');
+  // From the sources or from the app's guide: both are checked against quotes.
+  const grounded = r.kind === 'material' || r.kind === 'app';
   const badge = {
     material: confirmed ? ['ok', t('From your sources')] : ['check', t('Not confirmed')],
     general: ['check', t('General knowledge, no source')],
     unknown: [null, t('Not in your sources')],
+    app: ['ok', t('From the Jay-S guide')],
   }[r.kind];
   const head = h('div', { class: 'chat-reply-head' }, h('span', { class: 'chat-avatar', html: icons.spark, 'aria-hidden': 'true' }), h('strong', {}, 'Jay-AI'), badge ? h('span', { class: 'badge', 'data-status': badge[0] }, badge[1]) : null);
   const parts = [head];
   // Unknown with plain sentences and no source: Jay-AI answered from what it knows, not the material.
   const outside = r.sentences.length > 0 && !r.sources.length && r.sentences.every((s) => s.status !== 'unconfirmed' && !s.sources.length);
   if (r.kind === 'unknown') parts.push(h('p', { class: 'chat-banner' }, outside ? t("Nothing in your sources is about this. This is Jay-AI's general knowledge, with no source: check it.") : r.sources.length ? t("Your sources don't answer this. The closest they get:") : t("Nothing in the sources you chose is about this.")));
-  if (r.kind === 'material' && !confirmed) parts.push(h('p', { class: 'chat-banner', 'data-tone': 'warning' }, t("Jay-AI couldn't back this answer with your sources. Read them below.")));
+  if (grounded && !confirmed) parts.push(h('p', { class: 'chat-banner', 'data-tone': 'warning' }, t("Jay-AI couldn't back this answer with your sources. Read them below.")));
   let sources = null;
   // A source chip opens the sources and takes the reader to its quote.
   const showSource = (n) => {
@@ -54,7 +57,7 @@ function replyEl(r) {
     sources = h(
       'details',
       // Open when the reader has to judge for themselves; one click away when all is confirmed.
-      { class: 'chat-sources', open: r.kind !== 'material' || r.sentences.some((s) => s.status === 'unconfirmed') },
+      { class: 'chat-sources', open: !grounded || r.sentences.some((s) => s.status === 'unconfirmed') },
       h('summary', {}, t('Sources ({n})', { n: r.sources.length })),
       h(
         'ol',
@@ -68,7 +71,7 @@ function replyEl(r) {
           ),
         ),
       ),
-      r.kind === 'material' ? h('p', { class: 'hint chat-checks' }, h('span', { class: 'btn-icon', html: icons.check, 'aria-hidden': 'true' }), t('Checked: {what}.', { what: done.join(' · ') }), r.checks.retried ? ` ${t('(answered again after a failed check)')}` : '') : null,
+      grounded ? h('p', { class: 'hint chat-checks' }, h('span', { class: 'btn-icon', html: icons.check, 'aria-hidden': 'true' }), t('Checked: {what}.', { what: done.join(' · ') }), r.checks.retried ? ` ${t('(answered again after a failed check)')}` : '') : null,
     );
     parts.push(sources);
   }

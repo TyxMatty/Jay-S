@@ -1,2 +1,4 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+# The chat cuts the app guide into passages at blank lines: keep it LF on every checkout.
+crates/jay-study/src/manual.*.md text eol=lf

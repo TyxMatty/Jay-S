@@ -356,6 +356,7 @@ export default {
   "From your sources": "Das suas fontes",
   "General knowledge, no source": "Conhecimento geral, sem fonte",
   "Not in your sources": "Não está nas suas fontes",
+  "From the Jay-S guide": "Do guia do Jay-S",
   "Sources ({n})": "Fontes ({n})",
   "Enter sends · Shift+Enter makes a new line": "Enter envia · Shift+Enter quebra a linha",
 };
