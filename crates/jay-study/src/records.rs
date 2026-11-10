@@ -399,13 +399,13 @@ impl Store {
     }
 
     pub fn attempts(&self) -> Vec<Attempt> {
-        let mut list: Vec<Attempt> = self.all_json("attempts");
+        let mut list: Vec<Attempt> = self.all_json::<Attempt>("attempts").into_iter().map(without_false_praise).collect();
         list.sort_by(|a, b| b.started.cmp(&a.started));
         list
     }
 
     pub fn attempt(&self, attempt: &str) -> Result<Attempt, StoreError> {
-        self.load_json("attempts", attempt)
+        self.load_json("attempts", attempt).map(without_false_praise)
     }
 
     pub fn save_attempt(&self, attempt: &Attempt) -> Result<(), StoreError> {
@@ -632,6 +632,17 @@ pub enum AnswerError {
     /// Learning mode: the question was already graded.
     Locked,
     Invalid,
+}
+
+/// An analysis saved before `no_hits` existed is read with it applied: the file stays as it was.
+fn without_false_praise(mut a: Attempt) -> Attempt {
+    if let (Some(result), Some(analysis)) = (&a.result, &mut a.analysis)
+        && !result.questions.iter().any(|g| g.points >= 1.0)
+        && analysis["strengths"].as_array().is_some_and(|s| !s.is_empty())
+    {
+        no_hits(analysis, result.questions.iter().filter(|g| g.marked.is_none()).count(), result.questions.len());
+    }
+    a
 }
 
 /// With no question right, the model still praises ("você acertou todas as questões": seen on an
