@@ -51,6 +51,8 @@ const PLAN: &str = "Em 'plano', antes de responder, anote em poucas palavras o q
 const MAX_PROBLEMS: usize = 1500;
 
 const MAX_QUESTION: usize = 800;
+/// Most sentences of an app answer (the prompt asks for it, `Checked::keep_answer` enforces it).
+const MAX_APP_SENTENCES: usize = 4;
 const MAX_PASSAGES: usize = 5;
 const PASSAGE_CHARS: usize = 1100;
 const BUDGET_CHARS: usize = 4800;
@@ -400,13 +402,45 @@ fn talk_roles(sentences: Vec<Sentence>, question: &str, facts: &Facts) -> Vec<Se
     let mut sentences = if kept.is_empty() { sentences } else { kept };
     if let Some(nick) = jay_nickname(facts) {
         let n = norm(nick);
-        let given = ["seu nome e", "voce se chama", "te chamar de", "te chamo de", "chamar voce de"];
+        // "chamo você de" seen with the real model: "Pode sim, chamo você de Matty!".
+        let given = ["seu nome e", "voce se chama", "te chamar de", "te chamo de", "chamar voce de", "chamo voce de"];
         sentences.retain(|s| !given.iter().any(|g| has(&s.text, &format!("{g} {n}"))));
         if sentences.is_empty() {
-            sentences.push(Sentence { text: format!("Meu nome é Jay-AI, e você também pode me chamar de {nick}."), sources: vec![], status: Status::Plain });
+            sentences.push(own_name(nick));
         }
     }
     sentences
+}
+
+/// Whether `text` has `word` as whole words (accents and case aside).
+fn says(text: &str, word: &str) -> bool {
+    format!(" {} ", norm(text)).contains(&format!(" {} ", norm(word)))
+}
+
+fn own_name(nick: &str) -> Sentence {
+    Sentence { text: format!("Meu nome é Jay-AI, e você também pode me chamar de {nick}."), sources: vec![], status: Status::Plain }
+}
+
+/// Whether the student asks what Jay-AI is called ("como é seu apelido?", "qual o seu nome?"), and
+/// is not just telling the nickname.
+fn asks_own_name(question: &str, nick: &str) -> bool {
+    let n = norm(question);
+    let words: Vec<&str> = n.split(' ').collect();
+    let has = |list: &[&str]| words.iter().any(|w| list.contains(w));
+    let you = has(&["voce", "vc", "seu", "sua", "teu", "tua", "tu", "you", "your"]);
+    (has(&["apelido", "nickname"]) || (you && has(&["nome", "chamar", "name"]))) && !says(question, nick)
+}
+
+/// When the student asks for Jay-AI's name or nickname and one is stored, the reply leads with it:
+/// leading sentences that share no word with the question and name neither the nickname nor
+/// Jay-AI go, while a later sentence names the nickname; with none naming it, one fixed sentence.
+fn lead_with_nickname(sentences: Vec<Sentence>, question: &str, facts: &Facts) -> Vec<Sentence> {
+    let Some(nick) = jay_nickname(facts).filter(|n| asks_own_name(question, n)) else { return sentences };
+    let wanted = terms(question);
+    let names_it = |s: &Sentence| says(&s.text, nick);
+    let Some(last) = sentences.iter().rposition(names_it) else { return vec![own_name(nick)] };
+    let lead = sentences.iter().take(last).take_while(|s| !names_it(s) && !says(&s.text, "jay ai") && terms(&s.text).is_disjoint(&wanted)).count();
+    sentences.into_iter().skip(lead).collect()
 }
 
 fn strip_vocative(text: &str, nick: &str) -> String {
@@ -743,24 +777,42 @@ impl Checked {
         if self.confirmed() == 0 {
             return;
         }
-        let keep: Vec<bool> = self.sentences.iter().map(|s| !(s.status == Status::Plain && about_sources(&s.text))).collect();
+        self.keep_only(self.sentences.iter().map(|s| !(s.status == Status::Plain && about_sources(&s.text))).collect());
+    }
+
+    /// Keeps the sentences marked `true`; `evidence` stays parallel to `sentences`.
+    fn keep_only(&mut self, keep: Vec<bool>) {
         let mut k = keep.iter();
         self.sentences.retain(|_| *k.next().unwrap());
         let mut k = keep.iter();
         self.evidence.retain(|_| *k.next().unwrap());
     }
 
-    /// For an app reply: the student never sees "trechos" (to them the passages are the guide), so a
-    /// sentence that says the word goes, unless it is all that is left. `evidence` stays parallel.
+    /// The student never sees "trechos" (to them the passages are the guide, or the material), so a
+    /// sentence that says the word goes, unless it is all that is left.
     fn drop_trecho(&mut self) {
         let keep: Vec<bool> = self.sentences.iter().map(|s| !norm(&s.text).split(' ').any(|w| w == "trecho" || w == "trechos")).collect();
-        if !keep.contains(&true) {
+        if keep.contains(&true) {
+            self.keep_only(keep);
+        }
+    }
+
+    /// For an app reply with a confirmed sentence: only the first `max` confirmed ones stay (the
+    /// unconfirmed ones were the model going past the guide), and each passage keeps only the quotes
+    /// of the sentences that stay, so a dropped sentence's source goes with it.
+    fn keep_answer(&mut self, max: usize) {
+        if self.confirmed() == 0 {
             return;
         }
-        let mut k = keep.iter();
-        self.sentences.retain(|_| *k.next().unwrap());
-        let mut k = keep.iter();
-        self.evidence.retain(|_| *k.next().unwrap());
+        let mut seen = 0;
+        let confirmed = |s: &Sentence| s.status == Status::Confirmed;
+        self.keep_only(self.sentences.iter().map(|s| confirmed(s) && { seen += 1; seen <= max }).collect());
+        self.quotes.iter_mut().for_each(Vec::clear);
+        for (s, e) in self.sentences.iter().zip(&self.evidence) {
+            if let Some(&n) = s.sources.first() {
+                self.quotes[n - 1].push(e.clone());
+            }
+        }
     }
 
     fn confirmed(&self) -> usize {
@@ -1251,7 +1303,7 @@ impl Store {
             s.text = without_vocative(&s.text, &c.facts);
         }
         if !sentences.is_empty() {
-            sentences = talk_roles(sentences, question, &c.facts);
+            sentences = lead_with_nickname(talk_roles(sentences, question, &c.facts), question, &c.facts);
         }
         if sentences.is_empty() {
             return Err(AiError::BadReply("talk with invented numbers".into()).into());
@@ -1315,7 +1367,7 @@ impl Store {
         } else if general {
             "O aluno não escolheu material: responda com o que você sabe, em até 4 frases curtas, só sobre a pergunta. Onde não souber com certeza, diga isso no lugar do dado.".to_owned()
         } else if app {
-            format!("Os trechos são o guia do Jay-S, o aplicativo de estudos. Responda como fazer isso no aplicativo, SÓ com o que os trechos dizem, em até 6 frases curtas, com os nomes de botões e seções como estão escritos neles. Fale direto, sem citar os trechos no texto ('o trecho diz', 'trecho 3'): para o aluno eles são 'o guia do Jay-S', e a palavra 'trecho' nunca aparece na resposta. Se o aluno quer algo que o aplicativo não faz, diga isso com franqueza e conte o caminho mais próximo que o guia dá. {CITE}")
+            format!("Os trechos são o guia do Jay-S, o aplicativo de estudos. Responda como fazer isso no aplicativo, SÓ com o que os trechos dizem, em até {MAX_APP_SENTENCES} frases curtas: a primeira responde à pergunta (sim, não ou onde fica) e o resto só traz o que a pergunta precisa, sem pré-requisitos nem outras telas se o aluno não perguntou. Use os nomes de botões e seções como estão escritos neles. Fale direto, sem citar os trechos no texto ('o trecho diz', 'trecho 3'): para o aluno eles são 'o guia do Jay-S', e a palavra 'trecho' nunca aparece na resposta. Se o aluno quer algo que o aplicativo não faz, diga isso com franqueza e conte o caminho mais próximo que o guia dá. {CITE}")
         } else {
             format!("Responda SÓ com o que os trechos dizem e só o que responde à pergunta, em até 6 frases curtas. Fale do assunto direto, sem citar os trechos no texto ('o trecho diz', 'trecho 3'). {CITE} Quando falar de uma questão da prova, o gabarito do trecho é a verdade.")
         };
@@ -1353,14 +1405,15 @@ impl Store {
             }
         }
         best.drop_meta();
-        if app {
-            best.drop_trecho();
-        }
+        best.drop_trecho();
         if best.kind == Kind::Material {
             checks.second_reading = self.second_reading(&mut best, passages, server, cancel)?;
             if best.confirmed() == 0 {
                 best.kind = Kind::Unknown;
             }
+        }
+        if app {
+            best.keep_answer(MAX_APP_SENTENCES);
         }
         checks.rejected_quotes = best.rejected_quotes;
         // Sources shown: those the sentences name, renumbered 1…k in order of first use.
@@ -1952,7 +2005,7 @@ mod tests {
         assert_eq!(texts(talk_roles(vec![plain("O Leonardo chegou.")], "oi", &none)), ["O Leonardo chegou."]);
         assert_eq!(texts(talk_roles(vec![plain("Pode me chamar de Leo!")], "oi", &none)), ["Pode me chamar de Leo!"]);
         // Jay-AI's nickname given to the student goes; with nothing left, one fixed sentence.
-        for given in ["Seu nome é Matty, mas eu ainda sou o Jay-AI do Jay-S.", "Agora também posso te chamar de Matty, Jay-AI.", "Você se chama Matty.", "Vou te chamo de Matty.", "Posso chamar você de Matty?"] {
+        for given in ["Seu nome é Matty, mas eu ainda sou o Jay-AI do Jay-S.", "Agora também posso te chamar de Matty, Jay-AI.", "Você se chama Matty.", "Vou te chamo de Matty.", "Posso chamar você de Matty?", "Pode sim, chamo você de Matty!"] {
             assert_eq!(texts(talk_roles(vec![plain(given)], "qual é o seu nome mesmo?", &nick)), ["Meu nome é Jay-AI, e você também pode me chamar de Matty."], "{given}");
         }
         assert_eq!(texts(talk_roles(vec![plain("Oi!"), plain("Seu nome é Matty.")], "oi", &nick)), ["Oi!"]);
@@ -1963,6 +2016,86 @@ mod tests {
         // The same name for both: nothing to guard.
         let same = Facts { nickname: Some("Matty".into()), name: Some("Matty".into()), ..Facts::default() };
         assert_eq!(texts(talk_roles(vec![plain("Seu nome é Matty.")], "oi", &same)), ["Seu nome é Matty."]);
+    }
+
+    #[test]
+    fn an_app_answer_keeps_only_confirmed_sentences_and_their_sources() {
+        let p = [passage("Na seção Flashcards, em Novo baralho, dê um Nome.", None), passage("Os cartões se adaptam aos temas em que você foi mal.", None), passage("Abra o resultado e veja Questão por questão.", None)];
+        let s = |t: &str, n: u64, q: &str| json!({ "text": t, "source": n, "quote": q });
+        let good = ["Na seção Flashcards, em Novo baralho", "Os cartões se adaptam aos temas", "Abra o resultado e veja Questão"];
+        let sentences: Vec<Value> = vec![
+            s("Um.", 1, good[0]),
+            s("Dois, de um quote inventado.", 2, "isto não está no trecho nenhum"),
+            s("Três.", 2, good[1]),
+            s("Quatro.", 3, good[2]),
+            s("Cinco.", 1, good[0]),
+            s("Seis.", 3, good[2]),
+        ];
+        let mut c = check(&json!({ "sentences": sentences }), &p, "x?", false).unwrap();
+        c.keep_answer(4);
+        let texts: Vec<&str> = c.sentences.iter().map(|s| s.text.as_str()).collect();
+        assert_eq!((texts, c.evidence.len()), (vec!["Um.", "Três.", "Quatro.", "Cinco."], 4));
+        // Passage 3 was cited by "Quatro." only, passage 1 by two: the dropped "Seis." leaves no quote.
+        assert_eq!(c.quotes, vec![vec![good[0].to_owned(), good[0].to_owned()], vec![good[1].to_owned()], vec![good[2].to_owned()]]);
+        // Nothing confirmed: everything stays, the honest "not confirmed" answer.
+        let mut none = check(&json!({ "sentences": [s("Um.", 1, "não está lá"), s("Dois.", 1, "nem aqui")] }), &p, "x?", false).unwrap();
+        none.keep_answer(1);
+        assert_eq!(none.sentences.len(), 2);
+    }
+
+    #[test]
+    fn trecho_goes_from_a_material_answer_too() {
+        let p = [passage("A definição completa está no capítulo dois do livro.", None)];
+        let q = "definição completa está no capítulo dois";
+        let s = |t: &str| json!({ "text": t, "source": 1, "quote": q });
+        let mut c = check(&json!({ "sentences": [s("A definição completa está no trecho 1."), s("O capítulo dois traz a definição.")] }), &p, "x?", false).unwrap();
+        c.drop_trecho();
+        assert_eq!((c.sentences.len(), c.evidence.len()), (1, 1));
+    }
+
+    #[test]
+    fn why_novo_baralho_is_not_confirmed() {
+        let about = "Como faço flashcards de uma prova que fiz?";
+        let passages = manual_passages(about);
+        let at = |start: &str| passages.iter().position(|p| p.text.starts_with(start)).map(|i| i + 1).unwrap() as u64;
+        let (how, from_exam) = (at("Flashcards: como crio"), at("Flashcards de uma prova"));
+        let sentence = "Para criar cartões de estudo, vá até a seção 'Flashcards' e selecione 'Novo baralho'.";
+        let status = |source: u64, quote: &str| {
+            let c = check(&one(sentence, source, quote), &passages, about, false).unwrap();
+            (c.sentences[0].status, c.rejected_quotes)
+        };
+        // The model sees `data()`'s `'` where the guide has `"`: `norm` makes them the same words.
+        assert_eq!(status(how, "Na seção 'Flashcards', em 'Novo baralho', dê um 'Nome'"), (Status::Confirmed, 0));
+        // A quote stitched from two places, one that copies the guide and adds words, and one from
+        // the other paragraph while `source` names this one: the check is right to refuse them.
+        assert_eq!(status(how, "vá até a seção Flashcards e selecione Novo baralho"), (Status::Unconfirmed, 1));
+        assert_eq!(status(how, "em 'Novo baralho', dê um 'Nome', marque os conteúdos, digite a quantidade de cartões e clique"), (Status::Unconfirmed, 1));
+        assert_eq!(status(how, "os cartões são feitos só do material de conteúdo"), (Status::Unconfirmed, 1));
+        assert_eq!(status(from_exam, "os cartões são feitos só do material de conteúdo"), (Status::Confirmed, 0));
+    }
+
+    #[test]
+    fn a_nickname_question_is_answered_with_the_nickname_first() {
+        let plain = |t: &str| Sentence { text: t.into(), sources: vec![], status: Status::Plain };
+        let texts = |v: Vec<Sentence>| v.into_iter().map(|s| s.text).collect::<Vec<_>>();
+        let nick = Facts { nickname: Some("Matty".into()), ..Facts::default() };
+        let fixed = "Meu nome é Jay-AI, e você também pode me chamar de Matty.";
+        // Seen with the real model: a first sentence that answers nothing.
+        let r = lead_with_nickname(vec![plain("Minha principal função é ajudar você a estudar no Jay-S."), plain("Você pode me chamar de Matty."), plain("Estou aqui para conversar.")], "Como é seu apelido?", &nick);
+        assert_eq!(texts(r), ["Você pode me chamar de Matty.", "Estou aqui para conversar."]);
+        // Already leading with it or with Jay-AI: untouched.
+        let seen = [plain("Minha principal identidade é Jay-AI, mas você também pode me chamar de Matty."), plain("Sigo o mesmo objetivo de ajudar você a estudar."), plain("Estou aqui para conversar.")];
+        assert_eq!(lead_with_nickname(seen.to_vec(), "Como é seu apelido?", &nick).len(), 3);
+        assert_eq!(texts(lead_with_nickname(vec![plain("Meu nome oficial é Jay-AI."), plain("Pode me chamar de Matty também.")], "Qual é o seu nome?", &nick)).len(), 2);
+        // Nothing names it: the fixed sentence.
+        assert_eq!(texts(lead_with_nickname(vec![plain("Sou o tutor do Jay-S.")], "Como é seu apelido?", &nick)), [fixed]);
+        // Not a question about the name, no nickname stored, or the student telling it: untouched.
+        let intro = vec![plain("Pode sim!"), plain("Agora atendo por Matty.")];
+        assert_eq!(lead_with_nickname(intro.clone(), "Posso chamar você de Matty?", &nick).len(), 2);
+        assert_eq!(lead_with_nickname(intro.clone(), "Como vai você?", &nick).len(), 2);
+        assert_eq!(lead_with_nickname(intro.clone(), "Como é seu apelido?", &Facts::default()).len(), 2);
+        // Even an empty reply gets the fixed sentence.
+        assert_eq!(texts(lead_with_nickname(vec![], "Como é seu apelido?", &nick)), [fixed]);
     }
 
     fn turn(question: &str, said: &str) -> Turn {
