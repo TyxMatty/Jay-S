@@ -9,7 +9,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const LABELS = new Set(['exam', 'content', 'both', 'key']);
+// exam_sum: an exam whose questions are mostly sum-type (UEM, UEPG, UFSC); for the app it is an exam.
+const LABELS = new Set(['exam', 'exam_sum', 'content', 'both', 'key']);
 const HOSTS = new Set([
   'download.inep.gov.br',
   'www.vestibular.uem.br',
@@ -71,6 +72,7 @@ export function looksRight(file, bytes) {
 function selfCheck() {
   const ok = 'exam,enem-2023-d1.pdf,public exam,https://download.inep.gov.br/a.pdf';
   assert.equal(parseRow(ok).file, 'enem-2023-d1.pdf');
+  assert.equal(parseRow(ok.replace('exam,', 'exam_sum,')).label, 'exam_sum');
   for (const bad of [
     'exam,../x.pdf,l,https://download.inep.gov.br/a.pdf',
     'exam,a/x.pdf,l,https://download.inep.gov.br/a.pdf',
