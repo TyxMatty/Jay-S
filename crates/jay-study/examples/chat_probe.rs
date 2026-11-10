@@ -55,7 +55,7 @@ fn main() {
             }
         }
         let c = store.chat(&chat.id).expect("reload");
-        println!("\n--- summary (covers {} turns): {}", c.summarized, c.summary);
+        println!("\n--- summary (covers {} turns): {}\n--- facts: {:?}", c.summarized, c.summary, c.facts);
     }
     let _ = std::fs::remove_dir_all(root);
 }
