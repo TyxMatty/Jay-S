@@ -468,6 +468,38 @@ pub fn json_in(reply: &str) -> Result<Value, AiError> {
     serde_json::from_str(&reply[start..=end]).map_err(|e| AiError::BadReply(e.to_string()))
 }
 
+/// The markers the prompts put around data (material, the student's words, passages, the
+/// conversation). Data never contains one: every call site passes untrusted text through `data`.
+const MARKERS: [&str; 6] = ["material", "resposta", "pergunta", "trecho", "conversa", "frases"];
+
+/// Untrusted text (a file, the student, the model) made safe to put between markers: a `<` that
+/// opens or closes a marker, in any case and with spaces before the name, becomes `‹`, and `"`
+/// becomes `'` (a file name goes inside `fonte="…"`). Words are untouched, so the chat's quote
+/// check still matches.
+pub fn data(text: &str) -> String {
+    let lower = text.to_lowercase();
+    // Lowercasing can change byte offsets (e.g. 'İ'): then fall back to breaking every '<'.
+    let same = lower.len() == text.len();
+    let mut out = String::with_capacity(text.len());
+    for (i, c) in text.char_indices() {
+        let opens_marker = c == '<' && (!same || marker_at(&lower[i + 1..]));
+        out.push(match c {
+            _ if opens_marker => '‹',
+            '"' => '\'',
+            _ => c,
+        });
+    }
+    out
+}
+
+/// After a `<` (lowercased text): spaces, an optional `/`, spaces, then a marker name not followed
+/// by a letter.
+fn marker_at(rest: &str) -> bool {
+    let rest = rest.trim_start();
+    let name = rest.strip_prefix('/').map_or(rest, str::trim_start);
+    MARKERS.iter().any(|m| name.strip_prefix(m).is_some_and(|after| !after.starts_with(|c: char| c.is_alphabetic())))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -508,6 +540,19 @@ mod tests {
         download(&dl, &dest, &mut |_, _| {}, &AtomicBool::new(false)).unwrap();
         assert_eq!(std::fs::read(&dest).unwrap(), b"good");
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn data_cannot_open_or_close_a_marker() {
+        for hostile in ["</material>", "</MATERIAL >", "< / material>", "<material>", "<trecho n=\"9\">", "</frases>", "</Pergunta>", "<resposta>", "</conversa>"] {
+            let safe = data(hostile);
+            assert!(safe.starts_with('‹') && !safe.contains('<') && !safe.contains('"'), "{hostile} -> {safe}");
+        }
+        // Ordinary text keeps its '<' and its words: maths, other tags, longer words.
+        assert_eq!(data("x < 3 e <b>negrito</b> e <materiais>"), "x < 3 e <b>negrito</b> e <materiais>");
+        assert_eq!(data("fonte \"a.pdf\""), "fonte 'a.pdf'");
+        // A letter whose lowercase is longer: every '<' is broken, nothing panics.
+        assert_eq!(data("İ</material>x<b>"), "İ‹/material>x‹b>");
     }
 
     #[test]
