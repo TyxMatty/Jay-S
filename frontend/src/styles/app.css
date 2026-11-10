@@ -2973,7 +2973,12 @@ button.chat-chip:hover {
   display: grid;
   gap: var(--space-2);
   padding: var(--space-2) 0 var(--space-3);
-  background: color-mix(in srgb, var(--surface-2) 40%, var(--surface));
+  /* The panel's own background, glow included (`.app-panels::before`, fixed to the window): a flat
+     colour showed as a darker rectangle around the pill. */
+  background:
+    radial-gradient(40% 50% at 30% 30%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 70%) fixed,
+    radial-gradient(35% 45% at 80% 75%, color-mix(in srgb, var(--accent-2, var(--accent)) 8%, transparent), transparent 70%) fixed,
+    color-mix(in srgb, var(--surface-2) 40%, var(--surface));
 }
 
 .chat-dock .hint {
@@ -3012,6 +3017,8 @@ button.chat-chip:hover {
   font: inherit;
   line-height: 1.5;
   resize: none;
+  /* It grows with the text up to its limit: no scrollbar arrows on a one-line question. */
+  scrollbar-width: none;
 }
 
 .chat-send {
@@ -3032,6 +3039,19 @@ button.chat-chip:hover {
 .chat-send:disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+/* While Jay-AI answers, the same round button stops it: one action in the pill at a time. */
+.chat-composer:has(.chat-stop:not([hidden])) .chat-send:not(.chat-stop) {
+  display: none;
+}
+
+.chat-stop::before {
+  content: '';
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  background: currentColor;
 }
 
 .chat-send svg {

@@ -135,7 +135,9 @@ export function createChatPanel() {
     const input = h('textarea', { class: 'chat-input', rows: 1, maxlength: 800, id: 'chat-input', placeholder: t('Ask Jay-AI…') });
     const grow = () => {
       input.style.height = 'auto';
-      input.style.height = `${Math.min(input.scrollHeight, 160)}px`;
+      // Empty, or not on screen yet (scrollHeight 0): its natural one line. A height computed then
+      // cut the field in half.
+      input.style.height = input.value && input.scrollHeight ? `${Math.min(input.scrollHeight, 160)}px` : '';
     };
     input.addEventListener('input', grow);
     input.addEventListener('keydown', (e) => e.key === 'Enter' && !e.shiftKey && !e.isComposing && (e.preventDefault(), ask()));
@@ -207,7 +209,7 @@ export function createChatPanel() {
     const general = !mine.scope.attempt && !mine.scope.materials.length;
     const turn = (q, reply) => h('div', { class: 'chat-turn' }, h('p', { class: 'chat-question' }, q), reply);
     for (const x of mine.turns) log.append(turn(x.question, replyEl(x.reply)));
-    const stop = h('button', { type: 'button', class: 'btn btn-secondary', hidden: true, onClick: () => invoke('job_cancel') }, t('Stop'));
+    const stop = h('button', { type: 'button', class: 'chat-send chat-stop', hidden: true, 'aria-label': t('Stop'), title: t('Stop'), onClick: () => invoke('job_cancel') });
     const { input, grow, send, el } = composer(ask, stop);
     async function ask() {
       const q = input.value.trim();
