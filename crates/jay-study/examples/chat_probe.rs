@@ -9,7 +9,7 @@ use jay_study::chat::Scope;
 use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
-const SCOPED: [&str; 9] = [
+const SCOPED: [&str; 10] = [
     "Oi, tudo bem?",
     "Como eu faço um simulado no Jay-S?",
     "Para que serve o modo aprender?",
@@ -19,6 +19,7 @@ const SCOPED: [&str; 9] = [
     "Qual é a capital da França?",
     "Qual o tamanho da amostra para estimar uma proporção com 95% de confiança, erro de 2% e estimativa inicial de 10%?",
     "Com erro relativo de 10%, média 40 e desvio padrão 10, a 95%, qual o tamanho da amostra?",
+    "Voltando ao começo: qual foi a definição de intervalo de confiança que você me deu?",
 ];
 
 const GENERAL: [&str; 2] = ["Como anexo um PDF?", "Quanto é (1,96 * 10 / 4)^2?"];
@@ -46,6 +47,8 @@ fn main() {
                 Err(e) => println!("\n> {q}\n  ERROR {e:?} time={:.1}s", t.elapsed().as_secs_f32()),
             }
         }
+        let c = store.chat(&chat.id).expect("reload");
+        println!("\n--- summary (covers {} turns): {}", c.summarized, c.summary);
     }
     let _ = std::fs::remove_dir_all(root);
 }
