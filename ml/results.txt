@@ -8,58 +8,58 @@ rules (the app today): 330 of 370 right
          both       17        3        9        0     0.31
           key        4        0        0       71     0.95
     precision     0.78     0.98     0.56     1.00
-  where the rules say sure: 303 of 335; unsure: 27 of 35
+  where the rules say sure: 320 of 352; unsure: 10 of 18
   on the 295 files that are not keys: 259
 
-logistic, 5 labels: 327 of 370 right
+logistic, 5 labels: 329 of 370 right
  label / said  content     exam exam_sum     both      key   recall
-      content       98        2        0        9        3     0.88
-         exam        0       50        0        6        6     0.81
+      content       99        2        0        8        3     0.88
+         exam        0       51        0        5        6     0.82
      exam_sum        0        0       92        0        0     1.00
          both       14        1        0       12        2     0.41
           key        0        0        0        0       75     1.00
-    precision     0.88     0.94     1.00     0.44     0.87
+    precision     0.88     0.94     1.00     0.48     0.87
 
-logistic + key parser, as the app's 4 kinds: 327 of 370 right
+logistic + key parser, as the app's 4 kinds: 329 of 370 right
  label / said  content     exam     both      key   recall
-      content       98        2        9        3     0.88
-         exam        0      142        6        6     0.92
+      content       99        2        8        3     0.88
+         exam        0      143        5        6     0.93
          both       14        1       12        2     0.41
           key        0        0        0       75     1.00
-    precision     0.88     0.98     0.44     0.87
-  without the key parser: 327 right
-  on the 295 files that are not keys: 252
-  against the rules: right where they are wrong in 11, wrong where they are right in 14
-  where the rules say sure: 297 of 335
-  where the rules say unsure: 30 of 35
-  over 10 other splits (seeds 0-9): 325 to 334 right; not keys: 250 to 259
+    precision     0.88     0.98     0.48     0.87
+  without the key parser: 329 right
+  on the 295 files that are not keys: 254
+  against the rules: right where they are wrong in 11, wrong where they are right in 12
+  where the rules say sure: 317 of 352
+  where the rules say unsure: 12 of 18
+  over 10 other splits (seeds 0-9): 325 to 332 right; not keys: 250 to 257
 
-tree, 5 labels: 312 of 370 right
+tree, 5 labels: 323 of 370 right
  label / said  content     exam exam_sum     both      key   recall
-      content      108        3        0        0        1     0.96
-         exam       24       32        1        4        1     0.52
+      content      104        7        0        0        1     0.93
+         exam        8       48        1        4        1     0.77
      exam_sum        0        2       90        0        0     0.98
-         both       16        1        0       12        0     0.41
+         both       16        2        0       11        0     0.38
           key        5        0        0        0       70     0.93
-    precision     0.71     0.84     0.99     0.75     0.97
+    precision     0.78     0.81     0.99     0.73     0.97
 
-tree + key parser, as the app's 4 kinds: 320 of 370 right
+tree + key parser, as the app's 4 kinds: 331 of 370 right
  label / said  content     exam     both      key   recall
-      content      108        3        0        1     0.96
-         exam       24      125        4        1     0.81
-         both       16        1       12        0     0.41
+      content      104        7        0        1     0.93
+         exam        8      141        4        1     0.92
+         both       16        2       11        0     0.38
           key        0        0        0       75     1.00
-    precision     0.73     0.97     0.75     0.97
-  without the key parser: 315 right
-  on the 295 files that are not keys: 245
-  against the rules: right where they are wrong in 14, wrong where they are right in 24
-  where the rules say sure: 305 of 335
-  where the rules say unsure: 15 of 35
-  over 10 other splits (seeds 0-9): 293 to 321 right; not keys: 218 to 246
+    precision     0.81     0.94     0.73     0.97
+  without the key parser: 326 right
+  on the 295 files that are not keys: 256
+  against the rules: right where they are wrong in 13, wrong where they are right in 12
+  where the rules say sure: 319 of 352
+  where the rules say unsure: 12 of 18
+  over 10 other splits (seeds 0-9): 328 to 337 right; not keys: 253 to 262
 
 tree on all files (chars, headers and question counts are ln(1 + n)):
 |--- sum_questions <= 1.35
-|   |--- headers <= 3.04
+|   |--- density <= 0.51
 |   |   |--- chars <= 8.13
 |   |   |   |--- exam_words <= 0.50
 |   |   |   |   |--- class: exam
@@ -70,11 +70,14 @@ tree on all files (chars, headers and question counts are ln(1 + n)):
 |   |   |   |   |--- class: both
 |   |   |   |--- first_at >  0.35
 |   |   |   |   |--- class: content
-|   |--- headers >  3.04
-|   |   |--- class: exam
+|   |--- density >  0.51
+|   |   |--- first_at <= 0.43
+|   |   |   |--- class: exam
+|   |   |--- first_at >  0.43
+|   |   |   |--- class: content
 |--- sum_questions >  1.35
-|   |--- chars <= 12.72
+|   |--- choice_questions <= 3.67
 |   |   |--- class: exam_sum
-|   |--- chars >  12.72
+|   |--- choice_questions >  3.67
 |   |   |--- class: exam
 

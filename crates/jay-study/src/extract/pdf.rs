@@ -23,6 +23,8 @@ const MAX_OCR_PAGES: u32 = 150;
 const SCAN_BELOW_CHARS: usize = 25;
 /// Width a scanned page is drawn at for the OCR (~240 dpi on A4).
 const OCR_WIDTH: f32 = 2_000.0;
+/// Option letters one page can give back to its OCR text (a 90-question exam page has ~25).
+const MAX_MARKERS: usize = 200;
 
 pub fn extract(bytes: Vec<u8>) -> Result<Extracted, ExtractError> {
     let pdf = match catch_unwind(AssertUnwindSafe(|| Pdf::new(bytes))) {
@@ -38,9 +40,9 @@ pub fn extract(bytes: Vec<u8>) -> Result<Extracted, ExtractError> {
     let mut ocr_error: Option<String> = None;
     let cache = RenderCache::new();
     for (index, page) in pages.iter().enumerate().take(MAX_PAGES) {
-        let (text, unmapped) = guard(|| page_text(page)).unwrap_or_else(|| {
+        let PageText { text, unmapped, markers } = guard(|| page_text(page)).unwrap_or_else(|| {
             out.warnings.push(Warning::PageUnreadable { page: index as u32 + 1 });
-            (String::new(), 0)
+            PageText::default()
         });
         let letters = text.chars().filter(|c| c.is_alphanumeric()).count();
         let text = if needs_ocr(letters, unmapped) && ocr_error.is_none() && out.ocr_pages < MAX_OCR_PAGES {
@@ -51,10 +53,11 @@ pub fn extract(bytes: Vec<u8>) -> Result<Extracted, ExtractError> {
                 render(page, &cache, &InterpreterSettings::default(), &RenderSettings::default(), &settings)
             });
             match drawn.filter(|p| (p.width() as f32) < OCR_WIDTH * 1.1 && (p.height() as f32) < h * scale * 1.1 + 2.0) {
-                Some(pixmap) => match ocr::recognize(pixmap.width() as u32, pixmap.height() as u32, pixmap.data_as_u8_slice()) {
-                    Ok(read) if read.chars().filter(|c| c.is_alphanumeric()).count() > letters => {
+                Some(pixmap) => match ocr::recognize_lines(pixmap.width() as u32, pixmap.height() as u32, pixmap.data_as_u8_slice()) {
+                    Ok(mut lines) if ocr::text_of(&lines).chars().filter(|c| c.is_alphanumeric()).count() > letters => {
                         out.ocr_pages += 1;
-                        read
+                        restore_markers(&mut lines, &markers, scale);
+                        ocr::text_of(&lines)
                     }
                     Ok(_) => text,
                     Err(e) => {
@@ -92,14 +95,75 @@ fn needs_ocr(letters: usize, unmapped: usize) -> bool {
     letters < SCAN_BELOW_CHARS || (unmapped >= SCAN_BELOW_CHARS && unmapped > letters)
 }
 
-/// The page's text in drawing order, one line per line, and how many glyphs had no Unicode.
-fn page_text(page: &hayro::hayro_syntax::page::Page<'_>) -> (String, usize) {
+/// A lone option letter of the text layer ("A" to "E" alone on its line, or opening it: "A 12"):
+/// its centre and size, in page points from the top-left. A sentence that opens with "A " or "E "
+/// counts too; there the letter only replaces the same letter in the OCR text.
+#[derive(Debug, Clone, PartialEq)]
+struct Marker {
+    letter: char,
+    x: f32,
+    y: f32,
+    size: f32,
+}
+
+/// Gives the OCR text the option letters it can't read (white letters inside dark circles come out
+/// as "O", "@" or nothing): each lone letter of the text layer takes the place of the short word
+/// the OCR read over it, or goes before the nearest word to its right on the same row.
+fn restore_markers(lines: &mut [ocr::Line], markers: &[Marker], scale: f32) {
+    for m in markers.iter().take(MAX_MARKERS) {
+        let (x, y, em) = (m.x * scale, m.y * scale, m.size * scale);
+        let mut best: Option<(usize, usize, f32)> = None;
+        for (li, line) in lines.iter().enumerate() {
+            let top = line.words.iter().map(|w| w.y).fold(f32::MAX, f32::min);
+            let bottom = line.words.iter().map(|w| w.y + w.h).fold(f32::MIN, f32::max);
+            if !(top..=bottom).contains(&y) {
+                continue;
+            }
+            for (wi, w) in line.words.iter().enumerate() {
+                let gap = if (w.x..=w.x + w.w).contains(&x) { 0.0 } else { w.x - x };
+                if (0.0..=4.0 * em).contains(&gap) && best.is_none_or(|b| gap < b.2) {
+                    best = Some((li, wi, gap));
+                }
+            }
+        }
+        let Some((li, wi, gap)) = best else { continue };
+        let line = &mut lines[li];
+        if gap == 0.0 && line.words[wi].text.chars().count() <= 2 {
+            line.words[wi].text = m.letter.to_string();
+        } else {
+            line.words.insert(wi, ocr::Word { text: m.letter.to_string(), x, y, w: 0.0, h: 0.0 });
+        }
+        line.text = line.words.iter().map(|w| w.text.as_str()).collect::<Vec<_>>().join(" ");
+    }
+}
+
+/// What the text layer of a page gives.
+#[derive(Default)]
+struct PageText {
+    /// The text in drawing order, one line per line.
+    text: String,
+    /// Glyphs with no Unicode.
+    unmapped: usize,
+    markers: Vec<Marker>,
+}
+
+fn page_text(page: &hayro::hayro_syntax::page::Page<'_>) -> PageText {
     let cache = InterpreterCache::new();
     let (w, h) = page.render_dimensions();
     let mut ctx = Context::new(page.initial_transform(true).to_kurbo(), Rect::new(0.0, 0.0, w as f64, h as f64), &cache, page.xref(), InterpreterSettings::default());
     let mut device = TextDevice { glyphs: vec![], unmapped: 0 };
     interpret_page(page, &mut ctx, &mut device);
-    (lines_from_glyphs(&device.glyphs).join("\n"), device.unmapped)
+    let lines = lines_from_glyphs(&device.glyphs);
+    let markers = lines
+        .iter()
+        .filter_map(|(text, g)| match text.trim().as_bytes() {
+            [letter @ b'A'..=b'E'] | [letter @ b'A'..=b'E', b' ', ..] => {
+                Some(Marker { letter: *letter as char, x: (g.x0 + g.x1) / 2.0, y: g.baseline - 0.35 * g.size, size: g.size })
+            }
+            _ => None,
+        })
+        .collect();
+    PageText { text: lines.iter().map(|(text, _)| text.as_str()).collect::<Vec<_>>().join("\n"), unmapped: device.unmapped, markers }
 }
 
 /// A glyph as drawn: its text, box and baseline, in page points from the top-left.
@@ -157,15 +221,19 @@ impl<'a> Device<'a> for TextDevice {
 
 /// Groups glyphs in drawing order into lines: a new line when the baseline moves or the text goes
 /// back to the left; a space where the gap between glyphs is wider than 0.12 em (Jay-E, measured).
-fn lines_from_glyphs(glyphs: &[PlacedGlyph]) -> Vec<String> {
-    let mut lines: Vec<String> = vec![];
+/// Each line comes with its first glyph that isn't blank.
+fn lines_from_glyphs(glyphs: &[PlacedGlyph]) -> Vec<(String, &PlacedGlyph)> {
+    let mut lines: Vec<(String, &PlacedGlyph)> = vec![];
     let mut last: Option<&PlacedGlyph> = None;
     for g in glyphs {
         let same_line = last.is_some_and(|p| (g.baseline - p.baseline).abs() < 0.5 * p.size.min(g.size) && g.x0 > p.x0 - 0.5 * p.size);
         if !same_line {
-            lines.push(String::new());
+            lines.push((String::new(), g));
         }
-        let line = lines.last_mut().unwrap();
+        let (line, first) = lines.last_mut().unwrap();
+        if line.trim().is_empty() {
+            *first = g;
+        }
         if let Some(p) = last.filter(|_| same_line)
             && g.x0 - p.x1 > 0.12 * g.size
             && !line.ends_with(' ')
@@ -176,7 +244,7 @@ fn lines_from_glyphs(glyphs: &[PlacedGlyph]) -> Vec<String> {
         line.push_str(&g.text);
         last = Some(g);
     }
-    lines.retain(|l| !l.trim().is_empty());
+    lines.retain(|(l, _)| !l.trim().is_empty());
     lines
 }
 
@@ -233,10 +301,71 @@ pub(crate) mod tests {
         // A font whose codes name glyphs nobody knows: the reader gets no letter and counts them.
         let font = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding << /Type /Encoding /Differences [65 /g001 /g002 /g003] >> >>";
         let pdf = Pdf::new(sample_with_font(font, &[&["ABCABCABCABC", "CBA"]])).unwrap();
-        assert_eq!(page_text(&pdf.pages()[0]), (String::new(), 15));
+        let read = page_text(&pdf.pages()[0]);
+        assert_eq!((read.text.as_str(), read.unmapped), ("", 15));
         // The same page in plain Helvetica loses nothing.
         let pdf = Pdf::new(sample(&[&["ABCABCABCABC", "CBA"]])).unwrap();
-        assert_eq!(page_text(&pdf.pages()[0]), ("ABCABCABCABC\nCBA".to_owned(), 0));
+        let read = page_text(&pdf.pages()[0]);
+        assert_eq!((read.text.as_str(), read.unmapped, read.markers.len()), ("ABCABCABCABC\nCBA", 0, 0));
+    }
+
+    /// An OCR line at row `y` (pixels): its words, each 40 px tall and as wide as given.
+    fn ocr_line(y: f32, words: &[(&str, f32, f32)]) -> ocr::Line {
+        let words: Vec<ocr::Word> = words.iter().map(|&(text, x, w)| ocr::Word { text: text.into(), x, y, w, h: 40.0 }).collect();
+        ocr::Line { text: words.iter().map(|w| w.text.as_str()).collect::<Vec<_>>().join(" "), words }
+    }
+
+    fn marker(letter: char, x: f32, y: f32) -> Marker {
+        Marker { letter, x, y, size: 12.0 }
+    }
+
+    #[test]
+    fn option_letters_go_back_to_their_own_row_or_nowhere() {
+        // Markers are in page points; the page was drawn at 2 px per point.
+        let page = || {
+            vec![
+                ocr_line(100.0, &[("combate", 100.0, 150.0), ("a", 260.0, 20.0), ("exclusão", 290.0, 160.0)]),
+                ocr_line(160.0, &[("O", 100.0, 30.0), ("possibilita", 140.0, 200.0)]),
+                ocr_line(220.0, &[("impede", 140.0, 120.0), ("que", 270.0, 60.0)]),
+                ocr_line(280.0, &[("Oadmite", 100.0, 180.0), ("que", 290.0, 60.0)]),
+                ocr_line(340.0, &[("obriga", 400.0, 120.0)]),
+            ]
+        };
+        let mut lines = page();
+        let markers = [
+            marker('A', 57.0, 90.0),  // over the short word "O": takes its place
+            marker('B', 57.0, 120.0), // nothing read over it: goes before "impede"
+            marker('C', 57.0, 150.0), // over a long word: goes before it, the word stays
+            marker('D', 57.0, 180.0), // the nearest word is more than 4 em away: nowhere
+            marker('E', 57.0, 400.0), // no OCR line on that row: nowhere
+            marker('A', f32::NAN, 90.0),
+        ];
+        restore_markers(&mut lines, &markers, 2.0);
+        assert_eq!(ocr::text_of(&lines), "combate a exclusão\nA possibilita\nB impede que\nC Oadmite que\nobriga\n");
+        // A row the OCR didn't read gets no letter from its neighbours.
+        let mut lines = page();
+        lines.remove(2);
+        restore_markers(&mut lines, &markers, 2.0);
+        assert_eq!(ocr::text_of(&lines), "combate a exclusão\nA possibilita\nC Oadmite que\nobriga\n");
+        // No markers: the OCR text is untouched, byte for byte.
+        let mut lines = vec![ocr::Line { text: "espaços   do  OCR".into(), words: vec![] }];
+        restore_markers(&mut lines, &[], 2.0);
+        assert_eq!(lines[0].text, "espaços   do  OCR");
+        // A page can't ask for more letters than the cap.
+        let mut lines: Vec<ocr::Line> = (0..300).map(|i| ocr_line(i as f32 * 60.0, &[("texto", 140.0, 100.0)])).collect();
+        let many: Vec<Marker> = (0..300).map(|i| marker('A', 57.0, i as f32 * 30.0 + 10.0)).collect();
+        restore_markers(&mut lines, &many, 2.0);
+        assert_eq!(lines.iter().filter(|l| l.text == "A texto").count(), MAX_MARKERS);
+    }
+
+    #[test]
+    fn markers_are_the_letters_alone_or_opening_a_line() {
+        let pdf = Pdf::new(sample(&[&["Enunciado da questao", "A", "B 12", "Casa", "E agora", "F", "a", "AB"]])).unwrap();
+        let read = page_text(&pdf.pages()[0]);
+        assert_eq!(read.markers.iter().map(|m| m.letter).collect::<String>(), "ABE");
+        // Each one sits on its own row, at the left margin of the sample page (x = 50 pt).
+        assert!(read.markers.iter().all(|m| m.x > 50.0 && m.x < 60.0 && m.size == 12.0), "{:?}", read.markers);
+        assert!(read.markers[0].y < read.markers[1].y && read.markers[1].y < read.markers[2].y);
     }
 
     #[test]
