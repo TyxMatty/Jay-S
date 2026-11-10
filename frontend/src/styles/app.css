@@ -2981,12 +2981,23 @@ button.chat-chip:hover {
   display: grid;
   gap: var(--space-2);
   padding: var(--space-2) 0 var(--space-3);
-  /* The panel's own background, glow included (`.app-panels::before`, fixed to the window): a flat
-     colour showed as a darker rectangle around the pill. */
+  /* Clips the backdrop below to the dock; the negative sides keep the pill's shadow and focus ring. */
+  clip-path: inset(0 -24px);
+}
+
+/* What hides the messages scrolling under the dock: the panel's own background drawn the same way
+   as the panel's (`.app-panels` + its `::before`, fixed to the window), so no box shows around the
+   pill. A flat colour, or the same gradients as `background-attachment: fixed`, showed as one. */
+.chat-dock::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
   background:
-    radial-gradient(40% 50% at 30% 30%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 70%) fixed,
-    radial-gradient(35% 45% at 80% 75%, color-mix(in srgb, var(--accent-2, var(--accent)) 8%, transparent), transparent 70%) fixed,
+    radial-gradient(40% 50% at 30% 30%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 70%),
+    radial-gradient(35% 45% at 80% 75%, color-mix(in srgb, var(--accent-2, var(--accent)) 8%, transparent), transparent 70%),
     color-mix(in srgb, var(--surface-2) 40%, var(--surface));
+  pointer-events: none;
 }
 
 .chat-dock .hint {
