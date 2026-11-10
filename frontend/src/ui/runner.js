@@ -5,6 +5,7 @@
 import { h } from './dom.js';
 import { icons } from './icons.js';
 import { invoke, listen } from '../core/bridge.js';
+import { aiReady, onAiStatus } from '../core/ai.js';
 import { t, language } from '../core/i18n.js';
 import { studyFailureText } from './study-text.js';
 
@@ -220,8 +221,15 @@ function scoreHero(r, attempt) {
 export function createResult(attempt, questions, { onBack }) {
   const r = attempt.result;
   const analysis = h('div', { class: 'analysis', 'aria-live': 'polite' });
+  let analyzed = false;
 
   function renderAnalysis(a) {
+    analyzed = Boolean(a);
+    if (!a && !aiReady()) {
+      // Not downloaded: nothing is on its way, so no spinner and no "in a moment".
+      analysis.replaceChildren(h('p', { class: 'hint' }, t('The analysis needs Jay-AI: download it in the Jay-AI section and it shows up here.')));
+      return;
+    }
     if (!a) {
       analysis.replaceChildren(h('p', { class: 'hint' }, h('span', { class: 'spinner', 'aria-hidden': 'true' }), ' ', t('Your result went to Jay-AI. The analysis shows up here in a moment.')));
       return;
@@ -239,9 +247,15 @@ export function createResult(attempt, questions, { onBack }) {
   }
 
   renderAnalysis(attempt.analysis);
+  // An attempt that ended while Jay-S was busy with something else (or before Jay-AI was there)
+  // was never sent: ask again when this opens, when the other job ends, when Jay-AI gets ready.
+  const ask = () => !analyzed && aiReady() && invoke('attempt_analyze').catch(() => {});
+  ask();
+  const unwatch = attempt.analysis ? null : onAiStatus(() => !analyzed && (renderAnalysis(null), ask()));
   const stop = attempt.analysis
     ? null
     : listen('study-job', async (e) => {
+        if (e.kind !== 'analysis' && e.state !== 'progress') ask();
         if (e.kind !== 'analysis' || e.id !== attempt.id) return;
         if (e.state === 'done') {
           const [fresh] = await invoke('attempt_result', { id: attempt.id });
@@ -288,6 +302,9 @@ export function createResult(attempt, questions, { onBack }) {
     h('fieldset', {}, h('h3', {}, t('By topic')), topics),
     h('fieldset', {}, h('h3', {}, t('Question by question')), review),
   );
-  el.dispose = () => stop?.then?.((un) => un());
+  el.dispose = () => {
+    unwatch?.();
+    stop?.then?.((un) => un());
+  };
   return el;
 }

@@ -204,6 +204,7 @@ export default {
   "What went well": "O que foi bem",
   "You marked: {marked}": "Você marcou: {marked}",
   "Your cards are {length}.": "Seus cartões estão {length}.",
+  "The analysis needs Jay-AI: download it in the Jay-AI section and it shows up here.": "A análise precisa do Jay-AI: baixe-o na seção Jay-AI e ela aparece aqui.",
   "Your result went to Jay-AI. The analysis shows up here in a moment.": "Seu resultado foi para o Jay-AI. A análise aparece aqui em instantes.",
   "Your results show up here, each with what Jay-AI made of it.": "Seus resultados aparecem aqui, cada um com a análise do Jay-AI.",
   "a bit longer": "um pouco mais longos",

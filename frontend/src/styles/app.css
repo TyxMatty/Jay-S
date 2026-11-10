@@ -1367,16 +1367,15 @@ fieldset > h3 {
 [data-tone='partial'] { --tone: var(--warning); }
 [data-tone='wrong'] { --tone: var(--danger); }
 
-/* ---------- The exam sheet: ruled paper with a margin line, like a school exam ---------- */
+/* ---------- The exam sheet: ruled paper, like a school exam ---------- */
 
 .exam-sheet {
   position: relative;
   margin-bottom: 14px;
-  padding: 24px 24px 20px 40px;
+  padding: 24px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background:
-    linear-gradient(90deg, transparent 24px, color-mix(in srgb, var(--danger) 30%, transparent) 24px 25px, transparent 25px),
     repeating-linear-gradient(to bottom, transparent 0 31px, color-mix(in srgb, var(--border) 45%, transparent) 31px 32px),
     var(--surface);
   box-shadow: var(--shadow-sm), 0 22px 44px -28px color-mix(in srgb, var(--accent) 55%, transparent);
