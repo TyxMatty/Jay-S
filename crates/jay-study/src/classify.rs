@@ -174,8 +174,12 @@ pub fn classify(text: &str) -> Classification {
     if crate::exam::parse_answer_key(text).is_some() {
         return Classification { kind: MaterialKind::Key, sure: true, choice_questions: 0, sum_questions: 0, headers: 0 };
     }
-    let Signals { choice_questions, sum_questions, headers, exam_words, density, first_at, .. } = signals(text);
+    let Signals { choice_questions, sum_questions, headers, exam_words, chars, density, first_at } = signals(text);
     let (kind, sure) = match choice_questions + sum_questions {
+        // Many question headers and almost no options read: an exam whose questions are images or
+        // outlined text (ENCCEJA 2017, a scanned ENEM). Headers as dense as questions are in an
+        // exam (the 0.2 below), so a long handout with "Exercício n" headings stays out.
+        0..=2 if headers >= 20 && headers as f32 >= 0.2 * chars as f32 / 1000.0 => (MaterialKind::Exam, false),
         0 if headers >= 3 && exam_words >= 1 => (MaterialKind::Exam, false),
         0 => (MaterialKind::Content, headers == 0),
         1..=2 => (if first_at > 0.5 { MaterialKind::Both } else { MaterialKind::Content }, false),
@@ -275,5 +279,36 @@ mod tests {
         let text = format!("{}\n{}", enem_question(1), prose(3000));
         let c = classify(&text);
         assert!(!c.sure);
+    }
+
+    /// What the reader gets from an exam with outlined text: the headers and loose letters.
+    fn unread_question(n: u32) -> String {
+        format!("QUESTÃO {n}\nCultura de massa e cultura popular\nA\nB\nC\nD\n")
+    }
+
+    #[test]
+    fn many_headers_and_no_options_read_is_an_exam_to_check() {
+        let c = classify(&(31..=60).map(unread_question).collect::<String>());
+        assert_eq!((c.kind, c.sure, c.choice_questions, c.headers), (MaterialKind::Exam, false, 0, 30));
+        // Two questions that were read don't change it.
+        let c = classify(&format!("{}{}{}", (1..=28).map(unread_question).collect::<String>(), enem_question(29), enem_question(30)));
+        assert_eq!((c.kind, c.sure, c.choice_questions), (MaterialKind::Exam, false, 2));
+    }
+
+    #[test]
+    fn headers_alone_do_not_make_an_exam() {
+        // 19 headers: under the threshold.
+        let c = classify(&(1..=19).map(unread_question).collect::<String>());
+        assert_eq!((c.kind, c.sure), (MaterialKind::Content, false));
+        // A long handout with 30 "Exercício n" headings and open exercises: too sparse.
+        let handout: String = (1..=30).map(|n| format!("{}\nExercício {n}\nExplique o processo com as suas palavras.\n", prose(1200))).collect();
+        let c = classify(&handout);
+        assert_eq!((c.kind, c.sure, c.headers), (MaterialKind::Content, false, 30));
+        // The same headings inside a sentence are not headers at all.
+        let c = classify(&(1..=30).map(|n| format!("Veja a questão {n} da lista. {}\n", prose(40))).collect::<String>());
+        assert_eq!((c.kind, c.sure), (MaterialKind::Content, true));
+        // Once three questions are read, the older rules decide.
+        let text = format!("{}\n{}", prose(8000), (1..=25).map(enem_question).collect::<String>());
+        assert_eq!(classify(&text).kind, MaterialKind::Both);
     }
 }

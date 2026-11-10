@@ -1,15 +1,15 @@
 370 files, 171 editions, 5 folds by edition, seed 8
 scikit-learn 1.9.1, numpy 2.5.4
 
-rules (the app today): 316 of 370 right
+rules (the app today): 329 of 370 right
  label / said  content     exam     both      key   recall
       content      106        0        6        0     0.95
-         exam       21      131        2        0     0.85
+         exam        9      144        1        0     0.94
          both       18        3        8        0     0.28
           key        4        0        0       71     0.95
-    precision     0.71     0.98     0.50     1.00
-  where the rules say sure: 308 of 341; unsure: 8 of 29
-  on the 295 files that are not keys: 245
+    precision     0.77     0.98     0.53     1.00
+  where the rules say sure: 308 of 341; unsure: 21 of 29
+  on the 295 files that are not keys: 258
 
 logistic, 5 labels: 325 of 370 right
  label / said  content     exam exam_sum     both      key   recall
@@ -29,7 +29,7 @@ logistic + key parser, as the app's 4 kinds: 325 of 370 right
     precision     0.87     0.98     0.39     0.88
   without the key parser: 325 right
   on the 295 files that are not keys: 250
-  against the rules: right where they are wrong in 23, wrong where they are right in 14
+  against the rules: right where they are wrong in 11, wrong where they are right in 15
   where the rules say sure: 302 of 341
   where the rules say unsure: 23 of 29
   over 10 other splits (seeds 0-9): 325 to 332 right; not keys: 250 to 257
@@ -52,7 +52,7 @@ tree + key parser, as the app's 4 kinds: 324 of 370 right
     precision     0.75     0.95     0.78     0.97
   without the key parser: 319 right
   on the 295 files that are not keys: 249
-  against the rules: right where they are wrong in 22, wrong where they are right in 14
+  against the rules: right where they are wrong in 14, wrong where they are right in 19
   where the rules say sure: 308 of 341
   where the rules say unsure: 16 of 29
   over 10 other splits (seeds 0-9): 304 to 332 right; not keys: 229 to 257
