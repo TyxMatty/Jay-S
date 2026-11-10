@@ -1,0 +1,127 @@
+label,file,license,url
+exam,enem-2018-d1.pdf,public exam,https://download.inep.gov.br/educacao_basica/enem/provas/2018/2018_PV_impresso_D1_CD1.pdf
+exam,enem-2019-d2.pdf,public exam,https://download.inep.gov.br/educacao_basica/enem/provas/2019/2019_PV_impresso_D2_CD5.pdf
+exam,enem-2020-d1.pdf,public exam,https://download.inep.gov.br/enem/provas_e_gabaritos/2020_PV_impresso_D1_CD1.pdf
+key,enem-2020-d1-key.pdf,public exam,https://download.inep.gov.br/enem/provas_e_gabaritos/2020_GB_impresso_D1_CD1.pdf
+exam,enem-2020-d2.pdf,public exam,https://download.inep.gov.br/enem/provas_e_gabaritos/2020_PV_impresso_D2_CD5.pdf
+key,enem-2020-d2-key.pdf,public exam,https://download.inep.gov.br/enem/provas_e_gabaritos/2020_GB_impresso_D2_CD5.pdf
+exam,enem-2021-d1.pdf,public exam,https://download.inep.gov.br/enem/provas_e_gabaritos/2021_PV_impresso_D1_CD1.pdf
+key,enem-2021-d1-key.pdf,public exam,https://download.inep.gov.br/enem/provas_e_gabaritos/2021_GB_impresso_D1_CD1.pdf
+exam,enem-2021-d2.pdf,public exam,https://download.inep.gov.br/enem/provas_e_gabaritos/2021_PV_impresso_D2_CD5.pdf
+key,enem-2021-d2-key.pdf,public exam,https://download.inep.gov.br/enem/provas_e_gabaritos/2021_GB_impresso_D2_CD5.pdf
+exam,enem-2022-d1.pdf,public exam,https://download.inep.gov.br/enem/provas_e_gabaritos/2022_PV_impresso_D1_CD1.pdf
+key,enem-2022-d1-key.pdf,public exam,https://download.inep.gov.br/enem/provas_e_gabaritos/2022_GB_impresso_D1_CD1.pdf
+exam,enem-2022-d2.pdf,public exam,https://download.inep.gov.br/enem/provas_e_gabaritos/2022_PV_impresso_D2_CD5.pdf
+key,enem-2022-d2-key.pdf,public exam,https://download.inep.gov.br/enem/provas_e_gabaritos/2022_GB_impresso_D2_CD5.pdf
+exam,enem-2023-d1.pdf,public exam,https://download.inep.gov.br/enem/provas_e_gabaritos/2023_PV_impresso_D1_CD1.pdf
+key,enem-2023-d1-key.pdf,public exam,https://download.inep.gov.br/enem/provas_e_gabaritos/2023_GB_impresso_D1_CD1.pdf
+exam,enem-2023-d2.pdf,public exam,https://download.inep.gov.br/enem/provas_e_gabaritos/2023_PV_impresso_D2_CD5.pdf
+key,enem-2023-d2-key.pdf,public exam,https://download.inep.gov.br/enem/provas_e_gabaritos/2023_GB_impresso_D2_CD5.pdf
+exam,enem-2024-d1.pdf,public exam,https://download.inep.gov.br/enem/provas_e_gabaritos/2024_PV_impresso_D1_CD1.pdf
+key,enem-2024-d1-key.pdf,public exam,https://download.inep.gov.br/enem/provas_e_gabaritos/2024_GB_impresso_D1_CD1.pdf
+exam,enem-2024-d2.pdf,public exam,https://download.inep.gov.br/enem/provas_e_gabaritos/2024_PV_impresso_D2_CD5.pdf
+key,enem-2024-d2-key.pdf,public exam,https://download.inep.gov.br/enem/provas_e_gabaritos/2024_GB_impresso_D2_CD5.pdf
+exam,uem-2020-vestibular.pdf,public exam,https://www.vestibular.uem.br/provas/ve20/P1.pdf
+exam,uem-2021-vestibular.pdf,public exam,https://www.vestibular.uem.br/provas/ve21/P1.pdf
+exam,uem-2022-vestibular.pdf,public exam,https://www.vestibular.uem.br/provas/ve22/P1.pdf
+exam,uem-2023-vestibular.pdf,public exam,https://www.vestibular.uem.br/provas/ve23/P1.pdf
+exam,uem-2024-vestibular.pdf,public exam,https://www.vestibular.uem.br/provas/ve24/P1.pdf
+exam,uem-2025-vestibular.pdf,public exam,https://www.vestibular.uem.br/provas/ve25/P1.pdf
+exam,uem-2021-pas-p1.pdf,public exam,https://www.vestibular.uem.br/provas/pas21/P1.pdf
+exam,uem-2021-pas-e1.pdf,public exam,https://www.vestibular.uem.br/provas/pas21/E1.pdf
+exam,uem-2022-pas-e1.pdf,public exam,https://www.vestibular.uem.br/provas/pas22/E1.pdf
+exam,uem-2022-pas-e2.pdf,public exam,https://www.vestibular.uem.br/provas/pas22/E2.pdf
+exam,uem-2022-pas-e3.pdf,public exam,https://www.vestibular.uem.br/provas/pas22/E3.pdf
+exam,uem-2023-pas-e1.pdf,public exam,https://www.vestibular.uem.br/provas/pas23/E1.pdf
+exam,uem-2023-pas-e2.pdf,public exam,https://www.vestibular.uem.br/provas/pas23/E2.pdf
+exam,uem-2023-pas-e3.pdf,public exam,https://www.vestibular.uem.br/provas/pas23/E3.pdf
+exam,uepg-2016-verao-grupo-2-por-mat-fis.pdf,public exam,https://cps.uepg.br/vestibular/provas/verao_2016/Grupo%202%20-%20Por%20Mat%20Fis.pdf
+exam,uepg-2016-verao-grupo-3-por-geo-his.pdf,public exam,https://cps.uepg.br/vestibular/provas/verao_2016/Grupo%203%20-%20Por%20Geo%20His.pdf
+exam,uepg-2016-verao-grupo-6-por-mat-geo.pdf,public exam,https://cps.uepg.br/vestibular/provas/verao_2016/Grupo%206%20-%20Por%20Mat%20Geo.pdf
+exam,uepg-2016-inverno-por-mat-fis.pdf,public exam,https://cps.uepg.br/vestibular/provas/inverno_2016/Por%20Mat%20Fis.pdf
+exam,uepg-2016-inverno-qui-mat-fis.pdf,public exam,https://cps.uepg.br/vestibular/provas/inverno_2016/Qui%20Mat%20Fis.pdf
+exam,uepg-2016-inverno-por-mat-geo.pdf,public exam,https://cps.uepg.br/vestibular/provas/inverno_2016/Por%20Mat%20Geo.pdf
+exam,uepg-2017-inverno-conhecimentos-gerais.pdf,public exam,https://cps.uepg.br/vestibular/provas/inverno_2017/Conhecimentos%20Gerais.pdf
+exam,uepg-2014-ead-por-mat-geo.pdf,public exam,https://cps.uepg.br/sistemas/uab/ead_2014/provas/Por_Mat_Geo.pdf
+exam,uepg-2025-grupo-1-por-mat-his.pdf,public exam,https://www2.uepg.br/cps/wp-content/uploads/sites/270/2025/12/Grupo-1-Por-Mat-His-2025.pdf
+exam,uepg-2025-grupo-2-por-mat-fis.pdf,public exam,https://www2.uepg.br/cps/wp-content/uploads/sites/270/2025/12/Grupo-2-Por-Mat-Fis-2025.pdf
+exam,uepg-2025-grupo-3-por-geo-his.pdf,public exam,https://www2.uepg.br/cps/wp-content/uploads/sites/270/2025/12/Grupo-3-Por-Geo-His-2025.pdf
+exam,uepg-2025-grupo-4-qui-bio-fis.pdf,public exam,https://www2.uepg.br/cps/wp-content/uploads/sites/270/2025/12/Grupo-4-Qui-Bio-Fis-2025.pdf
+exam,uepg-2025-grupo-5-qui-mat-fis.pdf,public exam,https://www2.uepg.br/cps/wp-content/uploads/sites/270/2025/12/Grupo-5-Qui-Mat-Fis-2025.pdf
+exam,uepg-2025-grupo-6-por-biol-his.pdf,public exam,https://www2.uepg.br/cps/wp-content/uploads/sites/270/2025/12/Grupo-6-Por-Biol-His-2025.pdf
+exam,uepg-2025-conhecimentos-gerais.pdf,public exam,https://www2.uepg.br/cps/wp-content/uploads/sites/270/2025/12/Conhecimentos-Gerais-2025.pdf
+exam,ufsc-2011-1.pdf,public exam,https://antiga.coperve.ufsc.br/provas_ant/2011-1-violeta.pdf
+exam,ufsc-2012-1.pdf,public exam,https://antiga.coperve.ufsc.br/provas_ant/2012-1-violeta.pdf
+exam,ufsc-2012-2.pdf,public exam,https://antiga.coperve.ufsc.br/provas_ant/2012-2-violeta.pdf
+exam,ufsc-2013-1.pdf,public exam,https://antiga.coperve.ufsc.br/provas_ant/2013-1-violeta.pdf
+exam,fuvest-2023-fase1.pdf,public exam,https://www.fuvest.br/wp-content/uploads/fuvest2023_primeira_fase_prova_V.pdf
+exam,uenp-2025.pdf,public exam,https://vestibular.uenp.edu.br/2025/docs/prova_espanhol_2025.pdf
+content,wikipedia-mitose.pdf,CC BY-SA 4.0,https://pt.wikipedia.org/api/rest_v1/page/pdf/Mitose
+content,wikipedia-fotossintese.pdf,CC BY-SA 4.0,https://pt.wikipedia.org/api/rest_v1/page/pdf/Fotoss%C3%ADntese
+content,wikipedia-revolucao-francesa.pdf,CC BY-SA 4.0,https://pt.wikipedia.org/api/rest_v1/page/pdf/Revolu%C3%A7%C3%A3o_Francesa
+content,wikipedia-tabela-periodica.pdf,CC BY-SA 4.0,https://pt.wikipedia.org/api/rest_v1/page/pdf/Tabela_peri%C3%B3dica
+content,wikipedia-leis-de-newton.pdf,CC BY-SA 4.0,https://pt.wikipedia.org/api/rest_v1/page/pdf/Leis_de_Newton
+content,wikipedia-teorema-de-pitagoras.pdf,CC BY-SA 4.0,https://pt.wikipedia.org/api/rest_v1/page/pdf/Teorema_de_Pit%C3%A1goras
+content,wikipedia-modernismo-no-brasil.pdf,CC BY-SA 4.0,https://pt.wikipedia.org/api/rest_v1/page/pdf/Modernismo_no_Brasil
+content,wikipedia-ciclo-hidrologico.pdf,CC BY-SA 4.0,https://pt.wikipedia.org/api/rest_v1/page/pdf/Ciclo_hidrol%C3%B3gico
+content,wikipedia-efeito-estufa.pdf,CC BY-SA 4.0,https://pt.wikipedia.org/api/rest_v1/page/pdf/Efeito_estufa
+content,wikipedia-era-vargas.pdf,CC BY-SA 4.0,https://pt.wikipedia.org/api/rest_v1/page/pdf/Era_Vargas
+content,wikipedia-guerra-fria.pdf,CC BY-SA 4.0,https://pt.wikipedia.org/api/rest_v1/page/pdf/Guerra_Fria
+content,wikipedia-iluminismo.pdf,CC BY-SA 4.0,https://pt.wikipedia.org/api/rest_v1/page/pdf/Iluminismo
+content,wikipedia-ligacao-quimica.pdf,CC BY-SA 4.0,https://pt.wikipedia.org/api/rest_v1/page/pdf/Liga%C3%A7%C3%A3o_qu%C3%ADmica
+content,wikipedia-termodinamica.pdf,CC BY-SA 4.0,https://pt.wikipedia.org/api/rest_v1/page/pdf/Termodin%C3%A2mica
+content,wikipedia-selecao-natural.pdf,CC BY-SA 4.0,https://pt.wikipedia.org/api/rest_v1/page/pdf/Sele%C3%A7%C3%A3o_natural
+content,wikipedia-urbanizacao.pdf,CC BY-SA 4.0,https://pt.wikipedia.org/api/rest_v1/page/pdf/Urbaniza%C3%A7%C3%A3o
+content,wikipedia-globalizacao.pdf,CC BY-SA 4.0,https://pt.wikipedia.org/api/rest_v1/page/pdf/Globaliza%C3%A7%C3%A3o
+content,wikipedia-cerrado.pdf,CC BY-SA 4.0,https://pt.wikipedia.org/api/rest_v1/page/pdf/Cerrado
+content,wikipedia-equacao-quadratica.pdf,CC BY-SA 4.0,https://pt.wikipedia.org/api/rest_v1/page/pdf/Equa%C3%A7%C3%A3o_quadr%C3%A1tica
+content,wikipedia-probabilidade.pdf,CC BY-SA 4.0,https://pt.wikipedia.org/api/rest_v1/page/pdf/Probabilidade
+content,wikipedia-estequiometria.pdf,CC BY-SA 4.0,https://pt.wikipedia.org/api/rest_v1/page/pdf/Estequiometria
+content,wikipedia-celula.pdf,CC BY-SA 4.0,https://pt.wikipedia.org/api/rest_v1/page/pdf/C%C3%A9lula
+content,wikipedia-revolucao-industrial.pdf,CC BY-SA 4.0,https://pt.wikipedia.org/api/rest_v1/page/pdf/Revolu%C3%A7%C3%A3o_Industrial
+content,wikipedia-feudalismo.pdf,CC BY-SA 4.0,https://pt.wikipedia.org/api/rest_v1/page/pdf/Feudalismo
+content,wikipedia-figura-de-linguagem.pdf,CC BY-SA 4.0,https://pt.wikipedia.org/api/rest_v1/page/pdf/Figura_de_linguagem
+content,wikipedia-logaritmo.pdf,CC BY-SA 4.0,https://pt.wikipedia.org/api/rest_v1/page/pdf/Logaritmo
+content,wikipedia-progressao-aritmetica.pdf,CC BY-SA 4.0,https://pt.wikipedia.org/api/rest_v1/page/pdf/Progress%C3%A3o_aritm%C3%A9tica
+content,wikipedia-respiracao-celular.pdf,CC BY-SA 4.0,https://pt.wikipedia.org/api/rest_v1/page/pdf/Respira%C3%A7%C3%A3o_celular
+content,wikipedia-tectonica-de-placas.pdf,CC BY-SA 4.0,https://pt.wikipedia.org/api/rest_v1/page/pdf/Tect%C3%B4nica_de_placas
+content,wikipedia-romantismo.pdf,CC BY-SA 4.0,https://pt.wikipedia.org/api/rest_v1/page/pdf/Romantismo
+content,wikipedia-barroco.pdf,CC BY-SA 4.0,https://pt.wikipedia.org/api/rest_v1/page/pdf/Barroco
+content,wikipedia-clima.pdf,CC BY-SA 4.0,https://pt.wikipedia.org/api/rest_v1/page/pdf/Clima
+content,wikipedia-corrente-eletrica.pdf,CC BY-SA 4.0,https://pt.wikipedia.org/api/rest_v1/page/pdf/Corrente_el%C3%A9trica
+content,wikipedia-acido-desoxirribonucleico.pdf,CC BY-SA 4.0,https://pt.wikipedia.org/api/rest_v1/page/pdf/%C3%81cido_desoxirribonucleico
+content,wikibooks-matematica-elementar-conjuntos.pdf,CC BY-SA 4.0,https://pt.wikibooks.org/api/rest_v1/page/pdf/Matem%C3%A1tica_elementar%2FConjuntos
+content,wikibooks-matematica-elementar-logaritmos.pdf,CC BY-SA 4.0,https://pt.wikibooks.org/api/rest_v1/page/pdf/Matem%C3%A1tica_elementar%2FLogaritmos
+content,wikibooks-matematica-elementar-funcoes.pdf,CC BY-SA 4.0,https://pt.wikibooks.org/api/rest_v1/page/pdf/Matem%C3%A1tica_elementar%2FFun%C3%A7%C3%B5es
+content,wikibooks-matematica-elementar-matrizes.pdf,CC BY-SA 4.0,https://pt.wikibooks.org/api/rest_v1/page/pdf/Matem%C3%A1tica_elementar%2FMatrizes
+content,wikibooks-matematica-elementar-trigonometria-funcoes-trigonometricas.pdf,CC BY-SA 4.0,https://pt.wikibooks.org/api/rest_v1/page/pdf/Matem%C3%A1tica_elementar%2FTrigonometria%2FFun%C3%A7%C3%B5es_trigonom%C3%A9tricas
+content,wikibooks-matematica-elementar-geometria-plana-poligonos.pdf,CC BY-SA 4.0,https://pt.wikibooks.org/api/rest_v1/page/pdf/Matem%C3%A1tica_elementar%2FGeometria_plana%2FPol%C3%ADgonos
+content,wikibooks-matematica-elementar-expressoes-algebricas.pdf,CC BY-SA 4.0,https://pt.wikibooks.org/api/rest_v1/page/pdf/Matem%C3%A1tica_elementar%2FExpress%C3%B5es_alg%C3%A9bricas
+content,wikibooks-introducao-a-fisica-energia.pdf,CC BY-SA 4.0,https://pt.wikibooks.org/api/rest_v1/page/pdf/Introdu%C3%A7%C3%A3o_%C3%A0_f%C3%ADsica%2FEnergia
+content,wikibooks-introducao-a-fisica-mecanica-dos-fluidos-densidade.pdf,CC BY-SA 4.0,https://pt.wikibooks.org/api/rest_v1/page/pdf/Introdu%C3%A7%C3%A3o_%C3%A0_f%C3%ADsica%2FMec%C3%A2nica_dos_fluidos%2FDensidade
+content,wikibooks-introducao-a-fisica-capacidade-termica-e-calor-especifico.pdf,CC BY-SA 4.0,https://pt.wikibooks.org/api/rest_v1/page/pdf/Introdu%C3%A7%C3%A3o_%C3%A0_f%C3%ADsica%2FCapacidade_t%C3%A9rmica_e_calor_espec%C3%ADfico
+both,wikibooks-introducao-a-fisica-conceitos-introdutorios.pdf,CC BY-SA 4.0,https://pt.wikibooks.org/api/rest_v1/page/pdf/Introdu%C3%A7%C3%A3o_%C3%A0_f%C3%ADsica%2FConceitos_introdut%C3%B3rios
+content,wikibooks-programar-em-c-ponteiros.pdf,CC BY-SA 4.0,https://pt.wikibooks.org/api/rest_v1/page/pdf/Programar_em_C%2FPonteiros
+content,wikibooks-programar-em-c-funcoes.pdf,CC BY-SA 4.0,https://pt.wikibooks.org/api/rest_v1/page/pdf/Programar_em_C%2FFun%C3%A7%C3%B5es
+content,wikibooks-programar-em-c-controle-de-fluxo.pdf,CC BY-SA 4.0,https://pt.wikibooks.org/api/rest_v1/page/pdf/Programar_em_C%2FControle_de_fluxo
+content,wikibooks-programar-em-c-tipos-de-dados.pdf,CC BY-SA 4.0,https://pt.wikibooks.org/api/rest_v1/page/pdf/Programar_em_C%2FTipos_de_dados
+content,wikibooks-bioquimica-proteinas.pdf,CC BY-SA 4.0,https://pt.wikibooks.org/api/rest_v1/page/pdf/Bioqu%C3%ADmica%2FProte%C3%ADnas
+content,wikibooks-bioquimica-enzimas.pdf,CC BY-SA 4.0,https://pt.wikibooks.org/api/rest_v1/page/pdf/Bioqu%C3%ADmica%2FEnzimas
+content,wikibooks-bioquimica-ph-pka-e-solucoes-tampao.pdf,CC BY-SA 4.0,https://pt.wikibooks.org/api/rest_v1/page/pdf/Bioqu%C3%ADmica%2FpH%2C_pKa_e_solu%C3%A7%C3%B5es_tamp%C3%A3o
+content,wikibooks-bioquimica-o-codigo-genetico.pdf,CC BY-SA 4.0,https://pt.wikibooks.org/api/rest_v1/page/pdf/Bioqu%C3%ADmica%2FO_c%C3%B3digo_gen%C3%A9tico
+content,wikibooks-portugues-escolas-literarias-brasil-quinhentismo.pdf,CC BY-SA 4.0,https://pt.wikibooks.org/api/rest_v1/page/pdf/Portugu%C3%AAs%2FEscolas_liter%C3%A1rias%2FBrasil%2FQuinhentismo
+content,wikibooks-portugues-classificacao-das-palavras-adverbios.pdf,CC BY-SA 4.0,https://pt.wikibooks.org/api/rest_v1/page/pdf/Portugu%C3%AAs%2FClassifica%C3%A7%C3%A3o_das_palavras%2FAdv%C3%A9rbios
+content,wikibooks-portugues-periodo-composto-oracoes-subordinadas-substantivas.pdf,CC BY-SA 4.0,https://pt.wikibooks.org/api/rest_v1/page/pdf/Portugu%C3%AAs%2FPer%C3%ADodo_composto%2FOra%C3%A7%C3%B5es_subordinadas%2FSubstantivas
+content,wikibooks-portugues-classificacao-das-palavras-verbos.pdf,CC BY-SA 4.0,https://pt.wikibooks.org/api/rest_v1/page/pdf/Portugu%C3%AAs%2FClassifica%C3%A7%C3%A3o_das_palavras%2FVerbos
+content,wikibooks-calculo-volume-1-limites-e-continuidade.pdf,CC BY-SA 4.0,https://pt.wikibooks.org/api/rest_v1/page/pdf/C%C3%A1lculo_(Volume_1)%2FLimites_e_Continuidade
+content,wikibooks-calculo-volume-1-derivadas.pdf,CC BY-SA 4.0,https://pt.wikibooks.org/api/rest_v1/page/pdf/C%C3%A1lculo_(Volume_1)%2FDerivadas
+content,wikibooks-calculo-volume-1-integrais.pdf,CC BY-SA 4.0,https://pt.wikibooks.org/api/rest_v1/page/pdf/C%C3%A1lculo_(Volume_1)%2FIntegrais
+content,wikibooks-historia-do-brasil-revolucao-farroupilha.pdf,CC BY-SA 4.0,https://pt.wikibooks.org/api/rest_v1/page/pdf/Hist%C3%B3ria_do_Brasil%2FRevolu%C3%A7%C3%A3o_Farroupilha
+content,wikibooks-historia-do-brasil-o-primeiro-reinado.pdf,CC BY-SA 4.0,https://pt.wikibooks.org/api/rest_v1/page/pdf/Hist%C3%B3ria_do_Brasil%2FO_Primeiro_Reinado
+content,wikibooks-eletromagnetismo-campo-eletrico.pdf,CC BY-SA 4.0,https://pt.wikibooks.org/api/rest_v1/page/pdf/Eletromagnetismo%2FCampo_el%C3%A9trico
+content,gutenberg-55752.txt,public domain,https://www.gutenberg.org/cache/epub/55752/pg55752.txt
+content,gutenberg-3333.txt,public domain,https://www.gutenberg.org/cache/epub/3333/pg3333.txt
+content,gutenberg-54829.txt,public domain,https://www.gutenberg.org/cache/epub/54829/pg54829.txt
+both,reamat-algebra-linear.pdf,CC BY-SA 3.0,https://www.ufrgs.br/reamat/AlgebraLinear/livro/livro.pdf
+both,reamat-pre-calculo.pdf,CC BY-SA 3.0,https://www.ufrgs.br/reamat/PreCalculo/livro/livro.pdf
+both,reamat-calculo-numerico.pdf,CC BY-SA 3.0,https://www.ufrgs.br/reamat/CalculoNumerico/livro-py/livro-py.pdf

@@ -10,7 +10,7 @@
     "dev": "npm run tauri dev -w frontend",
     "build": "npm run tauri build -w frontend",
     "web": "npm run dev -w frontend",
-    "test": "npm test --workspaces --if-present"
+    "test": "node ml/fetch.mjs --check && npm test --workspaces --if-present"
   },
   "engines": {
     "node": ">=22"
