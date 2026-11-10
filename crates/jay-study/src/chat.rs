@@ -732,6 +732,19 @@ impl Checked {
         self.evidence.retain(|_| *k.next().unwrap());
     }
 
+    /// For an app reply: the student never sees "trechos" (to them the passages are the guide), so a
+    /// sentence that says the word goes, unless it is all that is left. `evidence` stays parallel.
+    fn drop_trecho(&mut self) {
+        let keep: Vec<bool> = self.sentences.iter().map(|s| !norm(&s.text).split(' ').any(|w| w == "trecho" || w == "trechos")).collect();
+        if !keep.contains(&true) {
+            return;
+        }
+        let mut k = keep.iter();
+        self.sentences.retain(|_| *k.next().unwrap());
+        let mut k = keep.iter();
+        self.evidence.retain(|_| *k.next().unwrap());
+    }
+
     fn confirmed(&self) -> usize {
         self.sentences.iter().filter(|s| s.status == Status::Confirmed).count()
     }
@@ -740,6 +753,12 @@ impl Checked {
     fn checkable(&self) -> usize {
         self.sentences.iter().filter(|s| s.status != Status::Plain).count()
     }
+}
+
+/// An app question stays one whether or not the guide answered it (the sentences keep their
+/// statuses): the screen then speaks of the guide, not of "your sources".
+fn reply_kind(app: bool, checked: Kind) -> Kind {
+    if app { Kind::App } else { checked }
 }
 
 /// A sentence that names the sources and denies something ("Os trechos não falam de X."): it talks
@@ -1262,7 +1281,7 @@ impl Store {
         } else if general {
             "O aluno não escolheu material: responda com o que você sabe, em até 4 frases curtas, só sobre a pergunta. Onde não souber com certeza, diga isso no lugar do dado.".to_owned()
         } else if app {
-            format!("Os trechos são o guia do Jay-S, o aplicativo de estudos. Responda como fazer isso no aplicativo, SÓ com o que os trechos dizem, em até 6 frases curtas, com os nomes de botões e seções como estão escritos neles. Fale direto, sem citar os trechos no texto ('o trecho diz', 'trecho 3'). {CITE}")
+            format!("Os trechos são o guia do Jay-S, o aplicativo de estudos. Responda como fazer isso no aplicativo, SÓ com o que os trechos dizem, em até 6 frases curtas, com os nomes de botões e seções como estão escritos neles. Fale direto, sem citar os trechos no texto ('o trecho diz', 'trecho 3'): para o aluno eles são 'o guia do Jay-S', e a palavra 'trecho' nunca aparece na resposta. Se o aluno quer algo que o aplicativo não faz, diga isso com franqueza e conte o caminho mais próximo que o guia dá. {CITE}")
         } else {
             format!("Responda SÓ com o que os trechos dizem e só o que responde à pergunta, em até 6 frases curtas. Fale do assunto direto, sem citar os trechos no texto ('o trecho diz', 'trecho 3'). {CITE} Quando falar de uma questão da prova, o gabarito do trecho é a verdade.")
         };
@@ -1300,6 +1319,9 @@ impl Store {
             }
         }
         best.drop_meta();
+        if app {
+            best.drop_trecho();
+        }
         if best.kind == Kind::Material {
             checks.second_reading = self.second_reading(&mut best, passages, server, cancel)?;
             if best.confirmed() == 0 {
@@ -1334,7 +1356,7 @@ impl Store {
             .into_iter()
             .map(|s| Sentence { sources: s.sources.iter().filter_map(|n| order.iter().position(|o| o == n).map(|i| i + 1)).collect(), ..s })
             .collect();
-        Ok(Reply { kind: if app && best.kind == Kind::Material { Kind::App } else { best.kind }, sentences, sources, checks, list: best.list })
+        Ok(Reply { kind: reply_kind(app, best.kind), sentences, sources, checks, list: best.list })
     }
 
     /// Jay-AI reads each confirmed sentence with the quote it came with and that whole passage, as a
@@ -1558,6 +1580,24 @@ mod tests {
         let mut alone = check(&json!({ "sentences": [meta] }), &p, "x?", false).unwrap();
         alone.drop_meta();
         assert_eq!((alone.sentences.len(), alone.evidence.len()), (1, 1));
+    }
+
+    #[test]
+    fn an_app_question_stays_an_app_reply_when_nothing_is_confirmed() {
+        assert_eq!((reply_kind(true, Kind::Unknown), reply_kind(true, Kind::Material), reply_kind(false, Kind::Unknown)), (Kind::App, Kind::App, Kind::Unknown));
+    }
+
+    #[test]
+    fn an_app_reply_never_says_trecho_unless_it_has_nothing_else() {
+        let p = [passage("Para criar flashcards abra a seção Flashcards e escolha o material.", None)];
+        let q = "abra a seção Flashcards e escolha o material";
+        let s = |t: &str| json!({ "text": t, "source": 1, "quote": q });
+        let mut c = check(&json!({ "sentences": [s("Os trechos não falam de exportar."), s("Abra a seção Flashcards."), s("Segundo o trecho 1, escolha o material.")] }), &p, "x?", false).unwrap();
+        c.drop_trecho();
+        assert_eq!((c.sentences.iter().map(|s| s.text.as_str()).collect::<Vec<_>>(), c.evidence.len()), (vec!["Abra a seção Flashcards."], 1));
+        let mut only = check(&json!({ "sentences": [s("Os trechos não falam de exportar.")] }), &p, "x?", false).unwrap();
+        only.drop_trecho();
+        assert_eq!((only.sentences.len(), only.evidence.len()), (1, 1));
     }
 
     #[test]
