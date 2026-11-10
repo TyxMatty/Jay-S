@@ -176,9 +176,10 @@ pub fn classify(text: &str) -> Classification {
     }
     let Signals { choice_questions, sum_questions, headers, exam_words, chars, density, first_at } = signals(text);
     let (kind, sure) = match choice_questions + sum_questions {
-        // Many question headers and almost no options read: an exam whose questions are images or
-        // outlined text (ENCCEJA 2017, a scanned ENEM). Headers as dense as questions are in an
-        // exam (the 0.2 below), so a long handout with "Exercício n" headings stays out.
+        // Many question headers and almost no options read: an exam read by OCR, which loses the
+        // option letters drawn inside circles (ENCCEJA 2017, a scanned ENEM). Headers as dense as
+        // questions are in an exam (the 0.2 below), so a long handout with "Exercício n" headings
+        // stays out.
         0..=2 if headers >= 20 && headers as f32 >= 0.2 * chars as f32 / 1000.0 => (MaterialKind::Exam, false),
         0 if headers >= 3 && exam_words >= 1 => (MaterialKind::Exam, false),
         0 => (MaterialKind::Content, headers == 0),
@@ -281,7 +282,7 @@ mod tests {
         assert!(!c.sure);
     }
 
-    /// What the reader gets from an exam with outlined text: the headers and loose letters.
+    /// What the reader gets from an exam whose options it can't read: the headers and loose letters.
     fn unread_question(n: u32) -> String {
         format!("QUESTÃO {n}\nCultura de massa e cultura popular\nA\nB\nC\nD\n")
     }

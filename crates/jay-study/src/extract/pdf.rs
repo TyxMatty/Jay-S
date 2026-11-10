@@ -38,12 +38,12 @@ pub fn extract(bytes: Vec<u8>) -> Result<Extracted, ExtractError> {
     let mut ocr_error: Option<String> = None;
     let cache = RenderCache::new();
     for (index, page) in pages.iter().enumerate().take(MAX_PAGES) {
-        let text = guard(|| page_text(page)).unwrap_or_else(|| {
+        let (text, unmapped) = guard(|| page_text(page)).unwrap_or_else(|| {
             out.warnings.push(Warning::PageUnreadable { page: index as u32 + 1 });
-            String::new()
+            (String::new(), 0)
         });
         let letters = text.chars().filter(|c| c.is_alphanumeric()).count();
-        let text = if letters < SCAN_BELOW_CHARS && ocr_error.is_none() && out.ocr_pages < MAX_OCR_PAGES {
+        let text = if needs_ocr(letters, unmapped) && ocr_error.is_none() && out.ocr_pages < MAX_OCR_PAGES {
             let (w, h) = page.render_dimensions();
             let scale = OCR_WIDTH / w.max(1.0);
             let drawn = guard(|| {
@@ -86,14 +86,20 @@ fn guard<T>(f: impl FnOnce() -> T) -> Option<T> {
     catch_unwind(AssertUnwindSafe(f)).ok()
 }
 
-/// The page's text in drawing order, one line per line.
-fn page_text(page: &hayro::hayro_syntax::page::Page<'_>) -> String {
+/// Whether a page goes to the OCR: (almost) no text, or most of its glyphs in fonts that don't say
+/// which letters they are (ENCCEJA 2017 and ENEM 2021 keep the headers and lose the questions).
+fn needs_ocr(letters: usize, unmapped: usize) -> bool {
+    letters < SCAN_BELOW_CHARS || (unmapped >= SCAN_BELOW_CHARS && unmapped > letters)
+}
+
+/// The page's text in drawing order, one line per line, and how many glyphs had no Unicode.
+fn page_text(page: &hayro::hayro_syntax::page::Page<'_>) -> (String, usize) {
     let cache = InterpreterCache::new();
     let (w, h) = page.render_dimensions();
     let mut ctx = Context::new(page.initial_transform(true).to_kurbo(), Rect::new(0.0, 0.0, w as f64, h as f64), &cache, page.xref(), InterpreterSettings::default());
-    let mut device = TextDevice(vec![]);
+    let mut device = TextDevice { glyphs: vec![], unmapped: 0 };
     interpret_page(page, &mut ctx, &mut device);
-    lines_from_glyphs(&device.0).join("\n")
+    (lines_from_glyphs(&device.glyphs).join("\n"), device.unmapped)
 }
 
 /// A glyph as drawn: its text, box and baseline, in page points from the top-left.
@@ -106,7 +112,11 @@ struct PlacedGlyph {
 }
 
 /// Collects the glyphs of a page instead of drawing them.
-struct TextDevice(Vec<PlacedGlyph>);
+struct TextDevice {
+    glyphs: Vec<PlacedGlyph>,
+    /// Glyphs dropped because the font gives no Unicode for them.
+    unmapped: usize,
+}
 
 impl<'a> Device<'a> for TextDevice {
     fn draw_path(&mut self, _: &BezPath, _: DrawProps<'a>, _: &DrawMode) {}
@@ -121,7 +131,10 @@ impl<'a> Device<'a> for TextDevice {
             let text = match glyph.as_unicode() {
                 Some(BfString::Char(c)) => c.to_string(),
                 Some(BfString::String(s)) => s,
-                None => continue,
+                None => {
+                    self.unmapped += 1;
+                    continue;
+                }
             };
             // Glyph space is 1000 units per em; the transform takes it to page points.
             let t: Affine = props.transform * glyph.transform();
@@ -137,7 +150,7 @@ impl<'a> Device<'a> for TextDevice {
                 continue;
             }
             let (x0, x1) = (origin.x.min(end.x) as f32, origin.x.max(end.x) as f32);
-            self.0.push(PlacedGlyph { text, x0, x1, baseline: origin.y as f32, size });
+            self.glyphs.push(PlacedGlyph { text, x0, x1, baseline: origin.y as f32, size });
         }
     }
 }
@@ -173,7 +186,11 @@ pub(crate) mod tests {
 
     /// A PDF whose pages each draw the given lines in Helvetica, top to bottom.
     pub fn sample(pages: &[&[&str]]) -> Vec<u8> {
-        let mut objs: Vec<String> = vec!["<< /Type /Catalog /Pages 2 0 R >>".into(), String::new(), "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".into()];
+        sample_with_font("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>", pages)
+    }
+
+    fn sample_with_font(font: &str, pages: &[&[&str]]) -> Vec<u8> {
+        let mut objs: Vec<String> = vec!["<< /Type /Catalog /Pages 2 0 R >>".into(), String::new(), font.into()];
         let mut kids = vec![];
         for lines in pages {
             let id = objs.len() + 1;
@@ -205,6 +222,21 @@ pub(crate) mod tests {
         assert_eq!(out.pages, 2);
         assert_eq!(out.text, "Questao 1 Qual e a capital do Parana?\na) Curitiba\nb) Ponta Grossa\x0cSegunda pagina com bastante texto aqui");
         assert_eq!(out.ocr_pages, 0);
+    }
+
+    #[test]
+    fn a_page_of_glyphs_with_no_unicode_goes_to_the_ocr() {
+        // No text, or more glyphs lost than letters read.
+        for (letters, unmapped, ocr) in [(0, 0, true), (24, 0, true), (25, 0, false), (25, 24, false), (3000, 0, false), (3000, 2999, false), (3000, 3000, false), (100, 101, true), (120, 1500, true), (30, 26, false), (26, 30, true)] {
+            assert_eq!(needs_ocr(letters, unmapped), ocr, "{letters} letters, {unmapped} unmapped");
+        }
+        // A font whose codes name glyphs nobody knows: the reader gets no letter and counts them.
+        let font = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding << /Type /Encoding /Differences [65 /g001 /g002 /g003] >> >>";
+        let pdf = Pdf::new(sample_with_font(font, &[&["ABCABCABCABC", "CBA"]])).unwrap();
+        assert_eq!(page_text(&pdf.pages()[0]), (String::new(), 15));
+        // The same page in plain Helvetica loses nothing.
+        let pdf = Pdf::new(sample(&[&["ABCABCABCABC", "CBA"]])).unwrap();
+        assert_eq!(page_text(&pdf.pages()[0]), ("ABCABCABCABC\nCBA".to_owned(), 0));
     }
 
     #[test]
