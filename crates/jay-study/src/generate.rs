@@ -146,7 +146,7 @@ fn field<'a>(v: &'a Value, name: &str, max: usize) -> Result<&'a str, AiError> {
 /// Checks a reply against `style` and makes it a question (options shuffled, answer moved along).
 pub fn parse_question(style: &Style, reply: &Value, number: u32, material: &str) -> Result<Question, AiError> {
     let n = style.options as usize;
-    let topic = field(reply, "topic", 80)?.to_owned();
+    let topic = whole_words(field(reply, "topic", 80)?, 60);
     let explanation = field(reply, "explanation", 1000)?.to_owned();
     let (stem, passage, options, answer) = match style.kind {
         QuestionKind::Choice => {
@@ -343,9 +343,30 @@ pub fn tag_topics(server: &Server, questions: &[Question], cancel: &AtomicBool) 
     Ok(topics)
 }
 
+/// A text that reached the schema's cap was cut by it mid-word, sometimes with a stray character
+/// ("Intervalo de Confiança para Média com Desvio Pá", "…populacional com变"): back to the last
+/// whole word.
+fn whole_words(text: &str, cap: usize) -> String {
+    if text.chars().count() < cap {
+        return text.to_owned();
+    }
+    text.rsplit_once(' ').map_or(text, |(whole, _)| whole).trim_end_matches(|c: char| !c.is_alphanumeric()).to_owned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_topic_cut_by_the_cap_ends_on_a_whole_word() {
+        let cut = "Estatística: Intervalo de Confiança para Média com Desvio Pá";
+        assert_eq!(cut.chars().count(), 60);
+        assert_eq!(whole_words(cut, 60), "Estatística: Intervalo de Confiança para Média com Desvio");
+        assert_eq!(whole_words("Estatística: teste de hipóteses para média populacional com变", 60), "Estatística: teste de hipóteses para média populacional");
+        // Under the cap, or one long word: as it came.
+        assert_eq!(whole_words("Biologia: fotossíntese", 60), "Biologia: fotossíntese");
+        assert_eq!(whole_words(&"a".repeat(60), 60), "a".repeat(60));
+    }
 
     /// The model writes the fields in the schema's order (llama-server's grammar): the question
     /// before its explanation, an option's text before whether it is right. Without serde_json's

@@ -568,6 +568,9 @@ impl Store {
         ];
         let mut reply = json_in(&server.chat(&messages, Some(&schema), 1500, &mut |_| {}, cancel)?)?;
         drop_contradictions(&mut reply, &e.questions);
+        if !result.questions.iter().any(|g| g.points >= 1.0) {
+            no_hits(&mut reply, result.questions.iter().filter(|g| g.marked.is_none()).count(), result.questions.len());
+        }
         a.analysis = Some(reply);
         self.save_attempt(&a)?;
         Ok(a)
@@ -629,6 +632,18 @@ pub enum AnswerError {
     /// Learning mode: the question was already graded.
     Locked,
     Invalid,
+}
+
+/// With no question right, the model still praises ("você acertou todas as questões": seen on an
+/// exam left blank, with the prompt saying "nenhuma"). What it wrote about what went well goes, and
+/// the summary is the fact, written here. What to review and the next steps stay.
+fn no_hits(reply: &mut Value, blank: usize, total: usize) {
+    reply["strengths"] = json!([]);
+    reply["summary"] = json!(if blank == total {
+        format!("Você deixou as {total} questões em branco, então ainda não dá para dizer o que você já sabe. Comece pelos temas abaixo e faça a prova de novo.")
+    } else {
+        format!("Você não acertou nenhuma das {total} questões desta prova ({blank} em branco). Comece pelos temas abaixo e faça a prova de novo.")
+    });
 }
 
 /// F6 in docs/SEGURANCA.md: the analysis is text nothing else checks, and an instruction planted in
@@ -726,6 +741,14 @@ mod tests {
             "next": ["PWNED", "Estude as Mitocôndrias como local da fotossíntese.", "Refaça a questão 1, que estava errada."],
         });
         assert_eq!(drop_contradictions(&mut reply, &exam), 3);
+        // Nothing right: the praise goes and the summary is the count, whatever the model wrote.
+        let mut praised = json!({ "strengths": ["Você acertou todas as questões."], "review": [{ "topic": "t", "why": "Deixou em branco", "tip": "Revise." }], "next": ["Refaça."], "summary": "Você demonstrou um conhecimento sólido." });
+        no_hits(&mut praised, 10, 10);
+        assert_eq!(praised["strengths"], json!([]));
+        assert!(praised["summary"].as_str().unwrap().starts_with("Você deixou as 10 questões em branco"), "{praised}");
+        assert_eq!((praised["review"].as_array().unwrap().len(), praised["next"].as_array().unwrap().len()), (1, 1));
+        no_hits(&mut praised, 3, 10);
+        assert!(praised["summary"].as_str().unwrap().starts_with("Você não acertou nenhuma das 10 questões desta prova (3 em branco)"), "{praised}");
         assert_eq!(reply["summary"], "Você errou a questão 1. Você marcou a mitocôndria, mas é no cloroplasto.");
         assert_eq!(reply["review"].as_array().unwrap().len(), 1);
         // Harmless noise isn't a contradiction: "PWNED" stays (the check is about the key, not about style).
