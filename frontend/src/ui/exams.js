@@ -72,7 +72,7 @@ export function createViews(home) {
       show(createRunner(started, async (finished) => {
         const [attempt, questions] = await invoke('attempt_result', { id: finished.id });
         show(createResult(attempt, questions, { onBack: () => show(home()) }));
-      }));
+      }, () => show(home())));
     },
     async result(id) {
       const [attempt, questions] = await invoke('attempt_result', { id });
@@ -315,6 +315,11 @@ export function createExamsPanel() {
                 message.textContent = studyFailureText(err);
               }
             } }, t('Continue')),
+            h('button', { type: 'button', class: 'icon-btn', 'aria-label': t('Discard {name}', { name: a.title }), title: t('Discard'), html: icons.trash, onClick: async () => {
+              if (!confirm(t('Discard this attempt? Your answers are lost.'))) return;
+              await invoke('attempt_delete', { id: a.id }).catch((err) => (message.textContent = studyFailureText(err)));
+              load();
+            } }),
           )),
         ),
       );

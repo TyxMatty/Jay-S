@@ -1543,6 +1543,11 @@ fieldset > h3 {
 
 /* ---------- Result ---------- */
 
+/* Leaving sits apart from the buttons that move through the exam. */
+.runner-leave {
+  margin-right: auto;
+}
+
 .score-hero {
   display: flex;
   align-items: center;

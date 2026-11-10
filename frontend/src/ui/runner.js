@@ -21,7 +21,7 @@ function sumOf(set) {
  * @param {{ attempt: object, questions: object[], graded: (object|null)[] }} started
  * @param {(attempt: object) => void} onFinished the finished attempt (with its result)
  */
-export function createRunner(started, onFinished) {
+export function createRunner(started, onFinished, onLeave) {
   const { attempt, questions } = started;
   const learn = attempt.mode === 'learn';
   const answers = attempt.answers.slice();
@@ -37,6 +37,8 @@ export function createRunner(started, onFinished) {
   const prev = h('button', { type: 'button', class: 'btn btn-secondary', onClick: () => go(current - 1) }, t('Previous'));
   const next = h('button', { type: 'button', class: 'btn btn-secondary', onClick: () => go(current + 1) }, t('Next'));
   const finish = h('button', { type: 'button', class: 'btn', onClick: () => end(false) }, t('Finish'));
+  // Answers are saved as they are given, so leaving loses nothing: the attempt waits in "In progress".
+  const leave = h('button', { type: 'button', class: 'btn btn-secondary runner-leave', title: t('Your answers are kept: continue later from Exams.'), onClick: () => onLeave?.() }, t('Leave'));
 
   function elapsed() {
     const ms = performance.now() - shownAt;
@@ -198,7 +200,7 @@ export function createRunner(started, onFinished) {
     nav,
     h('div', { class: 'exam-sheet' }, body),
     status,
-    h('div', { class: 'button-row runner-actions' }, prev, next, finish),
+    h('div', { class: 'button-row runner-actions' }, leave, prev, next, finish),
   );
   el.dispose = () => clearInterval(tick);
   return el;
