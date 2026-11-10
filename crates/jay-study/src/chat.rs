@@ -530,6 +530,29 @@ fn drop_repeats(sentences: &mut Vec<Sentence>, previous: &[Sentence]) {
     }
 }
 
+/// A short sentence that only offers help or invites to go on ("Se precisar, é só chamar!"): the
+/// model ends almost every reply with one.
+/// shortcut: a short pt/en phrase list; upgrade if the probe shows other closings.
+fn is_filler(sentence: &str) -> bool {
+    const PHRASES: &[&str] = &[
+        // Not a bare "se precisar"/"se quiser": "Se precisar de mais precisão, use t" is a fact.
+        "se precisar de ajuda", "se precisar de algo", "se quiser ajuda", "se quiser algo", "e so chamar", "e so falar", "e so avisar", "e so perguntar", "estou aqui para ajudar", "como posso ajudar", "posso ajudar com os", "posso ajudar com seus",
+        "pronto para comecar", "pronto para estudar", "vamos comecar", "quer estudar hoje", "quer revisar hoje", "quer fazer hoje", "gostaria de estudar hoje", "gostaria de revisar hoje",
+        "conte comigo", "fico a disposicao", "let me know if", "how can i help", "happy to help",
+    ];
+    // "te" and "você" only soften these phrases: "como posso te ajudar" is "como posso ajudar".
+    let n = format!(" {} ", norm(sentence).replace(" voce ", " ").replace(" te ", " "));
+    n.split(' ').filter(|w| !w.is_empty()).count() <= 14 && PHRASES.iter().any(|p| n.contains(&format!(" {p} ")))
+}
+
+/// Drops the closing fillers (no sources, see `is_filler`) while a real sentence remains.
+fn drop_fillers(sentences: &mut Vec<Sentence>) {
+    let filler = |s: &Sentence| s.sources.is_empty() && is_filler(&s.text);
+    if sentences.iter().any(|s| !filler(s)) {
+        sentences.retain(|s| !filler(s));
+    }
+}
+
 /// The `<conversa>` block: the summary of the older turns (model output, so data) first, then the
 /// recent turns. Nothing when there are no recent turns.
 fn conversation(c: &Chat, history: &str) -> String {
@@ -1078,8 +1101,10 @@ impl Store {
             self.grounded_reply(&c, &question, rewritten, with_history, previous.as_deref(), &passages, general, app, server, cancel)?
         };
         // shortcut: the sources of a dropped sentence stay listed; upgrade if the probe shows it confuses.
-        if let Some((_, said)) = last.filter(|_| correcting) {
-            drop_repeats(&mut reply.sentences, &said);
+        if let Some((_, said)) = &last {
+            drop_repeats(&mut reply.sentences, said);
+            // The first reply may offer help once.
+            drop_fillers(&mut reply.sentences);
         }
         let turn = Turn { question, reply, at: now_ms() };
         if c.title.is_empty() {
@@ -1594,6 +1619,36 @@ mod tests {
         let mut none: Vec<Sentence> = vec![];
         drop_repeats(&mut none, &before);
         assert!(none.is_empty());
+    }
+
+    #[test]
+    fn closing_fillers_are_recognized_and_facts_are_not() {
+        for f in [
+            "Se precisar de ajuda com os estudos, é só chamar!", "Estou aqui para te ajudar com seus estudos.", "Como posso ajudar você hoje?", "Pronto para começar a estudar ou tirar dúvidas?", "Vamos começar?",
+            "Se quiser algo, é só falar!", "Posso te ajudar com os estudos quando precisar.", "O que você quer estudar hoje?", "Conte comigo!", "Fico à disposição.", "Let me know if you need anything.",
+            "How can I help you today?", "Happy to help!",
+        ] {
+            assert!(is_filler(f), "{f}");
+        }
+        for f in ["A enzima ajuda a fixar o CO2.", "Se precisar de mais precisão, use t.", "Se quiser o intervalo, some e subtraia o erro.","Qual é a média da amostra?", "Pode me chamar de Matty!", "Meu nome é Jay-AI.", "O desvio padrão mede a dispersão dos dados em torno da média e se precisar for calculado com n menos um no denominador da fórmula."] {
+            assert!(!is_filler(f), "{f}");
+        }
+    }
+
+    #[test]
+    fn fillers_go_only_without_sources_and_never_the_last_sentence() {
+        let s = |t: &str, src: Vec<usize>| Sentence { text: t.into(), sources: src, status: Status::Plain };
+        let mut mixed = vec![s("A média é a soma dividida por n.", vec![]), s("Se precisar, é só chamar!", vec![]), s("Vamos começar?", vec![1])];
+        drop_fillers(&mut mixed);
+        assert_eq!(mixed.iter().map(|x| x.text.as_str()).collect::<Vec<_>>(), ["A média é a soma dividida por n.", "Vamos começar?"]);
+        let mut only = vec![s("Se precisar, é só chamar!", vec![]), s("Conte comigo!", vec![])];
+        drop_fillers(&mut only);
+        assert_eq!(only.len(), 2);
+        // Repeats from the previous turn go on any route, and one sentence stays.
+        let before = [s("Pode me chamar de Matty, sem problemas!", vec![])];
+        let mut now = vec![s("pode me chamar de Matty sem problemas", vec![]), s("Sobre o que vamos falar?", vec![])];
+        drop_repeats(&mut now, &before);
+        assert_eq!(now.len(), 1);
     }
 
     #[test]
