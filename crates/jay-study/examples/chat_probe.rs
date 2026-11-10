@@ -38,7 +38,9 @@ fn main() {
     // PROBE_PERSONAL=1: only the third conversation (for repeated runs).
     let only_personal = std::env::var_os("PROBE_PERSONAL").is_some();
     let chats = [(Scope { materials, attempt: None }, &SCOPED[..]), (Scope::default(), &GENERAL[..]), (Scope::default(), &PERSONAL[..])];
-    for (scope, questions) in chats.into_iter().skip(if only_personal { 2 } else { 0 }) {
+    // PROBE_GENERAL=1: only the second one (the questions with no sources).
+    let only_general = std::env::var_os("PROBE_GENERAL").is_some();
+    for (scope, questions) in chats.into_iter().skip(if only_personal { 2 } else if only_general { 1 } else { 0 }).take(if only_general { 1 } else { 3 }) {
         let chat = store.new_chat(scope).expect("chat");
         println!("=== chat: {}", if chat.title.is_empty() { "(no sources)" } else { &chat.title });
         for q in questions {

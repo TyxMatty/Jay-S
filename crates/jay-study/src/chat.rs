@@ -2008,7 +2008,19 @@ mod tests {
     #[test]
     fn the_paragraph_named_by_the_question_comes_first_and_each_goes_once() {
         let title = |p: &Passage| p.text.split(':').next().unwrap().to_owned();
-        assert_eq!(title(&manual_passages("Como faço flashcards de uma prova que fiz?")[0]), "Flashcards");
+        // The question is about cards from an exam: the paragraph that says "not directly, but…" comes
+        // before the one on making a deck (which doesn't answer it), and both are in the first two.
+        let titles: Vec<String> = manual_passages("Como faço flashcards de uma prova que fiz?").iter().take(2).map(title).collect();
+        assert_eq!(titles[0], "Flashcards de uma prova");
+        assert!(titles.contains(&"Flashcards".to_owned()), "{titles:?}");
+        // ("não" and "faz" are stop words, so a bare "o que o Jay-S não faz?" has only "jay" to go by
+        // and ties with the overview; a student asking about limits says one of these.)
+        for q in ["quais são os limites do Jay-S?", "o que o Jay-S não consegue fazer?"] {
+            assert_eq!(title(&manual_passages(q)[0]), "Limites do Jay-S", "{q}");
+        }
+        assert_eq!(title(&manual_passages("what are the limits of Jay-S?")[0]), "Limits of Jay-S");
+        assert_eq!(title(&manual_passages("Flashcards from an exam I took?")[0]), "Flashcards from an exam");
+        assert_eq!(title(&manual_passages("Como crio flashcards?")[0]), "Flashcards");
         assert_eq!(title(&manual_passages("como faço um simulado")[0]), "Simulado");
         assert_eq!(title(&manual_passages("How do I attach a PDF?")[0]), "Attach material");
         for q in ["Como faço flashcards de uma prova que fiz?", "how do I attach a PDF? Como anexo um PDF?", "jay prova provas material anexar simulado flashcards chat exam attach"] {
