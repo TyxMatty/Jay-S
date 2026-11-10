@@ -38,7 +38,7 @@ fn main() {
             match store.chat_ask(&chat.id, q, &server, &cancel) {
                 Ok(turn) => {
                     let r = &turn.reply;
-                    println!("\n> {q}\n  kind={:?} time={:.1}s retried={} second_reading={} sources={}", r.kind, t.elapsed().as_secs_f32(), r.checks.retried, r.checks.second_reading, r.sources.iter().map(|s| s.label.as_str()).collect::<Vec<_>>().join(" | "));
+                    println!("\n> {q}\n  kind={:?} list={} time={:.1}s retried={} second_reading={} sources={}", r.kind, r.list, t.elapsed().as_secs_f32(), r.checks.retried, r.checks.second_reading, r.sources.iter().map(|s| s.label.as_str()).collect::<Vec<_>>().join(" | "));
                     for s in &r.sentences {
                         println!("  [{:?} {:?}] {}", s.status, s.sources, s.text);
                     }

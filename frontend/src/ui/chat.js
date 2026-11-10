@@ -7,15 +7,22 @@ import { invoke, isTauri } from '../core/bridge.js';
 import { t } from '../core/i18n.js';
 import { studyFailureText } from './study-text.js';
 
-/** The answer as one paragraph; each run of unconfirmed sentences starts with its label (never color alone). */
-function answerEl(sentences, showSource) {
-  const p = h('p', { class: 'chat-answer' });
+/** The answer as one paragraph, or a list when asked; each run of unconfirmed sentences starts with its label (never color alone). */
+function answerEl(sentences, showSource, list) {
+  // Not `chat-list`: that is the conversations sidebar.
+  const p = h(list ? 'ul' : 'p', { class: list ? 'chat-answer chat-answer-list' : 'chat-answer' });
   let run = null;
   for (const s of sentences) {
     const chips = s.sources.map((n) => h('button', { type: 'button', class: 'chat-chip', 'aria-label': t('Source {n}', { n }), title: t('Source {n}', { n }), onClick: () => showSource(n) }, String(n)));
+    // A list item holds one sentence; a paragraph runs them together.
+    const into = (...nodes) => (list ? p.append(h('li', {}, ...nodes)) : p.append(...nodes, ' '));
     if (s.status !== 'unconfirmed') {
       run = null;
-      p.append(h('span', {}, s.text, ...chips), ' ');
+      into(h('span', {}, s.text, ...chips));
+      continue;
+    }
+    if (list) {
+      into(h('span', { class: 'badge', 'data-status': 'check' }, t('Not confirmed')), ' ', h('span', { class: 'chat-unconfirmed' }, s.text, ...chips));
       continue;
     }
     if (!run) {
@@ -50,7 +57,7 @@ function replyEl(r) {
     sources.open = true;
     sources.querySelector(`[data-n="${n}"]`)?.focus();
   };
-  if (r.sentences.length) parts.push(answerEl(r.sentences, showSource));
+  if (r.sentences.length) parts.push(answerEl(r.sentences, showSource, r.list === true));
   if (r.sources.length) {
     const done = [t('quotes found in the text'), t('numbers and keys checked')];
     if (r.checks.second_reading) done.push(t('second reading'));

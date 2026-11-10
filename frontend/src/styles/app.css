@@ -2798,6 +2798,14 @@ textarea.input {
   overflow-wrap: anywhere;
 }
 
+.chat-answer-list {
+  padding-left: var(--space-5);
+}
+
+.chat-answer-list li + li {
+  margin-top: var(--space-1);
+}
+
 .chat-answer .badge {
   padding: 1px 8px;
   vertical-align: 1px;
