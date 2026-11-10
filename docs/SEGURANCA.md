@@ -110,7 +110,16 @@ Medido com o `examples/injection_probe.rs` (Qwen3.5 4B, RTX 3050): uma apostila 
 O escape dos marcadores não muda nada: o modelo de 4B obedece à instrução saindo ou não do bloco.
 *O que segura hoje:* todo recurso cuja saída importa é conferido fora do modelo. As questões geradas são resolvidas de novo às cegas, e o gabarito tem de bater. As frases do chat precisam de uma citação literal de um trecho que o Rust escolheu. Notas, gabaritos e arquivos nunca vêm do modelo. Tudo chega à tela como texto. A medida antiga do chat (a apostila com "mitocôndria" plantada respondida certo) vale por essas conferências, não pelo prompt.
 *O que fica exposto:* texto que nada confere. **Explicar** (resumo, pontos-chave, conceitos), os **flashcards** e a **análise do resultado** podem repetir uma falsidade plantada.
-*Próximo passo:* datamarking + a regra repetida nesses três recursos, medidos quanto à injeção *e* à qualidade (o modelo copia o `^` na saída? resumos e cartões pioram?) antes de ir para o app. O chat e as questões pedem a mesma conferência de qualidade, porque as conferências de citação e de nova resolução leem a cópia que o modelo faz do texto.
+*Mitigação aplicada a esses três:* `ai::marked` (datamarking em cima do `data`), `ai::MARK_RULE` no fim dos prompts de sistema deles e `ai::REMINDER` logo depois dos dados. Na análise, a lista das questões certas também entrou no marcador (antes ficava fora dele). Teste: `ai.rs` `marked_data_joins_words_keeps_lines_and_breaks_markers`. Medido com o `examples/f6_probe.rs`: os próprios recursos, numa apostila com a instrução plantada no meio (e numa prova cuja explicação a carrega), 8 rodadas cada:
+
+| Recurso | Antes | Com datamarking |
+|---|---|---|
+| Explicar | 1/8 | 0/8 |
+| Flashcards | 0/8 | 0/8 |
+| Análise do resultado | 3/8 | 2/8 |
+
+Qualidade na apostila limpa (3 rodadas cada): nenhum `^` vazou para a saída; resumos de 2,9 a 4,9 mil caracteres (antes: 4,0 a 5,3 mil), 5 cartões por baralho, com os mesmos tamanhos.
+*O que isso mostra, com franqueza:* dentro de uma apostila de verdade, o modelo já ignorava a instrução plantada na maior parte das vezes. Com 8 rodadas, a diferença em Explicar e nos flashcards está dentro do ruído. O efeito grande é o da sonda isolada (de 17–20 em 20 para 2–5). **A análise do resultado continua exposta** (2 de 8), porque ali a instrução fica num campo curto (a explicação de uma questão), que o modelo lê como parte da tarefa. *Ainda aberto:* uma conferência da saída da análise (por exemplo, tirar itens que contradigam o gabarito oficial) ou deixar de fora explicações que não vieram de um gabarito oficial. O chat e as questões não foram marcados: as conferências de citação e de nova resolução comparam a cópia que o modelo faz do texto, e marcar ali pede a sua própria medida de qualidade.
 
 **F3. O instalador não é assinado.** O SmartScreen mostra "editor desconhecido". As versões saem só do GitHub do projeto, por HTTPS, com o SHA-256 nas notas. Assinar custa dinheiro; é decisão em aberto para toda a linha Jay.
 

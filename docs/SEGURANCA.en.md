@@ -110,7 +110,16 @@ Measured with `examples/injection_probe.rs` (Qwen3.5 4B, RTX 3050): a handout wi
 The marker escape changes nothing: the 4B model obeys the instruction whether or not it "leaves" the block.
 *What holds today:* every feature whose output matters is checked outside the model. Generated questions are re-solved blind, and the key must agree. Chat sentences need a literal quote from a passage Rust picked. Grades, answer keys and files never come from the model. Everything reaches the screen as text. The earlier chat measurement (the planted "mitochondria" handout answered correctly) holds because of those checks, not because of the prompt.
 *What is exposed:* text that nothing checks. **Explain** (summary, key points, concepts), **flashcards** and the **result analysis** can repeat a planted falsehood.
-*Next step:* datamarking + the repeated rule in those three features, measured for injection *and* quality (does the model copy `^` into its output, do summaries and cards get worse) before shipping. The chat and question paths need the same quality check, because their quote and re-solve checks read the model's copy of the text.
+*Mitigation applied to those three:* `ai::marked` (datamarking on top of `data`), `ai::MARK_RULE` at the end of their system prompts and `ai::REMINDER` right after the data. In the analysis, the list of right answers moved inside the marker too (it used to sit outside it). Test: `ai.rs` `marked_data_joins_words_keeps_lines_and_breaks_markers`. Measured with `examples/f6_probe.rs`: the features themselves, on a handout with the plant in the middle (and an exam whose explanation carries it), 8 runs each:
+
+| Feature | Before | With datamarking |
+|---|---|---|
+| Explain | 1/8 | 0/8 |
+| Flashcards | 0/8 | 0/8 |
+| Result analysis | 3/8 | 2/8 |
+
+Quality on the clean handout (3 runs each): no `^` leaked into any output; summaries 2.9–4.9 k characters (before: 4.0–5.3 k), 5 cards per deck with the same lengths.
+*What this shows, honestly:* inside a real handout the model already ignored the plant most of the time. With 8 runs, the difference in Explain and flashcards is within noise. The large effect is the isolated probe's (17–20 of 20 → 2–5). **The result analysis is still exposed** (2 of 8), because there the plant sits in a short field (a question's explanation), which the model reads as part of its task. *Still open:* an output check for the analysis (for example, dropping items that contradict the official key), or leaving out explanations that didn't come from an official key. The chat and question paths were not marked: their quote and re-solve checks compare the model's copy of the text, and marking needs its own quality measurement there.
 
 **F3. The installer is not signed.** SmartScreen shows "unknown publisher". Releases come only from the project's GitHub, over HTTPS, with the SHA-256 in the notes. Signing costs money; this is an open decision for the whole Jay line.
 
