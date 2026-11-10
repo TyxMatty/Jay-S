@@ -24,6 +24,10 @@ const SCOPED: [&str; 10] = [
 
 const GENERAL: [&str; 2] = ["Como anexo um PDF?", "Quanto é (1,96 * 10 / 4)^2?"];
 
+/// A conversation a student really had, in a chat with no sources: a nickname for Jay-AI, then a
+/// correction when it was misread.
+const PERSONAL: [&str; 5] = ["Opa! Como vc ta?", "Pode se chamar de Matty?", "Eu to me referindo a você se chamar de Matty", "Qual é o seu nome mesmo?", "O que você consegue fazer?"];
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let root = std::env::temp_dir().join(format!("jay-s-chat-probe-{}", jay_study::id::new_id()));
@@ -31,7 +35,10 @@ fn main() {
     let materials: Vec<String> = args[2..].iter().map(|f| store.import(std::path::Path::new(f)).expect("import").id).collect();
     let server = Server::start(&AiPaths::new(std::path::Path::new(&args[1])), ModelChoice::Standard).expect("server");
     let cancel = AtomicBool::new(false);
-    for (scope, questions) in [(Scope { materials, attempt: None }, &SCOPED[..]), (Scope::default(), &GENERAL[..])] {
+    // PROBE_PERSONAL=1: only the third conversation (for repeated runs).
+    let only_personal = std::env::var_os("PROBE_PERSONAL").is_some();
+    let chats = [(Scope { materials, attempt: None }, &SCOPED[..]), (Scope::default(), &GENERAL[..]), (Scope::default(), &PERSONAL[..])];
+    for (scope, questions) in chats.into_iter().skip(if only_personal { 2 } else { 0 }) {
         let chat = store.new_chat(scope).expect("chat");
         println!("=== chat: {}", if chat.title.is_empty() { "(no sources)" } else { &chat.title });
         for q in questions {
