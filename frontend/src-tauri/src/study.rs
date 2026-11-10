@@ -222,8 +222,12 @@ pub fn analyze_pending(app: &AppHandle) {
     let _ = spawn_job(app, "analysis", |app| {
         let library = app.state::<Library>();
         let ai = app.state::<Ai>();
-        let pending: Vec<String> = library.store.attempts().into_iter().filter(|a| a.result.is_some() && a.analysis.is_none()).map(|a| a.id).collect();
-        for id in pending {
+        // Looked for again after each one: an attempt that ends while this runs is refused as
+        // "busy" by `spawn_job`, and nobody came back for it (its result page waited forever).
+        // Each attempt is tried once per run, so one that fails doesn't loop.
+        let mut tried = std::collections::HashSet::new();
+        while let Some(id) = library.store.attempts().into_iter().find(|a| a.result.is_some() && a.analysis.is_none() && !tried.contains(&a.id)).map(|a| a.id) {
+            tried.insert(id.clone());
             emit_job(app, JobEvent::Progress { kind: "analysis", step: BuildStep::Reading });
             let result = ai.with_server(app, |server, cancel| library.store.analyze(&id, server, cancel).map_err(|e| match e {
                 BuildError::Ai(e) => e,
