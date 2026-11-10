@@ -137,4 +137,4 @@ C:\Users\<você>\.venvs\semgrep\Scripts\pip install --only-binary=:all: semgrep
 C:\Users\<você>\.venvs\semgrep\Scripts\semgrep scan --metrics=off --config p/rust --config p/javascript --config p/secrets --config p/security-audit --sarif --output semgrep.sarif crates frontend/src frontend/src-tauri/src ml scripts
 ```
 
-Os testes que precisam do `llama-server` de verdade (T4) rodam com `cargo test -- --ignored` depois de baixar o Jay-AI. A medida da injeção (F6): `cargo run --release --example injection_probe -- <pasta de dados> 20`. Veja o `CLAUDE.md`.
+Os testes que precisam do `llama-server` de verdade (T4) rodam com `cargo test -- --ignored` depois de baixar o Jay-AI. A medida da injeção (F6): `cargo run --release --example injection_probe -- <pasta de dados> 20`. Para baixar o Jay-AI num PC de desenvolvimento: `cargo run --release --example ai_setup -- <pasta de dados>`.
