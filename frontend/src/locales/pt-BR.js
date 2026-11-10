@@ -357,6 +357,8 @@ export default {
   "General knowledge, no source": "Conhecimento geral, sem fonte",
   "Not in your sources": "Não está nas suas fontes",
   "From the Jay-S guide": "Do guia do Jay-S",
+  "Computed by the app": "Calculado pelo app",
+  "The numbers were computed by Jay-S; the formula was chosen by Jay-AI: check it against your material.": "Os números foram calculados pelo Jay-S; a fórmula foi escolhida pelo Jay-AI: confira com o seu material.",
   "Sources ({n})": "Fontes ({n})",
   "Enter sends · Shift+Enter makes a new line": "Enter envia · Shift+Enter quebra a linha",
 };

@@ -2,6 +2,7 @@
 //! attached files, telling content from exams. Tested with `cargo test` here.
 
 pub mod ai;
+pub mod calc;
 pub mod cards;
 pub mod chat;
 pub mod classify;

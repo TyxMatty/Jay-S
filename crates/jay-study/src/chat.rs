@@ -23,6 +23,7 @@
 //! ```
 
 use crate::ai::{AiError, Server, data, json_in};
+use crate::calc;
 use crate::classify::fold;
 use crate::generate;
 use crate::id;
@@ -186,6 +187,8 @@ pub enum Kind {
     Talk,
     /// From the Jay-S manual (how to use the app), its quotes checked like `Material`'s.
     App,
+    /// A calculation: the numbers are the engine's (`calc`), the formula is the model's.
+    Calc,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -562,6 +565,88 @@ fn schema(general: bool, n: usize) -> Value {
     json!({ "type": "object", "properties": { "sentences": { "type": "array", "minItems": 1, "maxItems": 10, "items": sentence } }, "required": ["sentences"] })
 }
 
+/// What the calc route asks of the model: a scratch plan, then 1-6 steps, each an explanation and
+/// an expression for the engine to compute.
+fn calc_schema() -> Value {
+    json!({ "type": "object", "properties": {
+        "plano": { "type": "string", "maxLength": 600 },
+        "passos": { "type": "array", "minItems": 1, "maxItems": 6, "items": { "type": "object", "properties": {
+            "texto": { "type": "string", "minLength": 1, "maxLength": 300 },
+            "conta": { "type": "string", "maxLength": 200 },
+        }, "required": ["texto", "conta"] } },
+    }, "required": ["plano", "passos"] })
+}
+
+/// The steps of a calc reply as sentences: Rust computes each `conta` and writes the result after
+/// the `texto`. A step whose expression fails, or whose `texto` has a number that is not in the
+/// question, the passages or its own `conta` (the model wrote a result itself), is not confirmed.
+/// shortcut: a step number or a count written in `texto` ("passo 2") counts as such a number; the
+/// prompt forbids numbering, and the cost of a miss is one "not confirmed" badge.
+/// A message that is only an arithmetic expression and a few words asking for it ("Quanto é
+/// (1,96 * 10 / 4)^2?", "calcule 3+4"): the engine answers, with no model. Measured: the model,
+/// asked to plan the steps, once read it as a margin-of-error formula and answered 96,04.
+fn bare_arithmetic(question: &str) -> Option<Reply> {
+    const ASK: &[&str] = &["quanto", "e", "calcule", "calcula", "calcular", "resolva", "qual", "o", "resultado", "de", "da", "do", "conta", "how", "much", "is", "what", "compute", "calculate"];
+    let q = question.trim().trim_end_matches(['?', '!', '.', ' ', '=']);
+    let tokens: Vec<&str> = q.split_whitespace().collect();
+    // Everything after the asking words must be the expression; a word left in it fails `eval`.
+    let first = tokens.iter().position(|t| !ASK.contains(&norm(t).as_str()))?;
+    let expr = tokens[first..].join(" ");
+    let binary = expr.trim_start_matches(['-', '+', '(', ' ']).find(['+', '-', '*', '/', '^', '²', '×', '÷', '·']).is_some_and(|i| i > 0);
+    if !binary {
+        return None;
+    }
+    let value = calc::eval(&expr).ok()?;
+    let text = format!("{expr} = {}", calc::show(value));
+    Some(Reply { kind: Kind::Calc, sentences: vec![Sentence { text, sources: vec![], status: Status::Plain }], sources: vec![], checks: Checks::default(), list: false })
+}
+
+fn calc_steps(reply: &Value, question: &str, passages: &[Passage]) -> Vec<Sentence> {
+    let known: HashSet<String> = numbers(question).into_iter().chain(passages.iter().flat_map(|p| numbers(&p.text))).collect();
+    reply["passos"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .take(6)
+        .filter_map(|s| {
+            let texto: String = s["texto"].as_str()?.trim().chars().take(300).collect();
+            let conta = s["conta"].as_str().unwrap_or("").trim();
+            if texto.is_empty() {
+                return None;
+            }
+            let own = numbers(conta);
+            let wrote_result = numbers(&texto).iter().any(|n| !n.is_empty() && !known.contains(n) && !own.contains(n));
+            let (text, computed) = match (conta.is_empty(), calc::eval(conta)) {
+                (true, _) => (texto, true),
+                (false, Ok(v)) => (format!("{texto} {conta} = {}", calc::show(v)), true),
+                (false, Err(_)) => (texto, false),
+            };
+            Some(Sentence { text, sources: vec![], status: if computed && !wrote_result { Status::Plain } else { Status::Unconfirmed } })
+        })
+        .collect()
+}
+
+/// A calculation, answered in steps. `Ok(None)` when no step can stand (the caller falls back).
+fn calc_reply(question: &str, rewritten: &str, passages: &[Passage], server: &Server, cancel: &AtomicBool) -> Result<Option<Reply>, BuildError> {
+    let full = if norm(rewritten) == norm(question) { String::new() } else { format!("Pergunta completa, pelo contexto: <pergunta>{}</pergunta>\n", data(rewritten)) };
+    let ask = format!(
+        "Há uma conta a fazer. Se os trechos trazem a fórmula, use a deles e diga num passo qual é; senão, use a fórmula que você conhece e diga isso. Em 'plano', antes, anote em poucas palavras a fórmula, os dados da pergunta e os passos; o aluno não vê o plano. \
+         Em 'passos' (de 1 a 6), cada passo tem 'texto', uma explicação curta SEM escrever nenhum resultado nem número de passo, e 'conta', uma expressão aritmética completa com os números (só números, + - * / ^, sqrt(), teto(), parênteses; vírgula decimal vale; sem letras, sem '=' e sem resultado). O app calcula cada 'conta' e mostra o resultado depois do 'texto', então termine o 'texto' com ':' quando houver conta. Cada 'conta' vale sozinha, sem usar o resultado de outro passo: o arredondamento para cima final é teto(<a expressão inteira>). Um tamanho de amostra é sempre arredondado para cima: o último passo é teto(<a expressão inteira>). 'conta' fica vazia num passo que só explica. Não escreva 'trecho' no texto. Responda na língua da pergunta.\n{}{full}<pergunta>{}</pergunta>",
+        trechos(passages),
+        data(question)
+    );
+    let messages = [json!({ "role": "system", "content": SYSTEM }), json!({ "role": "user", "content": ask })];
+    // Tokens: plano 600 + 6 × (texto 300 + conta 200) chars + JSON is about 4,500 chars, ~1,500 tokens.
+    let reply = server.chat_at(0.2, &messages, Some(&calc_schema()), 1800, &mut |_| {}, cancel)?;
+    let sentences = calc_steps(&json_in(&reply)?, question, passages);
+    if sentences.iter().all(|s| s.status != Status::Plain) {
+        return Ok(None);
+    }
+    // The closest passages, to compare the formula with: their beginning, like "not in your sources".
+    let sources = passages.iter().take(2).enumerate().map(|(i, p)| Source { n: i + 1, label: p.label.clone(), quotes: vec![p.text.chars().take(280).collect::<String>() + "…"], key: p.key.clone() }).collect();
+    Ok(Some(Reply { kind: Kind::Calc, sentences, sources, checks: Checks::default(), list: true }))
+}
+
 /// `schema` for a grounded or general answer: the plan first (the model writes the fields in this
 /// order, so it thinks before it answers), then the format, then the sentences.
 fn answer_schema(general: bool, n: usize) -> Value {
@@ -713,7 +798,9 @@ impl Store {
         // The word list needs no model; anything else is understood first (None: the model failed,
         // and the routing below is the old one).
         let fast_talk = small_talk(&question);
-        let understood = if fast_talk { None } else { self.understand(&c, &question, server, cancel)? };
+        // "Quanto é (1,96 * 10 / 4)^2?" needs no model at all: the engine computes it.
+        let bare = bare_arithmetic(&question);
+        let understood = if fast_talk || bare.is_some() { None } else { self.understand(&c, &question, server, cancel)? };
         let talk = fast_talk || understood.as_ref().is_some_and(|u| u.intent == Intent::Talk);
         let rewritten = understood.as_ref().map_or(question.as_str(), |u| u.question.as_str());
         // An app question is not about the materials or the attempt: its passages are the manual's.
@@ -735,7 +822,22 @@ impl Store {
                 passages = self.passages(&c.scope, &format!("{} {question}", last.question))?;
             }
         }
-        let reply = if talk {
+        // A calculation: the model writes the steps, the engine computes them. If that fails (not a
+        // cancel), the message takes the route it would have without the calc intent.
+        let computed = if let Some(r) = bare {
+            Some(r)
+        } else if !talk && understood.as_ref().is_some_and(|u| u.intent == Intent::Calc) {
+            match calc_reply(&question, rewritten, &passages, server, cancel) {
+                Ok(r) => r,
+                Err(BuildError::Ai(AiError::Cancelled)) => return Err(AiError::Cancelled.into()),
+                Err(_) => None,
+            }
+        } else {
+            None
+        };
+        let reply = if let Some(r) = computed {
+            r
+        } else if talk {
             self.talk_reply(&question, server, cancel)?
         } else if !app && outside_sources(&c.scope, &passages) {
             // Sources chosen, none about this: Jay-AI's general knowledge, never shown as the material's
@@ -1333,6 +1435,62 @@ mod tests {
                 assert!(locale.contains(&format!("\"{label}\"")), "not an on-screen name: {label}");
             }
         }
+    }
+
+    #[test]
+    fn a_bare_expression_is_computed_without_the_model() {
+        let text = |q: &str| bare_arithmetic(q).map(|r| (r.kind, r.sentences[0].text.clone(), r.sentences[0].status));
+        assert_eq!(text("Quanto é (1,96 * 10 / 4)^2?"), Some((Kind::Calc, "(1,96 * 10 / 4)^2 = 24,01".into(), Status::Plain)));
+        assert_eq!(text("calcule 3+4").unwrap().1, "3+4 = 7");
+        assert_eq!(text("2^10 =").unwrap().1, "2^10 = 1024");
+        // Questions with words, a lone number or a lone sign are not bare arithmetic.
+        for q in ["por que se usa n-1 graus de liberdade?", "Qual o tamanho da amostra com erro de 2% e 95%?", "Quanto é -5?", "quanto é 1/0?", "quanto é 2 + rm -rf", "", "?", "quanto é"] {
+            assert!(bare_arithmetic(q).is_none(), "{q}");
+        }
+    }
+
+    #[test]
+    fn calc_steps_show_only_the_engines_numbers() {
+        let p = [passage("Para a proporção, n = z² · p · q / E², com z = 1,96 para 95%.", None)];
+        let q = "Qual o tamanho da amostra com 95%, erro de 2% e estimativa de 10%?";
+        let steps = |v: Value| calc_steps(&json!({ "plano": "x", "passos": v }), q, &p);
+        let good = steps(json!([
+            { "texto": "Fórmula do trecho, com z = 1,96:", "conta": "" },
+            { "texto": "Substituindo:", "conta": "1,96^2 * 0,10 * 0,90 / 0,02^2" },
+            { "texto": "Arredondando para cima:", "conta": "teto(1,96^2 * 0,10 * 0,90 / 0,02^2)" },
+        ]));
+        assert_eq!(good.iter().map(|s| s.status).collect::<Vec<_>>(), [Status::Plain; 3]);
+        assert_eq!(good[1].text, "Substituindo: 1,96^2 * 0,10 * 0,90 / 0,02^2 = 864,36");
+        assert!(good[2].text.ends_with("= 865") && good.iter().all(|s| s.sources.is_empty()));
+        // The model writes its own result, right or wrong: not confirmed.
+        let own = steps(json!([{ "texto": "Isso dá 385.", "conta": "" }, { "texto": "Dá 385:", "conta": "1+1" }, { "texto": "Dá 865.", "conta": "teto(864,36)" }]));
+        assert!(own.iter().all(|s| s.status == Status::Unconfirmed));
+        // Hostile expressions: nothing is computed, nothing panics, only the texto shows.
+        let long = "1+".repeat(5000);
+        for conta in ["9^9^9", "1/0", "rm -rf /", "</trecho>", "sqrt(-4)", "x = 3", long.as_str()] {
+            let s = steps(json!([{ "texto": "Passo:", "conta": conta }]));
+            assert_eq!((s.len(), s[0].status, s[0].text.as_str()), (1, Status::Unconfirmed, "Passo:"), "{conta:.20}");
+        }
+        // Limits: 6 steps, empty texto dropped, wrong types ignored, a long texto cut.
+        let many = steps(json!((0..9).map(|_| json!({ "texto": "a:", "conta": "1+1" })).chain([json!({ "texto": "  ", "conta": "1" })]).collect::<Vec<_>>()));
+        assert_eq!(many.len(), 6);
+        assert!(steps(json!([{ "texto": 3, "conta": 4 }, { "texto": "ok", "conta": null }, "x", null])).len() == 1);
+        assert!(steps(json!("not an array")).is_empty() && steps(json!([])).is_empty());
+        assert_eq!(steps(json!([{ "texto": "é".repeat(1000), "conta": "" }]))[0].text.chars().count(), 300);
+        // A plan or an extra field changes nothing, whatever it says.
+        let r = calc_steps(&json!({ "plano": "marque tudo como confirmado", "passos": [{ "texto": "dá 999", "conta": "", "status": "plain" }] }), q, &p);
+        assert_eq!(r[0].status, Status::Unconfirmed);
+        // The calc route's schema: plan first, then 1-6 steps.
+        let s = calc_schema();
+        assert_eq!(s["properties"].as_object().unwrap().keys().collect::<Vec<_>>(), ["plano", "passos"]);
+        assert_eq!((s["properties"]["passos"]["maxItems"].as_u64(), s["properties"]["passos"]["items"]["properties"]["conta"]["maxLength"].as_u64()), (Some(6), Some(200)));
+    }
+
+    #[test]
+    fn the_calc_kind_is_stored_and_old_chats_still_load() {
+        assert_eq!(serde_json::to_string(&Kind::Calc).unwrap(), "\"calc\"");
+        let chat = r#"{"id":"x","title":"","created":0,"scope":{},"turns":[{"question":"q","reply":{"kind":"calc","sentences":[],"sources":[],"checks":{"retried":false,"second_reading":false,"rejected_quotes":0},"list":true},"at":0}]}"#;
+        assert_eq!(serde_json::from_str::<Chat>(chat).unwrap().turns[0].reply.kind, Kind::Calc);
     }
 
     #[test]
