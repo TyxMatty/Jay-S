@@ -11,6 +11,49 @@ import { createRunner, createResult } from './runner.js';
 import { studyFailureText } from './study-text.js';
 
 const date = (ms) => new Intl.DateTimeFormat(language(), { dateStyle: 'short', timeStyle: 'short' }).format(ms);
+const fmt = (n) => new Intl.NumberFormat(language(), { maximumFractionDigits: 1 }).format(n);
+
+/**
+ * The finished attempts, newest first, each opening its result; one Jay-AI hasn't analyzed says
+ * whether it is being analyzed right now. Shared by Exams and Mock test. `box` is shown only when
+ * there is something to list.
+ */
+export function createHistory(views, message, box) {
+  const list = h('ul', { class: 'material-list' });
+  let analyzing = false;
+  async function load() {
+    if (!isTauri) return;
+    const done = (await invoke('attempts_list')).filter((a) => a.finished).sort((a, b) => b.started - a.started);
+    const state = (a) =>
+      a.analyzed ? t('analyzed by Jay-AI') : analyzing ? h('span', {}, h('span', { class: 'spinner', 'aria-hidden': 'true' }), ' ', t('Jay-AI is analyzing…')) : t('waiting for Jay-AI');
+    list.replaceChildren(
+      ...done.map((a) =>
+        h('li', { class: 'material-card' }, h('div', { class: 'material-row' },
+          h('div', { class: 'material-main' },
+            h('h3', { class: 'material-name' }, a.title),
+            h('p', { class: 'material-meta' }, [t('{p} of {total}', { p: fmt(a.points ?? 0), total: a.total }), a.mode === 'learn' ? t('Learning mode') : a.time_limit ? t('Mock test') : t('Exam mode'), date(a.started)].join(' · '), ' · ', state(a)),
+          ),
+          h('button', { type: 'button', class: 'btn btn-secondary', onClick: () => views.result(a.id).catch((e) => (message.textContent = studyFailureText(e))) }, t('See the result')),
+          h('button', { type: 'button', class: 'icon-btn', 'aria-label': t('Delete {name}', { name: a.title }), title: t('Delete'), html: icons.trash, onClick: async () => {
+            if (!confirm(t('Delete this result?'))) return;
+            await invoke('attempt_delete', { id: a.id }).catch((e) => (message.textContent = studyFailureText(e)));
+            load();
+          } }),
+        )),
+      ),
+    );
+    if (box) box.hidden = done.length === 0;
+    return done.length;
+  }
+  // An analysis starting or ending changes the marks.
+  const stop = listen('study-job', (e) => {
+    if (e.kind !== 'analysis') return;
+    analyzing = e.state === 'progress';
+    load();
+  });
+  if (isTauri) invoke('job_status').then((j) => j?.kind === 'analysis' && ((analyzing = true), load())).catch(() => {});
+  return { list, load, dispose: () => stop.then((un) => un()) };
+}
 
 /** A section that shows one view at a time (the list, a runner, a result). */
 export function createViews(home) {
@@ -281,9 +324,16 @@ export function createExamsPanel() {
 
     const empty = h('div', { class: 'empty-state' }, h('span', { class: 'card-icon', html: icons.exam, 'aria-hidden': 'true' }), h('p', {}, t('A new exam from your content in the style you pick (ENEM, UEPG, UEM…), or the questions of your exam mixed with your content. Answer it right here, and see the result at the end or each answer at once in learning mode.')), h('p', { class: 'hint' }, isTauri ? t('Start with "New exam".') : t('Only in the app.')));
     const goingBox = h('div', { hidden: true }, h('h2', { class: 'section-title' }, t('In progress')), going);
+    const resultsBox = h('div', { hidden: true }, h('h2', { class: 'section-title' }, t('Results')));
+    const history = createHistory(views, message, resultsBox);
+    resultsBox.append(history.list);
     load();
-    const section = h('section', { class: 'app-panel is-single' }, h('div', { class: 'panel-head' }, h('h1', {}, t('Exams')), newButton), message, make, goingBox, empty, list);
-    section.dispose = make.dispose;
+    history.load();
+    const section = h('section', { class: 'app-panel is-single' }, h('div', { class: 'panel-head' }, h('h1', {}, t('Exams')), newButton), message, make, goingBox, empty, list, resultsBox);
+    section.dispose = () => {
+      make.dispose?.();
+      history.dispose();
+    };
     return section;
   }
   views.home();

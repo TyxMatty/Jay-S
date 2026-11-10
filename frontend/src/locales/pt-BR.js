@@ -219,6 +219,7 @@ export default {
   "short": "curtos",
   "very short": "bem curtos",
   "waiting for Jay-AI": "esperando o Jay-AI",
+  "Jay-AI is analyzing…": "o Jay-AI está analisando…",
   "{n} answered by Jay-AI": "{n} respondidas pelo Jay-AI",
   "{n} cards": "{n} cartões",
   "{n} of {total} answered": "{n} de {total} respondidas",
