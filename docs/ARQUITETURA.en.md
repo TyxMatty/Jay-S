@@ -11,7 +11,7 @@ The study app of the Jay line. The student attaches **content** and/or **exams**
 
 Separate tabs hold the **mock test** (optional: the chosen exam, with the time limit and style the student wants) and the **flashcards**, which adapt to the student's way of studying (short and direct or longer) and to what they got wrong in mock tests.
 
-Written on 2026-11-09, from Jay-C 0.4, Jay-A 0.3.3, Jay-E 0.2.1 and Jay-H 0.1.4. License: **MIT**, like the whole line. Stages 0 to 6 are done; of stage 7, the first release (0.1.0) is published, with the installer built by the CI, and Jay-S is in Jay-H's catalog; still missing are a Jay-H release with that catalog and seeing, outside the dev PC, Jay-H install and update Jay-S (section 8). Stage 8 (training a content-vs-exam classifier) has started with the tool that exports the signals.
+Written on 2026-11-09, from Jay-C 0.4, Jay-A 0.3.3, Jay-E 0.2.1 and Jay-H 0.1.4. License: **MIT**, like the whole line. Stages 0 to 6 are done; of stage 7, the first release (0.1.0) is published, with the installer built by the CI, and Jay-S has been in Jay-H's catalog since 0.1.5; still missing is seeing, outside the dev PC, Jay-H install and update Jay-S (section 8). Stage 8 (training a content-vs-exam classifier) has started with the tool that exports the signals.
 
 ## 1. Overview
 
@@ -340,10 +340,10 @@ Each stage ends with something testable; at the end of each one: commit, summary
 - **The real-server test, by hand** (section 7, item 10: the CI doesn't run it): `cargo test -- --ignored server` with the model, 1 passed in 3.82 s.
 - **Installer from the CI** (`installer.yml` on tag `v0.1.0`, run 42727640106, ~8.5 min): `Jay-S_0.1.0_x64-setup.exe` with **4,696,362 bytes (4.48 MiB)**, within RNF-2; SHA-256 `f88a7fa47fc9ebe6be35f644bc58e81457974a74f1eece41260c6fd7ca1c265e`; not signed.
 - **Release published:** https://github.com/TyxMatty/Jay-S/releases/tag/v0.1.0, with that file (the size and SHA-256 GitHub shows are those of the file downloaded from the CI); `releases/latest`, which is what Jay-H queries, points at it. The notes carry the SHA-256 and 4 pictures of the app in English, which load (HTTP 200) from the tag's address. The text of the notes is provisional.
-- **Jay-H:** Jay-S is in the catalog (`products.json`, with an icon and a summary); there, `npm test` 16/16 and `catalog_is_valid` pass. The catalog is compiled into Jay-H: it only reaches people in a new Jay-H release.
+- **Jay-H:** Jay-S is in the catalog (`products.json`, with an icon and a summary); there, `npm test` 16/16 and `catalog_is_valid` pass. The catalog is compiled into Jay-H and shipped in its [0.1.5](https://github.com/TyxMatty/Jay-H/releases/tag/v0.1.5) release (installer from the CI, 1,939,970 bytes; the CI passed there on the version's commit).
 - **Uninstalling:** tested by hand by the author, on a real install; not measured here.
 - **What this doesn't prove:** the published installer wasn't run here: the install measured above was the local 0.0.1 build, in the private copy of AppData. Jay-H installing and updating Jay-S wasn't seen.
-- **Missing:** a Jay-H release with the new catalog; installing 0.1.0 from Explorer and from Jay-H, on a test account (pages, language choice, SmartScreen, taskbar icon); the final description (release notes and the summary in Jay-H).
+- **Missing:** installing 0.1.0 from Explorer and from Jay-H, on a test account (pages, language choice, SmartScreen, taskbar icon); the final description (release notes and the summary in Jay-H).
 
 **Stage 8, measured (2026-11-09), the signals exporter (part a):**
 - **Tests:** `cargo test` in `jay-study`: 83 passed, 1 ignored (the one with the model). The new one, `signals_are_the_numbers_the_rules_use`: on a 20-question ENEM exam, 20 multiple-choice, 0 sum-type, 20 headers, a density of at least 0.3 and the first question before 5% of the text; on running prose, no questions, density 0 and `first_at` 1.
