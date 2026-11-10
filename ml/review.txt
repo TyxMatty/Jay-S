@@ -21,3 +21,13 @@ tree + key parser
     enem-2024 exam (nothing to run) x1, uepg-2020 content x1, wikibooks content x3, wikipedia content x2
   answer changes with the split (right in 3 to 8): 11 files, 10 of them right by the rules
   both: 11 to 12 of 29 right (rules 12)
+
+xgboost + key parser
+  all files: 325 to 339 right (rules 340); above the rules in 0 splits, level in 0, below in 11
+  the 339 files with something to run: 312 to 327 right (rules 339); above the rules in 0 splits, level in 0, below in 11
+  right in 9+ splits where the rules are wrong: 11 files, 0 with something to run
+    encceja-2018 key (nothing to run) x4, wikibooks both (nothing to run) x2, wikibooks exam (nothing to run) x5
+  wrong in 9+ splits where the rules are right: 7 files, 7 with something to run
+    wikibooks content x4, wikipedia content x3
+  answer changes with the split (right in 3 to 8): 25 files, 21 of them right by the rules
+  both: 13 to 17 of 29 right (rules 12)

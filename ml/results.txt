@@ -1,5 +1,5 @@
 370 files, 171 editions, 5 folds by edition, seed 8
-scikit-learn 1.9.1, numpy 2.5.4
+scikit-learn 1.9.1, xgboost 3.4.1, numpy 2.5.4
 
 rules (the app today): 340 of 370 right
  label / said  content     exam     both      key   recall
@@ -56,6 +56,29 @@ tree + key parser, as the app's 4 kinds: 331 of 370 right
   where the rules say sure: 326 of 359
   where the rules say unsure: 5 of 11
   over 10 other splits (seeds 0-9): 328 to 337 right; not keys: 253 to 262
+
+xgboost, 5 labels: 323 of 370 right
+ label / said  content     exam exam_sum     both      key   recall
+      content      100        3        0        8        1     0.89
+         exam        1       56        1        2        2     0.90
+     exam_sum        0       12       80        0        0     0.87
+         both       15        0        0       14        0     0.48
+          key        1        1        0        0       73     0.97
+    precision     0.85     0.78     0.99     0.58     0.96
+
+xgboost + key parser, as the app's 4 kinds: 338 of 370 right
+ label / said  content     exam     both      key   recall
+      content      100        3        8        1     0.89
+         exam        1      149        2        2     0.97
+         both       15        0       14        0     0.48
+          key        0        0        0       75     1.00
+    precision     0.86     0.98     0.58     0.96
+  without the key parser: 336 right
+  on the 295 files that are not keys: 263
+  against the rules: right where they are wrong in 11, wrong where they are right in 13
+  where the rules say sure: 332 of 359
+  where the rules say unsure: 6 of 11
+  over 10 other splits (seeds 0-9): 325 to 339 right; not keys: 250 to 264
 
 tree on all files (chars, headers and question counts are ln(1 + n)):
 |--- sum_questions <= 1.35

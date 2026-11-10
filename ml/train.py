@@ -1,4 +1,4 @@
-"""Stage 8 (b): trains two small classifiers on ml/signals.csv and measures them next to the rules.
+"""Stage 8 (b): trains three small classifiers on ml/signals.csv and measures them next to the rules.
 
     python -I ml/train.py > ml/results.txt
 
@@ -11,13 +11,15 @@ from pathlib import Path
 
 import numpy as np
 import sklearn
-from sklearn.base import clone
+import xgboost
+from sklearn.base import BaseEstimator, ClassifierMixin, clone
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import confusion_matrix, precision_recall_fscore_support
 from sklearn.model_selection import StratifiedGroupKFold
 from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.tree import DecisionTreeClassifier, export_text
+from sklearn.utils.class_weight import compute_sample_weight
 
 SEED = 8
 FOLDS = 5
@@ -26,10 +28,27 @@ LOGGED = {"choice_questions", "sum_questions", "headers", "chars", "longest_pros
 LABELS = ["content", "exam", "exam_sum", "both", "key"]
 KINDS = ["content", "exam", "both", "key"]  # what the app knows: exam_sum is an exam
 
+
+
+class Boosted(BaseEstimator, ClassifierMixin):
+    """XGBoost on the text labels, with the classes weighted like the other two models."""
+
+    def fit(self, x, y):
+        self.labels_ = LabelEncoder().fit(y)
+        self.model_ = xgboost.XGBClassifier(n_estimators=100, max_depth=3, learning_rate=0.1, random_state=SEED, n_jobs=1)
+        self.model_.fit(x, self.labels_.transform(y), sample_weight=compute_sample_weight("balanced", y))
+        self.classes_ = self.labels_.classes_
+        return self
+
+    def predict(self, x):
+        return self.labels_.inverse_transform(self.model_.predict(x))
+
+
 # Fixed before the first run, never tuned: the same files score the models, so tuning would be cheating.
 MODELS = {
     "logistic": make_pipeline(StandardScaler(), LogisticRegression(class_weight="balanced", max_iter=2000)),
     "tree": DecisionTreeClassifier(max_depth=4, class_weight="balanced", random_state=SEED),
+    "xgboost": Boosted(),
 }
 
 
@@ -78,7 +97,7 @@ def main():
     assert set(y) == set(LABELS) and set(rules) <= set(KINDS)
 
     print(f"{len(rows)} files, {len(set(groups))} editions, {FOLDS} folds by edition, seed {SEED}")
-    print(f"scikit-learn {sklearn.__version__}, numpy {np.__version__}")
+    print(f"scikit-learn {sklearn.__version__}, xgboost {xgboost.__version__}, numpy {np.__version__}")
     truth = kind(y)
     rest = truth != "key"
     report("rules (the app today)", truth, rules, KINDS)

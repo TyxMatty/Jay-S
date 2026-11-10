@@ -567,6 +567,13 @@ Cada etapa termina com algo testável; ao fim de cada uma, commit, resumo e a pe
 - **O que isso não prova:** que as regras acertam um arquivo novo. Os limiares saíram destes mesmos 370 arquivos, e "339 de 339" quer dizer "cobre o que foi visto"; os modelos, medidos em arquivos que não viram, têm a comparação contra eles neste ponto. As 12 apostilas com questões lidas vêm de três fontes (8 livros do ENCCEJA, 2 do REAMAT, 2 apostilas). O conjunto não tem apostila curta com questões de alternativas. Não foi aberto no app.
 - **Parte (c):** segue fechada com as regras.
 
+**Etapa 8, medido (2026-11-10), um terceiro modelo: XGBoost:**
+- **O que entrou:** o `ml/train.py` e o `ml/review.py` medem também um XGBoost (100 árvores de profundidade 3, taxa 0,1, classes balanceadas, semente fixa, uma thread), com os parâmetros escolhidos antes da primeira rodada e não mexidos, como os outros dois. É o tipo de modelo mais usado em dados tabulares pequenos, e faltava na comparação.
+- **Resultado:** na semente 8, 338 de 370 com o `parse_answer_key` (323 sem ele), o melhor dos três; nas 11 divisões, de 325 a 339. As regras, 340: ele fica abaixo nas 11. Nos 339 arquivos em que há algo para o app rodar, de 312 a 327 contra 339 das regras.
+- **Onde ele ganha e perde:** acerta em 9 divisões ou mais 11 arquivos que as regras erram, todos entre os que não têm nada para rodar (os 4 gabaritos em imagem e 7 de exercícios abertos). Erra em 9 ou mais 7 conteúdos curtos que as regras acertam. É o melhor em `both` (13 a 17 de 29; regras 12) e o mais instável: 25 arquivos mudam de resposta conforme a divisão.
+- **Segurança (os pontos que mudam em relação a "O treino"):** uma dependência nova, só no ambiente virtual de desenvolvimento, fora do repositório e do app: `xgboost==3.4.1`, instalada só de pacote binário (`--only-binary=:all:`) e fixada no `ml/requirements.txt`. Nenhum modelo é gravado, nada entra no instalador. Duas rodadas dão a mesma saída; o treino leva 10 s (eram 3).
+- **Leitura:** o terceiro modelo confirma a parte (c): nada passa das regras, e o que os modelos acertam a mais está onde o app não tem o que fazer com o acerto. O que ele mostra de novo é que há sinal para os exercícios abertos (ele acha 7 dos 26 de forma repetida), ao custo de errar conteúdos curtos.
+
 ## 9. Riscos e spikes
 
 | # | Risco | Como reduzir |

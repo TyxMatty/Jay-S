@@ -568,6 +568,13 @@ Each stage ends with something testable; at the end of each one: commit, summary
 - **What this does not prove:** that the rules get a new file right. The thresholds came from these same 370 files, and "339 of 339" means "covers what was seen"; the models, measured on files they have not seen, have the comparison against them on this point. The 12 handouts with questions read come from three sources (8 ENCCEJA books, 2 from REAMAT, 2 handouts). The set has no short handout with choice questions. Not opened in the app.
 - **Part (c):** stays closed with the rules.
 
+**Stage 8, measured (2026-11-10), a third model: XGBoost:**
+- **What came in:** `ml/train.py` and `ml/review.py` also measure an XGBoost (100 trees of depth 3, rate 0.1, balanced classes, fixed seed, one thread), with parameters chosen before the first run and not touched, like the other two. It is the kind of model most used on small tabular data, and it was missing from the comparison.
+- **Result:** on seed 8, 338 of 370 with `parse_answer_key` (323 without it), the best of the three; over the 11 splits, 325 to 339. The rules, 340: it stays below in all 11. On the 339 files where there is something for the app to run, 312 to 327 against the rules' 339.
+- **Where it wins and loses:** it gets right, in 9 splits or more, 11 files the rules get wrong, all among those with nothing to run (the 4 image keys and 7 with open exercises). It gets wrong, in 9 or more, 7 short contents the rules get right. It is the best on `both` (13 to 17 of 29; rules 12) and the least stable: 25 files change answer with the split.
+- **Security (the points that change from "The training"):** one new dependency, only in the development virtual environment, outside the repository and the app: `xgboost==3.4.1`, installed from binary packages only (`--only-binary=:all:`) and pinned in `ml/requirements.txt`. No model is saved, nothing goes into the installer. Two runs give the same output; the training takes 10 s (was 3).
+- **Reading:** the third model confirms part (c): nothing passes the rules, and what the models get right beyond them is where the app has nothing to do with it. What it shows that is new is that there is signal for open exercises (it finds 7 of the 26 repeatedly), at the cost of getting short contents wrong.
+
 ## 9. Risks and spikes
 
 | # | Risk | How to reduce it |
