@@ -36,7 +36,9 @@ function replyEl(r) {
   }[r.kind];
   const head = h('div', { class: 'chat-reply-head' }, h('span', { class: 'chat-avatar', html: icons.spark, 'aria-hidden': 'true' }), h('strong', {}, 'Jay-AI'), badge ? h('span', { class: 'badge', 'data-status': badge[0] }, badge[1]) : null);
   const parts = [head];
-  if (r.kind === 'unknown') parts.push(h('p', { class: 'chat-banner' }, r.sources.length ? t("Your sources don't answer this. The closest they get:") : t("Nothing in the sources you chose is about this.")));
+  // Unknown with plain sentences and no source: Jay-AI answered from what it knows, not the material.
+  const outside = r.sentences.length > 0 && !r.sources.length && r.sentences.every((s) => s.status !== 'unconfirmed' && !s.sources.length);
+  if (r.kind === 'unknown') parts.push(h('p', { class: 'chat-banner' }, outside ? t("Nothing in your sources is about this. This is Jay-AI's general knowledge, with no source: check it.") : r.sources.length ? t("Your sources don't answer this. The closest they get:") : t("Nothing in the sources you chose is about this.")));
   if (r.kind === 'material' && !confirmed) parts.push(h('p', { class: 'chat-banner', 'data-tone': 'warning' }, t("Jay-AI couldn't back this answer with your sources. Read them below.")));
   let sources = null;
   // A source chip opens the sources and takes the reader to its quote.

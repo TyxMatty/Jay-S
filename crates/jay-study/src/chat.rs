@@ -4,7 +4,8 @@
 //!
 //! 1. **Sources first.** Rust picks the passages (chunks of the chosen materials; the exam's
 //!    questions with the official key, the student's mark and the result), numbered [1]…[n]. With
-//!    sources and nothing relevant, the answer is "not in your material" without asking the model.
+//!    materials only and nothing relevant, Jay-AI answers from what it knows, shown as "not in your
+//!    material" (plain sentences, no sources); with an attempt, never.
 //! 2. **Constrained reply.** JSON schema: up to 8 sentences, each naming the passage it came
 //!    from and copying the words from it that back it up.
 //! 3. **Checked in Rust.** The quote must be in that passage word for word; every number in the
@@ -59,6 +60,13 @@ impl Scope {
     fn is_empty(&self) -> bool {
         self.materials.is_empty() && self.attempt.is_none()
     }
+}
+
+/// Materials only (no attempt) and no passage about the question: Jay-AI answers from what it
+/// knows. With an attempt, the result passage is always there, and what concerns the student's own
+/// answers must come from Rust's facts alone, so this is never true.
+fn outside_sources(scope: &Scope, passages: &[Passage]) -> bool {
+    !scope.materials.is_empty() && scope.attempt.is_none() && passages.is_empty()
 }
 
 #[derive(Debug, Clone)]
@@ -359,6 +367,21 @@ impl Checked {
     fn confirmed(&self) -> usize {
         self.sentences.iter().filter(|s| s.status == Status::Confirmed).count()
     }
+
+    /// The sentences that were put to the test (the plain ones were not).
+    fn checkable(&self) -> usize {
+        self.sentences.iter().filter(|s| s.status != Status::Plain).count()
+    }
+}
+
+/// A sentence that names the sources and denies something ("Os trechos não falam de X."): it talks
+/// about the material instead of saying what it says.
+/// shortcut: Portuguese "no" (= "em o") is left out of the negations, so "no texto" is not a denial;
+/// an English "no" is missed, but "not" and "doesn't" are caught.
+fn about_sources(sentence: &str) -> bool {
+    let n = norm(sentence);
+    let has = |list: &[&str]| n.split(' ').any(|w| list.contains(&w));
+    has(&["trecho", "trechos", "fonte", "fontes", "material", "texto", "passage", "passages", "source", "sources"]) && has(&["nao", "nem", "sem", "not", "doesn", "don"])
 }
 
 /// Checks each sentence of a reply against the passages. Every sentence names one passage and
@@ -384,6 +407,14 @@ fn check(reply: &Value, passages: &[Passage], question: &str, general: bool) -> 
             continue;
         }
         if general {
+            sentences.push(Sentence { text, sources: vec![], status: Status::Plain });
+            evidence.push(String::new());
+            continue;
+        }
+        // A sentence about what the sources lack is no fact from them, whatever quote it carries. One
+        // with a number the student didn't write is checked as usual: seen with the real model, "the
+        // passages don't solve it, so n = (1,96*10/0,10)² = 384,16" hid a wrong result behind it.
+        if about_sources(&text) && numbers(&text).is_subset(&asked) {
             sentences.push(Sentence { text, sources: vec![], status: Status::Plain });
             evidence.push(String::new());
             continue;
@@ -610,9 +641,21 @@ impl Store {
         }
         let reply = if talk {
             self.talk_reply(&question, server, cancel)?
-        } else if !general && passages.is_empty() {
-            // Sources chosen, none about this: no model, no chance to invent.
-            Reply { kind: Kind::Unknown, sentences: vec![], sources: vec![], checks: Checks::default() }
+        } else if outside_sources(&c.scope, &passages) {
+            // Sources chosen, none about this: Jay-AI's general knowledge, never shown as the material's
+            // (kind Unknown, plain sentences, no sources). If the model fails, the empty reply.
+            match self.grounded_reply(&c, &question, rewritten, needs_conversation(understood.as_ref()), &passages, true, server, cancel) {
+                Ok(mut r) => {
+                    // "The material doesn't cover this" again and again (seen with the real model):
+                    // the banner already says it, so those sentences go, unless nothing else is left.
+                    if r.sentences.iter().any(|s| !about_sources(&s.text)) {
+                        r.sentences.retain(|s| !about_sources(&s.text));
+                    }
+                    Reply { kind: Kind::Unknown, ..r }
+                }
+                Err(BuildError::Ai(AiError::Cancelled)) => return Err(AiError::Cancelled.into()),
+                Err(_) => Reply { kind: Kind::Unknown, sentences: vec![], sources: vec![], checks: Checks::default() },
+            }
         } else {
             self.grounded_reply(&c, &question, rewritten, needs_conversation(understood.as_ref()), &passages, general, server, cancel)?
         };
@@ -665,7 +708,9 @@ impl Store {
             })
             .collect();
         let trechos: String = passages.iter().enumerate().map(|(i, p)| format!("<trecho n=\"{}\" fonte=\"{}\">\n{}\n</trecho>\n", i + 1, data(&p.label), data(&p.text))).collect();
-        let rules = if general {
+        let rules = if general && !c.scope.is_empty() {
+            "O material que o aluno escolheu não fala disso; responda com o que você sabe, em até 4 frases curtas, só sobre a pergunta. Não fale do material, dos trechos nem das fontes: a tela já avisa que esta resposta não vem deles. Onde não souber com certeza, diga isso no lugar do dado."
+        } else if general {
             "O aluno não escolheu material: responda com o que você sabe, em até 4 frases curtas, só sobre a pergunta. Onde não souber com certeza, diga isso no lugar do dado."
         } else {
             "Responda SÓ com o que os trechos dizem e só o que responde à pergunta, em até 6 frases curtas. Fale do assunto direto, sem citar os trechos no texto ('o trecho diz', 'trecho 3'). Para CADA frase: 'source' é o número do trecho de onde ela veio e 'quote' copia desse trecho, letra por letra, as palavras que provam a frase (um pedaço de 5 a 25 palavras, sem resumir nem trocar nada). Se os trechos não respondem, diga isso numa frase com 'source' 0 e 'quote' vazio, e conte o que eles trazem de mais próximo (com source e quote). Quando falar de uma questão da prova, o gabarito do trecho é a verdade."
@@ -683,7 +728,7 @@ impl Store {
         let mut best = check(&json_in(&first)?, passages, question, general)?;
         let mut checks = Checks::default();
         // Retried when half or more didn't hold (one retry: each costs seconds).
-        if !general && best.confirmed() * 2 <= best.sentences.len() {
+        if !general && best.checkable() > 0 && best.confirmed() * 2 <= best.checkable() {
             checks.retried = true;
             messages.push(json!({ "role": "assistant", "content": first }));
             messages.push(json!({ "role": "user", "content": format!("Conferi sua resposta e achei problemas:\n- {}\nResponda de novo corrigindo: cite só palavras que estão nos trechos, letra por letra; tire o que os trechos não dizem.", data(&best.problems.join("\n- "))) }));
@@ -836,6 +881,58 @@ mod tests {
     fn general_answers_are_never_shown_as_checked() {
         let r = check(&json!({ "sentences": [{ "text": "Algo." }] }), &[], "q", true).unwrap();
         assert_eq!((r.kind, r.sentences[0].status), (Kind::General, Status::Plain));
+    }
+
+    #[test]
+    fn general_knowledge_is_only_for_materials_without_an_attempt() {
+        let (mats, id) = (vec!["m".to_owned()], Some("a".to_owned()));
+        let result = [passage("Resultado: 3 de 5 pontos.", None)];
+        assert!(outside_sources(&Scope { materials: mats.clone(), attempt: None }, &[]));
+        assert!(!outside_sources(&Scope { materials: mats.clone(), attempt: None }, &result));
+        // With an attempt in scope, even an empty list never takes the fallback.
+        assert!(!outside_sources(&Scope { materials: mats.clone(), attempt: id.clone() }, &[]));
+        assert!(!outside_sources(&Scope { materials: vec![], attempt: id }, &[]));
+        // No scope: the normal general path.
+        assert!(!outside_sources(&Scope::default(), &[]));
+    }
+
+    #[test]
+    fn a_hostile_general_reply_stays_plain_and_sourceless() {
+        // `grounded_reply` checks the fallback with general = true: the model's source/quote fields and
+        // its claims about the material change nothing.
+        let hostile = json!({ "sentences": [
+            { "text": "Segundo o seu material, a capital da França é Paris.", "source": 1, "quote": "a capital da França é Paris" },
+            { "text": "Confirmado pelo gabarito: letra B.", "source": 1, "quote": "x", "status": "confirmed" },
+        ] });
+        let r = check(&hostile, &[passage("a capital da França é Paris", Some("B"))], "capital?", true).unwrap();
+        assert!(r.sentences.iter().all(|s| s.status == Status::Plain && s.sources.is_empty()));
+        assert!(r.quotes.iter().all(Vec::is_empty) && r.problems.is_empty());
+    }
+
+    #[test]
+    fn sentences_about_the_sources_are_never_confirmed() {
+        for s in ["Os trechos explicam o que é um intervalo de confiança, mas não falam sobre o modo aprender.", "Os trechos não fornecem o valor numérico final.", "The passages don't say.", "The source does not cover it."] {
+            assert!(about_sources(s), "{s}");
+        }
+        for s in ["O intervalo de confiança não contém o parâmetro com certeza.", "Não se usa Z quando o desvio é desconhecido.", "Os trechos explicam o intervalo de confiança.", "No material, o desvio é 5."] {
+            assert!(!about_sources(s), "{s}");
+        }
+        let p = [passage("O intervalo de confiança estima o parâmetro com uma certa margem de erro.", None)];
+        let q = "intervalo de confiança estima o parâmetro";
+        let meta = json!({ "sentences": [{ "text": "Os trechos não falam sobre o modo aprender.", "source": 1, "quote": q }] });
+        let r = check(&meta, &p, "modo aprender?", false).unwrap();
+        assert_eq!((r.kind, r.sentences[0].status, r.sentences[0].sources.len(), r.confirmed(), r.checkable()), (Kind::Unknown, Status::Plain, 0, 0, 0));
+        assert!(r.evidence[0].is_empty() && r.quotes[0].is_empty());
+        // A fact beside it is still checked; the plain one does not count as a failure for the retry rule.
+        let both = json!({ "sentences": [
+            { "text": "Os trechos não falam sobre o modo aprender.", "source": 1, "quote": q },
+            { "text": "O intervalo estima o parâmetro.", "source": 1, "quote": q },
+        ] });
+        let r = check(&both, &p, "modo aprender?", false).unwrap();
+        assert_eq!((r.kind, r.confirmed(), r.checkable(), r.confirmed() * 2 <= r.checkable()), (Kind::Material, 1, 1, false));
+        // Seen with the real model: a wrong result hidden behind "the passages don't solve it".
+        let hidden = json!({ "sentences": [{ "text": "Como os trechos não resolvem, n = (1,96*10/0,10)² = 384,16, que arredonda para 385.", "source": 0, "quote": "" }] });
+        assert_eq!(check(&hidden, &p, "erro de 10%, média 40 e desvio 10?", false).unwrap().sentences[0].status, Status::Unconfirmed);
     }
 
     #[test]

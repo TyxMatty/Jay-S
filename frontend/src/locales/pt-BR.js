@@ -328,6 +328,7 @@ export default {
   "Not confirmed": "Não confirmado",
   "Your sources don't answer this. The closest they get:": "Suas fontes não respondem isso. O mais perto que chegam:",
   "Nothing in the sources you chose is about this.": "Nada nas fontes que você escolheu fala disso.",
+  "Nothing in your sources is about this. This is Jay-AI's general knowledge, with no source: check it.": "Nada nas suas fontes fala disso. Isto é o conhecimento geral do Jay-AI, sem fonte: confira.",
   "Jay-AI couldn't back this answer with your sources. Read them below.": "O Jay-AI não conseguiu confirmar esta resposta nas suas fontes. Leia os trechos abaixo.",
   "Key: {key}": "Gabarito: {key}",
   "quotes found in the text": "citações achadas no texto",
