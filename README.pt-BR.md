@@ -21,7 +21,7 @@ O app de estudos da linha Jay: anexe seu conteúdo e suas provas, e o **Jay-AI**
 
 Baixe o `Jay-S_<versão>_x64-setup.exe` da **[última release](https://github.com/TyxMatty/Jay-S/releases/latest)** (Windows, 64 bits). O Jay-AI não vem no instalador: o programa e o modelo dele (1,3 ou 2,7 GB) são baixados uma vez, quando você liga o Jay-AI no app. Todas as versões estão em [releases](https://github.com/TyxMatty/Jay-S/releases).
 
-O plano, as etapas e o que foi medido estão em [docs/ARQUITETURA.md](docs/ARQUITETURA.md).
+O plano, as etapas e o que foi medido estão em [docs/ARQUITETURA.md](docs/ARQUITETURA.md). A revisão de segurança (fronteiras de confiança, CWEs e OWASP LLM, Semgrep, achados em aberto) está em [docs/SEGURANCA.md](docs/SEGURANCA.md).
 
 ## Código
 

@@ -108,24 +108,28 @@ fn relaunch_with_icon(hwnd: HWND, exe: &Path, ico_path: &Path, app_id: &str) -> 
 }
 
 fn set_text(store: &IPropertyStore, key: &PROPERTYKEY, text: &str) -> windows::core::Result<()> {
-    let mut value = string_value(text);
+    let mut value = string_value(text)?;
     let result = unsafe { store.SetValue(key, &value) };
     let _ = unsafe { PropVariantClear(&mut value) };
     result
 }
 
 /// A VT_LPWSTR value (its string is freed by PropVariantClear).
-fn string_value(text: &str) -> PROPVARIANT {
+fn string_value(text: &str) -> windows::core::Result<PROPVARIANT> {
     let wide: Vec<u16> = text.encode_utf16().chain(Some(0)).collect();
     let mut value = PROPVARIANT::default();
     unsafe {
         let ptr = CoTaskMemAlloc(wide.len() * 2) as *mut u16;
+        // Out of memory: copying into a null pointer would be undefined behaviour (Semgrep, CWE-690).
+        if ptr.is_null() {
+            return Err(windows::Win32::Foundation::E_OUTOFMEMORY.into());
+        }
         ptr.copy_from_nonoverlapping(wide.as_ptr(), wide.len());
         let inner = &mut *value.Anonymous.Anonymous;
         inner.vt = VT_LPWSTR;
         inner.Anonymous.pwszVal = PWSTR(ptr);
     }
-    value
+    Ok(value)
 }
 
 /// A one-picture .ico (32-bit BGRA bitmap, bottom-up, empty AND mask) from straight-alpha RGBA.
