@@ -108,8 +108,9 @@ async function main() {
   const signals = new Map(lines('signals.csv').slice(1).map((l) => l.split(',').slice(0, 2)));
   assert.deepEqual([...signals].sort(), [...hashed].sort(), 'signals.csv and sha256.txt differ');
   for (const [file, label] of hashed) assert.ok(NAME.test(file) && LABELS.has(label), file);
-  for (const r of rows) assert.equal(hashed.get(r.file), r.label, r.file);
   const out = process.argv[2];
+  // A row that is not in sha256.txt yet is a file still to download; --check accepts none.
+  for (const r of rows) if (out === '--check' || hashed.has(r.file)) assert.equal(hashed.get(r.file), r.label, r.file);
   if (out === '--check') return console.log(`${rows.length} sources ok, ${hashed.size} files in the set`);
   if (!out) throw new Error('usage: node ml/fetch.mjs <folder outside the repository> | --check');
   const root = path.resolve(out);
