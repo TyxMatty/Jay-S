@@ -533,6 +533,14 @@ Medido com o Jay-AI (`chat_probe`, uma rodada da conversa sem fontes): "Como ane
 
 **Limites:** a tabela é escrita à mão, como o guia: um parágrafo novo exige uma linha nela (o teste de tamanho falha antes de chegar ao usuário), mas nada confere se a seção escolhida é a melhor para o parágrafo. Só um botão por resposta, o da primeira frase confirmada; uma resposta que cruza duas seções leva à primeira.
 
+### Sugestões para começar (o chat)
+
+Na conversa nova, o aluno que não sabe o que perguntar vê três botões sob o campo: "O que você consegue fazer?", "Como faço um simulado?" e "Como anexo um PDF?" (`STARTERS` em `chat.js`). Clicar escolhe "Qualquer dúvida", põe o texto no campo e aperta o botão de enviar, o mesmo caminho do Enter: a conversa nasce sem fontes e o guia responde. Só aparecem na conversa nova, e o clique não faz nada enquanto um envio está em curso (o botão fica desabilitado). Pelos 10 pontos: **1** só interface; nenhum comando, arquivo ou rede novos. **2, 3, 5, 6, 8, 9** nada novo. **4** os textos são nossos, fixos, e vão ao campo por `.value` e aos botões por `h()`; o que segue é a pergunta comum, com o tratamento de sempre. **7** o botão de enviar desabilitado impede um segundo envio. **10** teste em `chat-reply.test.js`: cada sugestão tem tradução em pt-BR.
+
+Medido com o Jay-AI: não medido com o modelo: é só interface.
+
+**Limites:** três textos fixos, não adaptados ao que o aluno já fez.
+
 ## 8. Etapas
 
 Cada etapa termina com algo testável; ao fim de cada uma, commit, resumo e a pergunta se segue para a próxima.

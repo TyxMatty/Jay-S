@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { replyNotes, goTarget } from '../src/ui/chat.js';
-import { setLanguage } from '../src/core/i18n.js';
+import { replyNotes, goTarget, STARTERS } from '../src/ui/chat.js';
+import { setLanguage, t } from '../src/core/i18n.js';
 
 const reply = (kind, statuses) => ({ kind, sources: [], sentences: statuses.map((status) => ({ text: 'x', sources: [], status })) });
 
@@ -19,6 +19,11 @@ test('a material reply keeps its own badge and banner', () => {
   setLanguage('pt-BR');
   assert.deepEqual(replyNotes(reply('material', ['confirmed'])).badge, ['ok', 'Das suas fontes']);
   assert.equal(replyNotes(reply('unknown', [])).banner, 'Nada nas fontes que você escolheu fala disso.');
+});
+
+test('every starter suggestion has a Portuguese text', () => {
+  setLanguage('pt-BR');
+  for (const s of STARTERS) assert.notEqual(t(s), s);
 });
 
 test('the button to a section needs an app reply and one of our own keys', () => {

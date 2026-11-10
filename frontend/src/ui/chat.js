@@ -7,6 +7,9 @@ import { invoke, isTauri } from '../core/bridge.js';
 import { t } from '../core/i18n.js';
 import { studyFailureText } from './study-text.js';
 
+/** Fixed questions offered on an empty new conversation (English keys of `t()`). */
+export const STARTERS = ['What can you do?', 'How do I make a mock test?', 'How do I attach a PDF?'];
+
 /** The answer as one paragraph, or a list when asked; each run of unconfirmed sentences starts with its label (never color alone). */
 function answerEl(sentences, showSource, list) {
   // Not `chat-list`: that is the conversations sidebar.
@@ -228,7 +231,20 @@ export function createChatPanel() {
       box.send.disabled = false;
     });
     box.send.disabled = !isTauri;
-    body.replaceChildren(h('div', { class: 'chat-hero' }, h('h2', { class: 'chat-greeting' }, t('Where do we start?')), box.el, about, materialsField, attemptField, note));
+    // Same as typing the text with "Any question" selected and pressing Enter; the send button
+    // is disabled while a send is on its way, so a click then does nothing.
+    const starters = h('div', { class: 'chat-starters' }, STARTERS.map((text) => h('button', {
+      type: 'button',
+      class: 'chat-starter',
+      onClick: () => {
+        const general = about.querySelector('input[value="general"]');
+        general.checked = true;
+        general.dispatchEvent(new Event('change', { bubbles: true }));
+        box.input.value = t(text);
+        box.send.click();
+      },
+    }, t(text))));
+    body.replaceChildren(h('div', { class: 'chat-hero' }, h('h2', { class: 'chat-greeting' }, t('Where do we start?')), box.el, starters, about,materialsField, attemptField, note));
     // A long conversation leaves the panel scrolled: the new one starts at its top.
     body.closest('.app-panels')?.scrollTo({ top: 0 });
     box.input.focus({ preventScroll: true });

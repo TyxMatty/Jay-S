@@ -534,6 +534,14 @@ Measured with Jay-AI (`chat_probe`, one run of the chat with no sources): "Como 
 
 **Limits:** the table is written by hand, like the guide: a new paragraph needs a line in it (the length test fails before it reaches the user), but nothing checks that the chosen section is the best one for the paragraph. Only one button per answer, from the first confirmed sentence; an answer that spans two sections leads to the first.
 
+### Starter suggestions (the chat)
+
+In a new conversation, a student who doesn't know what to ask sees three buttons under the box: "What can you do?", "How do I make a mock test?" and "How do I attach a PDF?" (`STARTERS` in `chat.js`). Clicking selects "Any question", puts the text in the box and presses the send button, the same path as Enter: the conversation is born with no sources and the guide answers. They appear only in a new conversation, and a click does nothing while a send is in progress (the button is disabled). By the 10 points: **1** interface only; no new command, file or network. **2, 3, 5, 6, 8, 9** nothing new. **4** the texts are ours, fixed, and go into the box through `.value` and into the buttons through `h()`; what follows is the ordinary question, handled as always. **7** the disabled send button prevents a second send. **10** test in `chat-reply.test.js`: each suggestion has a pt-BR translation.
+
+Measured with Jay-AI: not measured with the model: it is interface only.
+
+**Limits:** three fixed texts, not adapted to what the student has already done.
+
 ## 8. Stages
 
 Each stage ends with something testable; at the end of each one: commit, summary, and the question whether to go on to the next.
