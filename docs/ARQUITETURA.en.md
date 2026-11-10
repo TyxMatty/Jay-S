@@ -542,6 +542,14 @@ Measured with Jay-AI: not measured with the model: it is interface only.
 
 **Limits:** three fixed texts, not adapted to what the student has already done.
 
+### A calculation only when there is one (the chat)
+
+"Consegue escrever uma calculadora simples em py?" ("Can you write a simple calculator in py?") was classified `calc` in 3 of 3 runs and came out under the "Calculated by the app" badge, over sentences about Python operators: nothing was computed. Now the calc route needs a digit in the message or in the rewrite (`has_numbers`; without one the message goes to `General`), and a calc reply only stands if the engine evaluated at least one `conta` (`evaluated_any`); otherwise `calc_reply` returns `None` and the usual fallback applies. The classifier prompt says that asking how something works, asking for a program or calculator, or talking about calculation as a subject is not `calc`. By the 10 points: **1** routing in Rust only; no new command, file or network. **2, 3, 5, 6, 8, 9** nothing new. **4** the decision looks only at digits and at the already-validated model output; what the model writes still goes through the calculation engine. **7** fewer calls to the calc model, not more. **10** test `calc_needs_a_number_and_a_computed_step` (no digit is no calculation; the number may come only from the rewrite; steps that only explain, or with an invalid or wrongly typed `conta`, do not count as computed) and the `calc_steps` and `bare_arithmetic` ones, untouched. Fewer replies end up under the "computed" badge, and no new data.
+
+Measured with Jay-AI (`chat_probe`, the whole probe, one run; before, three runs of the user's conversation): "Consegue escrever uma calculadora simples em py?" no longer came out as "Computed by the app" (before, 3 of 3, with five or six sentences about Python operators and no calculation); it now went to the guide route, which answered that the app doesn't write programs (the answer with code is the next change). Real calculations still go through the calculator: the proportion gave 864,36 and 865, and "(1,96 * 10 / 4)^2" 24,01; the relative-error sample size stayed wrong (38 416, the model's formula without the mean), as before
+
+**Limits:** a digit in the message ("write a calculator for 2 numbers") still opens the route; the badge then depends on a `conta` the engine can evaluate. One step with an evaluated `conta` next to steps with invalid ones is enough.
+
 ## 8. Stages
 
 Each stage ends with something testable; at the end of each one: commit, summary, and the question whether to go on to the next.

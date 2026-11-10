@@ -28,6 +28,10 @@ const GENERAL: [&str; 3] = ["Como anexo um PDF?", "Quanto é (1,96 * 10 / 4)^2?"
 /// correction when it was misread.
 const PERSONAL: [&str; 5] = ["Opa! Como vc ta?", "Pode se chamar de Matty?", "Eu to me referindo a você se chamar de Matty", "Qual é o seu nome mesmo?", "O que você consegue fazer?"];
 
+/// Another conversation the student had, with no sources: an app question that wants a short
+/// answer, the nickname, and a request for code that is not a calculation.
+const MIXED: [&str; 4] = ["Como faço flashcards de uma prova que fiz?", "Posso te chamar de Matty?", "Como é seu apelido?", "Consegue escrever uma calculadora simples em py?"];
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let root = std::env::temp_dir().join(format!("jay-s-chat-probe-{}", jay_study::id::new_id()));
@@ -35,12 +39,14 @@ fn main() {
     let materials: Vec<String> = args[2..].iter().map(|f| store.import(std::path::Path::new(f)).expect("import").id).collect();
     let server = Server::start(&AiPaths::new(std::path::Path::new(&args[1])), ModelChoice::Standard).expect("server");
     let cancel = AtomicBool::new(false);
-    // PROBE_PERSONAL=1: only the third conversation (for repeated runs).
-    let only_personal = std::env::var_os("PROBE_PERSONAL").is_some();
-    let chats = [(Scope { materials, attempt: None }, &SCOPED[..]), (Scope::default(), &GENERAL[..]), (Scope::default(), &PERSONAL[..])];
-    // PROBE_GENERAL=1: only the second one (the questions with no sources).
-    let only_general = std::env::var_os("PROBE_GENERAL").is_some();
-    for (scope, questions) in chats.into_iter().skip(if only_personal { 2 } else if only_general { 1 } else { 0 }).take(if only_general { 1 } else { 3 }) {
+    let chats = [(Scope { materials, attempt: None }, &SCOPED[..]), (Scope::default(), &GENERAL[..]), (Scope::default(), &PERSONAL[..]), (Scope::default(), &MIXED[..])];
+    // Only one conversation, for repeated runs: PROBE_GENERAL=1 (the second), PROBE_PERSONAL=1 (the
+    // third), PROBE_MIXED=1 (the fourth).
+    let only = [("PROBE_GENERAL", 1), ("PROBE_PERSONAL", 2), ("PROBE_MIXED", 3)].iter().find(|(v, _)| std::env::var_os(v).is_some()).map(|&(_, i)| i);
+    for (i, (scope, questions)) in chats.into_iter().enumerate() {
+        if only.is_some_and(|o| o != i) {
+            continue;
+        }
         let chat = store.new_chat(scope).expect("chat");
         println!("=== chat: {}", if chat.title.is_empty() { "(no sources)" } else { &chat.title });
         for q in questions {
@@ -48,7 +54,7 @@ fn main() {
             match store.chat_ask(&chat.id, q, &server, &cancel) {
                 Ok(turn) => {
                     let r = &turn.reply;
-                    println!("\n> {q}\n  kind={:?} go={:?} list={} time={:.1}s retried={} second_reading={} sources={}", r.kind, r.go, r.list, t.elapsed().as_secs_f32(), r.checks.retried, r.checks.second_reading, r.sources.iter().map(|s| s.label.as_str()).collect::<Vec<_>>().join(" | "));
+                    println!("\n> {q}\n  kind={:?} go={:?} list={} time={:.1}s retried={} second_reading={} rejected_quotes={} sources={}", r.kind, r.go, r.list, t.elapsed().as_secs_f32(), r.checks.retried, r.checks.second_reading, r.checks.rejected_quotes, r.sources.iter().map(|s| s.label.as_str()).collect::<Vec<_>>().join(" | "));
                     for s in &r.sentences {
                         println!("  [{:?} {:?}] {}", s.status, s.sources, s.text);
                     }

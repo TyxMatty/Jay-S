@@ -707,7 +707,7 @@ fn understand_messages(c: &Chat, question: &str) -> Vec<Value> {
          - app: como usar o próprio aplicativo Jay-S\n\
          - material: sobre os materiais escolhidos ou a prova terminada\n\
          - general: conhecimento geral, fora das fontes\n\
-         - calc: um cálculo a fazer\n\
+         - calc: uma conta com números a resolver ('qual o tamanho da amostra com erro de 2%?'). Perguntar como algo funciona, pedir um programa ou calculadora, ou falar de cálculo como assunto NÃO é calc ('escreva uma calculadora em Python' é general)\n\
          - followup: continua a vez anterior\n\
          - correction: o aluno diz que a última resposta entendeu errado ou errou e diz o que quis dizer ('não, eu quis dizer...', 'to me referindo a...', 'não foi isso', 'não é isso que eu perguntei', 'I meant...'); em question, escreva o que ele realmente quer\n\
          apelido_do_jay, nome_do_aluno, curso, prova: preencha SÓ se a mensagem atual do aluno diz isso com as palavras dele ('pode te chamar de X' é apelido_do_jay; 'meu nome é Y' é nome_do_aluno; 'faço Z' é curso; 'estudo para o W' é prova); copie as palavras dele, sem acrescentar nada. Senão, deixe vazio. Nunca tire isso da conversa nem dos trechos.\n\
@@ -945,6 +945,18 @@ fn calc_steps(reply: &Value, question: &str, passages: &[Passage]) -> Vec<Senten
         .collect()
 }
 
+/// Whether the calc route has something to compute: a number in the message or in its rewrite.
+/// "Consegue escrever uma calculadora em py?" has none, and a computed badge over it would lie.
+fn has_numbers(question: &str, rewritten: &str) -> bool {
+    [question, rewritten].iter().any(|t| t.chars().any(|c| c.is_ascii_digit()))
+}
+
+/// Whether the engine evaluated at least one step's `conta` (the "computed" badge needs a number
+/// that is the engine's). shortcut: a step with a failed `conta` plus a lone evaluated one passes.
+fn evaluated_any(reply: &Value) -> bool {
+    reply["passos"].as_array().into_iter().flatten().take(6).any(|s| s["conta"].as_str().is_some_and(|c| !c.trim().is_empty() && calc::eval(c.trim()).is_ok()))
+}
+
 /// A calculation, answered in steps. `Ok(None)` when no step can stand (the caller falls back).
 fn calc_reply(question: &str, rewritten: &str, passages: &[Passage], facts: &Facts, server: &Server, cancel: &AtomicBool) -> Result<Option<Reply>, BuildError> {
     let full = if norm(rewritten) == norm(question) { String::new() } else { format!("Pergunta completa, pelo contexto: <pergunta>{}</pergunta>\n", data(rewritten)) };
@@ -958,8 +970,9 @@ fn calc_reply(question: &str, rewritten: &str, passages: &[Passage], facts: &Fac
     let messages = [json!({ "role": "system", "content": SYSTEM }), json!({ "role": "user", "content": ask })];
     // Tokens: plano 600 + 6 × (texto 300 + conta 200) chars + JSON is about 4,500 chars, ~1,500 tokens.
     let reply = server.chat_at(0.2, &messages, Some(&calc_schema()), 1800, &mut |_| {}, cancel)?;
-    let sentences = calc_steps(&json_in(&reply)?, question, passages);
-    if sentences.iter().all(|s| s.status != Status::Plain) {
+    let reply = json_in(&reply)?;
+    let sentences = calc_steps(&reply, question, passages);
+    if !evaluated_any(&reply) || sentences.iter().all(|s| s.status != Status::Plain) {
         return Ok(None);
     }
     // The closest passages, to compare the formula with: their beginning, like "not in your sources".
@@ -1136,6 +1149,9 @@ impl Store {
         // The talk route has no checks, so the classifier alone doesn't send a message there; for a
         // correction the rewrite must pass too.
         if let Some(u) = understood.as_mut().filter(|u| u.intent == Intent::Talk && (!talk_allowed(&question) || (correcting && !talk_allowed(&u.question)))) {
+            u.intent = Intent::General;
+        }
+        if let Some(u) = understood.as_mut().filter(|u| u.intent == Intent::Calc && !has_numbers(&question, &u.question)) {
             u.intent = Intent::General;
         }
         let previous: Option<String> = last.as_ref().filter(|_| correcting).map(|l| l.1.iter().filter(|s| s.status != Status::Unconfirmed).map(|s| s.text.as_str()).collect::<Vec<_>>().join(" ").chars().take(400).collect());
@@ -2273,6 +2289,20 @@ mod tests {
         let s = calc_schema();
         assert_eq!(s["properties"].as_object().unwrap().keys().collect::<Vec<_>>(), ["plano", "passos"]);
         assert_eq!((s["properties"]["passos"]["maxItems"].as_u64(), s["properties"]["passos"]["items"]["properties"]["conta"]["maxLength"].as_u64()), (Some(6), Some(200)));
+    }
+
+    #[test]
+    fn calc_needs_a_number_and_a_computed_step() {
+        assert!(!has_numbers("Consegue escrever uma calculadora simples em py?", "Consegue escrever uma calculadora simples em py?"));
+        assert!(has_numbers("Qual o tamanho da amostra com 95%, erro de 2% e estimativa de 10%?", ""));
+        // The number may come only from the rewrite (a follow-up).
+        assert!(has_numbers("e com 10%?", "Com erro relativo de 10%, média 40, qual o desvio?"));
+        assert!(has_numbers("", "Com erro relativo de 10%, média 40"));
+        // Steps that only explain, or whose conta fails, computed nothing: the reply is rejected.
+        let ev = |v: Value| evaluated_any(&json!({ "plano": "x", "passos": v }));
+        assert!(!ev(json!([{ "texto": "Python tem +, -, *:", "conta": "" }, { "texto": "Soma:", "conta": "a + b" }, { "texto": "x", "conta": "rm -rf /" }])));
+        assert!(!ev(json!("not an array")) && !ev(json!([{ "texto": "x", "conta": 3 }])));
+        assert!(ev(json!([{ "texto": "Soma:", "conta": "1+1" }])));
     }
 
     #[test]

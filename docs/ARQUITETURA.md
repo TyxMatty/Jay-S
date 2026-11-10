@@ -541,6 +541,14 @@ Medido com o Jay-AI: não medido com o modelo: é só interface.
 
 **Limites:** três textos fixos, não adaptados ao que o aluno já fez.
 
+### Conta só quando há conta (o chat)
+
+"Consegue escrever uma calculadora simples em py?" foi classificada `calc` em 3 de 3 rodadas e saiu sob o selo "Calculado pelo app", sobre frases sobre operadores de Python: nada foi calculado. Agora a rota de conta exige um dígito na mensagem ou na reescrita (`has_numbers`; sem ele a mensagem vai para `General`), e a resposta de conta só vale se o motor avaliou ao menos uma `conta` (`evaluated_any`); senão `calc_reply` devolve `None` e vale a queda de sempre. O prompt do classificador diz que perguntar como algo funciona, pedir um programa ou falar de cálculo como assunto não é `calc`. Pelos 10 pontos: **1** só roteamento no Rust; nenhum comando, arquivo ou rede novos. **2, 3, 5, 6, 8, 9** nada novo. **4** a decisão olha só dígitos e a saída do modelo já validada; o que o modelo escreve continua passando pelo motor de contas. **7** menos chamadas ao modelo de contas, não mais. **10** teste `calc_needs_a_number_and_a_computed_step` (sem dígito não é conta; o número pode vir só da reescrita; passos só explicativos, com `conta` inválida ou de tipo errado não contam como calculados) e os de `calc_steps` e `bare_arithmetic`, intactos. Menos respostas ficam sob o selo "calculado", e nenhum dado novo.
+
+Medido com o Jay-AI (`chat_probe`, a conversa toda, uma rodada; antes, três rodadas da conversa do usuário): "Consegue escrever uma calculadora simples em py?" deixou de sair como "Calculado pelo app" (antes, 3 de 3, com cinco ou seis frases sobre operadores do Python e nenhuma conta); agora foi para a rota do guia, que respondeu que o app não escreve programas (a resposta com código é a mudança seguinte). As contas de verdade seguem pela calculadora: a proporção deu 864,36 e 865, e "(1,96 * 10 / 4)^2" 24,01; a amostra com erro relativo seguiu errada (38 416, a fórmula do modelo sem a média), como antes
+
+**Limites:** um dígito na mensagem ("escreva uma calculadora para 2 números") ainda deixa a rota abrir; o selo depende então de uma `conta` que o motor avalie. Um passo com `conta` avaliada ao lado de passos com `conta` inválida basta.
+
 ## 8. Etapas
 
 Cada etapa termina com algo testável; ao fim de cada uma, commit, resumo e a pergunta se segue para a próxima.
