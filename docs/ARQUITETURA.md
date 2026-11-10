@@ -387,6 +387,21 @@ O `classify` (`classify.rs`) ganhou um sinal, `longest_prose` (o maior trecho do
 9. **Rede e exposição.** Nenhuma.
 10. **Testes adversariais e critérios de release.** `a_handout_is_questions_and_a_chapter`: questões tão densas quanto as de uma prova, com um capítulo no meio, dão apostila com certeza; com um texto longo que não chega a capítulo, prova; uma prova que abre com folha de fórmulas (a primeira questão a 40% do texto) segue prova; uma apostila curta com os exercícios no fim dá apostila sem certeza. `a_few_lettered_lists_in_a_text_are_content`: duas listas "a) b) c) d)" no fim de um texto são conteúdo; cinco num livro de 150 mil caracteres, também; trinta no mesmo livro, apostila. `signals_are_the_numbers_the_rules_use` prende o sinal novo. Medido: cada uma das três regras, quebrada de propósito, derruba um teste. **Limites:** os três limiares foram escolhidos olhando os 370 arquivos (15 mil, entre 11.040 e 23.994; 0,04 questão por mil caracteres, entre 0,016 e 0,061; metade do texto, acima de 0,38). A regra da apostila curta não tem nenhum arquivo do conjunto que passe por ela: só o teste.
 
+### Fórmulas: a fonte Symbol e as equações em ordem de leitura (depois da etapa 8)
+
+O leitor de PDF (`extract/pdf.rs`, `extract/symbol.rs`) passou a traduzir os caracteres de uso privado da fonte Symbol (U+F020 a U+F0FF) para as letras e sinais que ela desenha, a contar uma vez o símbolo que o editor de equações desenha duas, e a pôr em ordem de leitura os símbolos de uma equação desenhada fora de ordem. É o texto de um anexo, a entrada mais hostil do app. Pelos 10 pontos:
+
+1. **Superfície de ataque.** A mesma entrada, o arquivo anexado; nenhum comando de IPC, arquivo, processo ou rede novo. Muda o texto que sai de páginas com fórmulas. O dano possível é o texto de uma página comum sair embaralhado.
+2. **Controle de acesso / IDOR.** Nada novo.
+3. **Permissões de dados.** Nenhum arquivo nem campo novo.
+4. **Entrada não confiável.** A tabela é fixa, de um caractere para um texto de no máximo um caractere; código fora dela fica como veio. A reordenação só mexe em três linhas seguidas ou mais, de 1 a 6 símbolos cada, vizinhas (a menos de 4 vezes o tamanho da letra), que tenham um sinal de matemática e voltem para cima ou para a esquerda; linha em branco encerra o trecho. Ela só troca a ordem dos símbolos: não cria nem apaga texto, e não adivinha fração nem expoente. Quem escreve o PDF já escolhia a ordem em que o texto sai.
+5. **Credenciais expostas.** Nenhuma.
+6. **Autenticação.** Não se aplica.
+7. **Abuso de recursos e corridas.** Uma passada pelos símbolos da página e uma ordenação por trecho. O `signals` nos 370 arquivos leva o mesmo de antes.
+8. **Cadeia de dependências.** Nenhuma dependência nova (`Cargo.lock` igual).
+9. **Rede e exposição.** Nenhuma.
+10. **Testes adversariais e critérios de release.** `symbol_codes_read_as_the_letters_they_draw`: "μ = 12", "(1 − α)", o parêntese alto em três pedaços, e o que fica como veio (texto comum, outros caracteres de uso privado, os códigos de enfeite); todos os 256 códigos respondem. `an_equation_drawn_out_of_order_is_read_in_rows`: uma fração desenhada de trás para a frente sai em linhas, e o símbolo desenhado duas vezes conta uma. `short_lines_that_are_not_an_equation_keep_their_order`: um gabarito em duas colunas, uma lista com "=", duas linhas só, uma linha longa ao lado, e uma proposição da UEPG entre linhas em branco (que uma versão anterior desta mudança partia em duas) ficam como estavam. **Limites:** outras fontes de símbolos usam os mesmos códigos; o marcador quadrado do Wingdings ainda sai como "ν". A biblioteca de PDF não diz o nome da fonte.
+
 ## 8. Etapas
 
 Cada etapa termina com algo testável; ao fim de cada uma, commit, resumo e a pergunta se segue para a próxima.
@@ -574,6 +589,14 @@ Cada etapa termina com algo testável; ao fim de cada uma, commit, resumo e a pe
 - **Onde ele ganha e perde:** acerta em 9 divisões ou mais 11 arquivos que as regras erram, todos entre os que não têm nada para rodar (os 4 gabaritos em imagem e 7 de exercícios abertos). Erra em 9 ou mais 7 conteúdos curtos que as regras acertam. É o melhor em `both` (13 a 17 de 29; regras 12) e o mais instável: 25 arquivos mudam de resposta conforme a divisão.
 - **Segurança (os pontos que mudam em relação a "O treino"):** uma dependência nova, só no ambiente virtual de desenvolvimento, fora do repositório e do app: `xgboost==3.4.1`, instalada só de pacote binário (`--only-binary=:all:`) e fixada no `ml/requirements.txt`. Nenhum modelo é gravado, nada entra no instalador. Duas rodadas dão a mesma saída; o treino leva 10 s (eram 3).
 - **Leitura:** o terceiro modelo confirma a parte (c): nada passa das regras, e o que os modelos acertam a mais está onde o app não tem o que fazer com o acerto. O que ele mostra de novo é que há sinal para os exercícios abertos (ele acha 7 dos 26 de forma repetida), ao custo de errar conteúdos curtos.
+
+**Depois da etapa 8, medido (2026-11-10), fórmulas: a fonte Symbol e as equações em ordem de leitura:**
+- **De onde veio:** 8 aulas de Estatística do autor (fora do repositório e do conjunto de treino). O Jay-AI fez 20 questões a partir de 4 delas: 12 boas, 2 com a conta errada, 2 que pedem um número e não o dão, 2 com a fórmula descrita ao contrário, 1 sem dado para conferir, 1 com o enunciado cortado (uma pessoa conferiu, com as contas refeitas por fora). As contas de um passo saíram certas; as de vários passos, não.
+- **A causa na leitura:** as letras gregas e os sinais não se perdiam, chegavam como caracteres de uso privado (μ como U+F06D), que é como o Word grava a fonte Symbol. E o editor de equações desenha os símbolos fora de ordem e cada um duas vezes, então uma fórmula saía com um símbolo por linha.
+- **Nas 8 aulas:** caracteres de uso privado, de 1.240 para 16; letras gregas e sinais de matemática lidos, de 1 para 252; linhas de 1 ou 2 caracteres, de 1.251 para 278. "x é o estimador de  e 79" passou a "x é o estimador de μ e 79"; "IC(95%) = 0,0543 ≤ pA − pB ≤ 0,1819" sai numa linha. Frações saem em linhas empilhadas (numerador, linha do "=", denominador), sem barra.
+- **No conjunto de treino:** nenhuma classificação mudou (regras 340 de 370); 31 linhas do `ml/signals.csv` mudaram em contagens; 12 provas ganharam 1 questão lida e nenhuma perdeu. Caracteres de uso privado, de 11.648 para 10.695 (os que sobram são marcadores de outras fontes); linhas de 1 ou 2 caracteres, de 143.945 para 132.893.
+- **Testes:** os 97 do motor passam (1 ignorado). `npm test`: 18.
+- **O que isso não prova:** que o Jay-AI erra menos. A segunda rodada de questões não terminou: com a máquina disputada, cada questão levou mais de 10 minutos, e só 2 saíram. Uma fração em linhas empilhadas pode não bastar para um modelo pequeno. Fontes de equação de outros programas (LaTeX já saía bem) não foram vistas. Não foi aberto no app.
 
 ## 9. Riscos e spikes
 

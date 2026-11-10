@@ -388,6 +388,21 @@ On a page read by OCR, the reader (`extract/pdf.rs`) puts back the option letter
 9. **Network and exposure.** None.
 10. **Adversarial tests and release criteria.** `a_handout_is_questions_and_a_chapter`: questions as dense as an exam's, with a chapter in the middle, give a handout, sure; with a long text that is not a chapter yet, an exam; an exam that opens with a formula sheet (the first question at 40% of the text) stays an exam; a short handout with its exercises at the end gives a handout, unsure. `a_few_lettered_lists_in_a_text_are_content`: two "a) b) c) d)" lists at the end of a text are content; five in a 150-thousand-character book, too; thirty in the same book, a handout. `signals_are_the_numbers_the_rules_use` pins the new signal. Measured: each of the three rules, broken on purpose, brings a test down. **Limits:** the three thresholds were chosen looking at the 370 files (15 thousand, between 11,040 and 23,994; 0.04 question per thousand characters, between 0.016 and 0.061; half the text, above 0.38). The short-handout rule has no file of the set going through it: only the test.
 
+### Formulas: the Symbol font and equations in reading order (after stage 8)
+
+The PDF reader (`extract/pdf.rs`, `extract/symbol.rs`) now translates the Symbol font's private-use characters (U+F020 to U+F0FF) into the letters and signs it draws, counts once the symbol the equation editor draws twice, and puts in reading order the symbols of an equation drawn out of order. It is the text of an attachment, the app's most hostile input. By the 10 points:
+
+1. **Attack surface.** The same input, the attached file; no new IPC command, file, process or network. What changes is the text that comes out of pages with formulas. The possible harm is the text of an ordinary page coming out scrambled.
+2. **Access control / IDOR.** Nothing new.
+3. **Data permissions.** No new file or field.
+4. **Untrusted input.** The table is fixed, from one character to a text of at most one character; a code outside it stays as it came. The reordering only touches three or more lines in a row, of 1 to 6 symbols each, close together (within 4 times the letter size), that have a maths sign and go back up or to the left; a blank line ends the stretch. It only changes the order of the symbols: it neither creates nor deletes text, and it does not guess fractions or exponents. Whoever writes the PDF already chose the order the text comes out in.
+5. **Exposed credentials.** None.
+6. **Authentication.** Does not apply.
+7. **Resource abuse and races.** One pass over the page's symbols and one sort per stretch. `signals` on the 370 files takes the same as before.
+8. **Supply chain.** No new dependency (`Cargo.lock` unchanged).
+9. **Network and exposure.** None.
+10. **Adversarial tests and release criteria.** `symbol_codes_read_as_the_letters_they_draw`: "μ = 12", "(1 − α)", the tall bracket in three pieces, and what stays as it came (ordinary text, other private-use characters, the ornament codes); all 256 codes answer. `an_equation_drawn_out_of_order_is_read_in_rows`: a fraction drawn back to front comes out in rows, and the symbol drawn twice counts once. `short_lines_that_are_not_an_equation_keep_their_order`: an answer key in two columns, a list with "=", only two lines, a long line next to them, and a UEPG proposition between blank lines (which an earlier version of this change split in two) stay as they were. **Limits:** other symbol fonts use the same codes; the Wingdings square bullet still comes out as "ν". The PDF library does not give the font's name.
+
 ## 8. Stages
 
 Each stage ends with something testable; at the end of each one: commit, summary, and the question whether to go on to the next.
@@ -575,6 +590,14 @@ Each stage ends with something testable; at the end of each one: commit, summary
 - **Where it wins and loses:** it gets right, in 9 splits or more, 11 files the rules get wrong, all among those with nothing to run (the 4 image keys and 7 with open exercises). It gets wrong, in 9 or more, 7 short contents the rules get right. It is the best on `both` (13 to 17 of 29; rules 12) and the least stable: 25 files change answer with the split.
 - **Security (the points that change from "The training"):** one new dependency, only in the development virtual environment, outside the repository and the app: `xgboost==3.4.1`, installed from binary packages only (`--only-binary=:all:`) and pinned in `ml/requirements.txt`. No model is saved, nothing goes into the installer. Two runs give the same output; the training takes 10 s (was 3).
 - **Reading:** the third model confirms part (c): nothing passes the rules, and what the models get right beyond them is where the app has nothing to do with it. What it shows that is new is that there is signal for open exercises (it finds 7 of the 26 repeatedly), at the cost of getting short contents wrong.
+
+**After stage 8, measured (2026-11-10), formulas: the Symbol font and equations in reading order:**
+- **Where it came from:** 8 Statistics lectures of the author's (outside the repository and the training set). Jay-AI wrote 20 questions from 4 of them: 12 good, 2 with the calculation wrong, 2 that ask for a number and do not give it, 2 with the formula described backwards, 1 with no data to check, 1 with the stem cut off (one person checked, redoing the calculations outside). One-step calculations came out right; multi-step ones did not.
+- **The cause in the reading:** the Greek letters and signs were not lost, they arrived as private-use characters (μ as U+F06D), which is how Word stores the Symbol font. And the equation editor draws the symbols out of order and each one twice, so a formula came out one symbol per line.
+- **On the 8 lectures:** private-use characters, from 1,240 to 16; Greek letters and maths signs read, from 1 to 252; lines of 1 or 2 characters, from 1,251 to 278. "x é o estimador de  e 79" became "x é o estimador de μ e 79"; "IC(95%) = 0,0543 ≤ pA − pB ≤ 0,1819" comes out on one line. Fractions come out as stacked rows (numerator, the "=" row, denominator), with no bar.
+- **On the training set:** no classification changed (rules 340 of 370); 31 lines of `ml/signals.csv` changed in counts; 12 exams gained 1 question read and none lost any. Private-use characters, from 11,648 to 10,695 (those left are bullets of other fonts); lines of 1 or 2 characters, from 143,945 to 132,893.
+- **Tests:** the 97 engine tests pass (1 ignored). `npm test`: 18.
+- **What this does not prove:** that Jay-AI gets fewer wrong. The second round of questions did not finish: with the machine contended, each question took over 10 minutes, and only 2 came out. A fraction in stacked rows may not be enough for a small model. Equation fonts from other programs (LaTeX already came out well) were not looked at. Not opened in the app.
 
 ## 9. Risks and spikes
 

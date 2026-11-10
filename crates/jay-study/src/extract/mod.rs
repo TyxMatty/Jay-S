@@ -6,6 +6,7 @@
 mod docx;
 mod ocr;
 mod pdf;
+mod symbol;
 
 #[cfg(test)]
 pub(crate) use pdf::tests::sample as pdf_sample;

@@ -2,6 +2,7 @@
 //! (`jay_docs::pdf`), measured there on LaTeX and Word PDFs. A page with (almost) no text is a scan:
 //! it's drawn and read by the Windows OCR.
 
+use super::symbol::symbol;
 use super::{ExtractError, Extracted, Warning, ocr};
 use hayro::hayro_interpret::font::{Glyph, GlyphRun};
 use hayro::hayro_interpret::hayro_cmap::BfString;
@@ -200,6 +201,11 @@ impl<'a> Device<'a> for TextDevice {
                     continue;
                 }
             };
+            // The Symbol font says its glyphs are private-use characters: back to the letters.
+            let text = if text.chars().any(|c| symbol(c).is_some()) { text.chars().map(|c| symbol(c).map(str::to_owned).unwrap_or_else(|| c.to_string())).collect() } else { text };
+            if text.is_empty() {
+                continue;
+            }
             // Glyph space is 1000 units per em; the transform takes it to page points.
             let t: Affine = props.transform * glyph.transform();
             let advance = match &**glyph {
@@ -223,10 +229,17 @@ impl<'a> Device<'a> for TextDevice {
 /// back to the left; a space where the gap between glyphs is wider than 0.12 em (Jay-E, measured).
 /// Each line comes with its first glyph that isn't blank.
 fn lines_from_glyphs(glyphs: &[PlacedGlyph]) -> Vec<(String, &PlacedGlyph)> {
+    let same_line = |p: &PlacedGlyph, g: &PlacedGlyph| (g.baseline - p.baseline).abs() < 0.5 * p.size.min(g.size) && g.x0 > p.x0 - 0.5 * p.size;
+    let mut order: Vec<&PlacedGlyph> = glyphs.iter().collect();
+    reorder_equations(&mut order, same_line);
     let mut lines: Vec<(String, &PlacedGlyph)> = vec![];
     let mut last: Option<&PlacedGlyph> = None;
-    for g in glyphs {
-        let same_line = last.is_some_and(|p| (g.baseline - p.baseline).abs() < 0.5 * p.size.min(g.size) && g.x0 > p.x0 - 0.5 * p.size);
+    for g in order {
+        // Equation Editor draws each symbol twice in the same place (for weight): once is enough.
+        if last.is_some_and(|p| p.text == g.text && (p.x0 - g.x0).abs() < 0.1 && (p.baseline - g.baseline).abs() < 0.1) {
+            continue;
+        }
+        let same_line = last.is_some_and(|p| same_line(p, g));
         if !same_line {
             lines.push((String::new(), g));
         }
@@ -246,6 +259,65 @@ fn lines_from_glyphs(glyphs: &[PlacedGlyph]) -> Vec<(String, &PlacedGlyph)> {
     }
     lines.retain(|(l, _)| !l.trim().is_empty());
     lines
+}
+
+/// Glyphs a formula line can have and still be "a few symbols" (one line of "n =", "σ", "2 π").
+const FORMULA_LINE: usize = 6;
+
+/// An equation object (Word's Equation Editor) draws its symbols in no reading order: all the
+/// digits, then the letters, then the operators, so "n = Z² p q / d²" comes out one symbol per
+/// line. Where three or more lines of a few symbols follow each other, go back (up the page, or
+/// to the left on the same row) and have a maths sign, the glyphs are put in reading order: rows
+/// from the top, each from the left.
+/// Fractions and exponents stay as rows; no structure is guessed.
+fn reorder_equations<'a>(order: &mut [&'a PlacedGlyph], same_line: impl Fn(&PlacedGlyph, &PlacedGlyph) -> bool) {
+    // Where each line starts, in drawing order.
+    let mut starts: Vec<usize> = (0..order.len()).filter(|&i| i == 0 || !same_line(order[i - 1], order[i])).collect();
+    starts.push(order.len());
+    // A line of blanks only is not a line of the formula: it ends the run.
+    let short = |l: usize| (1..=FORMULA_LINE).contains(&order[starts[l]..starts[l + 1]].iter().filter(|g| !g.text.trim().is_empty()).count());
+    // An equation is a few rows tall: a line that starts far above or below the one before (the
+    // next column, another part of the page) is not part of it.
+    let near = |l: usize| l == 0 || (order[starts[l]].baseline - order[starts[l] - 1].baseline).abs() <= 4.0 * order[starts[l]].size;
+    let mut blocks = vec![];
+    let mut l = 0;
+    while l + 1 < starts.len() {
+        let mut end = l;
+        while end + 1 < starts.len() && short(end) && (end == l || near(end)) {
+            end += 1;
+        }
+        if end - l >= 3 {
+            blocks.push(starts[l]..starts[end]);
+        }
+        l = end.max(l + 1);
+    }
+    for block in blocks {
+        let glyphs = &mut order[block];
+        let maths = glyphs.iter().any(|g| g.text.chars().any(|c| "=−±≤≥<>+×÷√∑∫".contains(c) || ('α'..='ω').contains(&c)));
+        let goes_back = glyphs.windows(2).any(|w| {
+            let half = 0.5 * w[0].size;
+            w[1].baseline < w[0].baseline - half || ((w[1].baseline - w[0].baseline).abs() < half && w[1].x0 < w[0].x0 - half)
+        });
+        if !maths || !goes_back {
+            continue;
+        }
+        glyphs.sort_by(|a, b| a.baseline.total_cmp(&b.baseline));
+        // Rows: the next baseline down stays in the row when it is the same line (within 0.15 of
+        // the size) or a smaller glyph up to 0.45 away, an exponent or an index. A numerator, a
+        // denominator and the text line just below are full size: each gets its own row.
+        let mut row_of = vec![0usize; glyphs.len()];
+        for i in 1..glyphs.len() {
+            let (p, g) = (glyphs[i - 1], glyphs[i]);
+            let (gap, size) = (g.baseline - p.baseline, p.size.max(g.size));
+            let script = p.size.min(g.size) < 0.85 * size;
+            row_of[i] = if gap <= 0.15 * size || (script && gap <= 0.45 * size) { row_of[i - 1] } else { i };
+        }
+        let mut keyed: Vec<(usize, &PlacedGlyph)> = row_of.into_iter().zip(glyphs.iter().copied()).collect();
+        keyed.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.x0.total_cmp(&b.1.x0)));
+        for (slot, (_, g)) in glyphs.iter_mut().zip(keyed) {
+            *slot = g;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -281,6 +353,48 @@ pub(crate) mod tests {
         }
         out.extend(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).bytes());
         out
+    }
+
+    /// Glyphs of size 12, each 6 pt wide, at (x, baseline), in the order given.
+    fn drawn(glyphs: &[(&str, f32, f32)]) -> Vec<String> {
+        let glyphs: Vec<PlacedGlyph> = glyphs.iter().map(|&(text, x, baseline)| PlacedGlyph { text: text.into(), x0: x, x1: x + 6.0, baseline, size: 12.0 }).collect();
+        lines_from_glyphs(&glyphs).into_iter().map(|(line, _)| line).collect()
+    }
+
+    #[test]
+    fn an_equation_drawn_out_of_order_is_read_in_rows() {
+        // "n = Z p q / d" as Equation Editor draws it: the denominator, the numerator from the
+        // right, then the left side. One symbol per line before; rows from the top now.
+        let fraction = [("d", 92.0, 112.0), ("q", 104.0, 90.0), ("p", 92.0, 90.0), ("Z", 80.0, 90.0), ("n", 50.0, 100.0), ("=", 62.0, 100.0)];
+        assert_eq!(drawn(&fraction), ["Z p q", "n =", "d"]);
+        // All on one row, drawn from the right: "x = 79 ± 3" in order.
+        assert_eq!(drawn(&[("3", 110.0, 100.0), ("±", 98.0, 100.0), ("7", 80.0, 100.0), ("9", 86.0, 100.0), ("=", 68.0, 100.0), ("x", 56.0, 100.0)]), ["x = 79 ± 3"]);
+        // Each symbol drawn twice in the same place counts once, even when the copies are apart.
+        let twice = [("μ", 104.0, 90.0), ("=", 62.0, 100.0), ("μ", 104.0, 90.0), ("=", 62.0, 100.0), ("x", 50.0, 100.0), ("σ", 92.0, 112.0)];
+        assert_eq!(drawn(&twice), ["μ", "x =", "σ"]);
+    }
+
+    #[test]
+    fn short_lines_that_are_not_an_equation_keep_their_order() {
+        // An answer key in two columns, drawn column by column: it goes back up, with no maths sign.
+        let key: Vec<(&str, f32, f32)> = [(50.0, ["31", "32", "33"], ["C", "A", "D"]), (200.0, ["46", "47", "48"], ["B", "C", "A"])]
+            .iter()
+            .flat_map(|(x, numbers, letters)| (0..3).flat_map(move |i| [(numbers[i], *x, 100.0 + 20.0 * i as f32), (letters[i], x + 20.0, 100.0 + 20.0 * i as f32)]))
+            .collect();
+        assert_eq!(drawn(&key), ["31 C", "32 A", "33 D", "46 B", "47 C", "48 A"]);
+        // Short lines with "=" that only go down the page: a list, left alone.
+        let list = [("a", 50.0, 100.0), ("=", 62.0, 100.0), ("b", 50.0, 120.0), ("=", 62.0, 120.0), ("c", 50.0, 140.0), ("=", 62.0, 140.0), ("d", 50.0, 160.0)];
+        assert_eq!(drawn(&list), ["a =", "b =", "c =", "d"]);
+        // Two scrambled lines are not enough to call it an equation.
+        assert_eq!(drawn(&[("=", 62.0, 100.0), ("x", 50.0, 100.0)]), ["=", "x"]);
+        // A long line next to short ones is text: its words stay in drawing order.
+        let text: Vec<(&str, f32, f32)> = "abcdefgh".split("").filter(|s| !s.is_empty()).enumerate().map(|(i, s)| (s, 50.0 + 6.0 * i as f32, 100.0)).collect();
+        assert_eq!(drawn(&[text.as_slice(), &[("=", 62.0, 80.0), ("x", 50.0, 80.0)]].concat()), ["abcdefgh", "=", "x"]);
+        // A UEPG proposition between two lines of blanks, the second one tiny and just below it:
+        // blank lines are not formula lines, so "01) m < 0" is not taken apart (it was, once).
+        let g = |text: &str, x: f32, baseline: f32, size: f32| PlacedGlyph { text: text.into(), x0: x, x1: x + 5.0, baseline, size };
+        let label = [g(" ", 28.0, 269.3, 8.0), g("0", 51.0, 279.0, 8.0), g("1", 56.0, 279.0, 8.0), g(")", 61.0, 279.0, 8.0), g("m", 71.0, 279.0, 8.0), g("<", 82.0, 279.0, 8.0), g("0", 91.0, 279.0, 8.0), g(" ", 51.0, 282.6, 2.0)];
+        assert_eq!(lines_from_glyphs(&label).into_iter().map(|(line, _)| line).collect::<Vec<_>>(), ["01) m < 0"]);
     }
 
     #[test]
