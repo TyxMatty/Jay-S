@@ -2510,12 +2510,24 @@ textarea.input {
   container-type: inline-size;
 }
 
-/* The conversations on the left, the one on screen on the right. */
+/* Jay-AI reads on one axis, the middle of the page (like Gemini): the section is as wide as the
+   widest ones and what it shows is a 760px column in its middle. */
+.app-panel.is-single:has(> .jayai-pane) {
+  max-width: 1240px;
+}
+
+.jayai-pane > fieldset {
+  justify-self: center;
+  width: min(100%, 760px);
+}
+
+/* The conversations on the left, the one on screen in the middle, and the same room again on the
+   right (240 + 760 + 240), so the list doesn't push the conversation off the middle. The room on the
+   right is the first to go in a smaller window; the list still gives room to the conversation in
+   the default one (the pane is ~650px there). */
 .chat-panel {
   display: grid;
-  /* The list gives room to the conversation in the default window (the pane is ~650px there). */
-  grid-template-columns: clamp(168px, 28cqi, 220px) minmax(0, 1fr);
-  gap: var(--space-5);
+  grid-template-columns: clamp(188px, 30cqi, 240px) minmax(0, 760px) minmax(0, 1fr);
   align-items: start;
 }
 
@@ -2531,6 +2543,8 @@ textarea.input {
   top: 0;
   display: grid;
   gap: var(--space-3);
+  /* Not a grid gap: the empty column on the right would get one too. */
+  padding-right: var(--space-5);
 }
 
 .chat-list {
@@ -2614,6 +2628,8 @@ textarea.input {
 
   .chat-side {
     position: static;
+    padding-right: 0;
+    padding-bottom: var(--space-4);
   }
 
   .chat-list {
@@ -2632,13 +2648,20 @@ textarea.input {
 }
 
 .chat-hero > * {
-  width: min(100%, 640px);
+  width: 100%;
   margin: 0;
 }
 
 .chat-greeting {
+  /* As wide as its words, so the colors run across them and not across the column. */
+  width: auto;
+  max-width: 100%;
   margin-bottom: var(--space-3);
-  font-size: 28px;
+  background: linear-gradient(90deg, var(--accent-text, var(--accent)), var(--accent-2, var(--accent)));
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  font-size: 32px;
   font-weight: 600;
   letter-spacing: -0.02em;
 }
@@ -2720,7 +2743,7 @@ textarea.input {
   gap: var(--space-3);
 }
 
-/* The student's question on the right, Jay-AI's answer as a card on the left. */
+/* The student's question in a bubble on the right, Jay-AI's answer as plain text across the column. */
 .chat-question {
   justify-self: end;
   max-width: 80%;
@@ -2736,12 +2759,6 @@ textarea.input {
 .chat-reply {
   display: grid;
   gap: var(--space-3);
-  justify-self: start;
-  max-width: min(92%, 760px);
-  padding: var(--space-5);
-  border: 1px solid var(--border);
-  border-radius: var(--radius) var(--radius) var(--radius) 4px;
-  background: var(--surface);
 }
 
 .chat-reply-head {

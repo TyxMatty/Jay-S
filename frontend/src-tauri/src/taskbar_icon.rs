@@ -6,9 +6,10 @@
 //! menu shortcut and shows the shortcut's icon (the .exe's), ignoring the window's (measured in
 //! Jay-C). So the window also gets its own AppUserModelID, which unties it, and "relaunch"
 //! properties: the taskbar (and the right-click menu, and a pin made from it) then use the relaunch
-//! icon, an .ico of the same picture. The taskbar only reads it again when the ID changes, and a
-//! clear and a set in the same instant don't count (measured in Jay-C), so each update clears the
-//! ID and sets it back a moment later.
+//! icon, an .ico of the same picture. Explorer keeps what it first drew for an app ID, a blank page
+//! included, and clearing the ID and setting the same one back doesn't make it look again (measured
+//! in Jay-S, 2026-11-09: one window, one valid .ico, a blank page under the old fixed ID and the
+//! picture under any new one). So the ID carries the picture's hash: a new picture is a new ID.
 
 use std::hash::{Hash, Hasher};
 use std::path::Path;
@@ -26,9 +27,12 @@ use windows::Win32::UI::Shell::PropertiesSystem::{IPropertyStore, SHGetPropertyS
 use windows::Win32::UI::WindowsAndMessaging::{CreateIcon, DestroyIcon, HICON, ICON_BIG, SendMessageW, WM_SETICON};
 use windows::core::PWSTR;
 
-/// The window's own app ID: not the Start menu shortcut's (`io.github.tyxmatty.jays`, set by the
-/// installer), or Windows ties them again. Dev and release get different IDs, so a dev build never
-/// shares a taskbar button (or what Explorer remembers about it) with the installed app.
+/// Start of the window's own app ID (the picture's hash follows): not the Start menu shortcut's
+/// (`io.github.tyxmatty.jays`, set by the installer), or Windows ties them again. Dev and release
+/// differ, so a dev build never shares a taskbar button (or what Explorer remembers about it) with
+/// the installed app.
+/// shortcut: a button pinned from the window keeps the ID of the picture it was pinned with, so
+/// after a style change the running window opens beside the pin; pin the Start menu shortcut.
 const WINDOW_APP_ID: &str = if cfg!(debug_assertions) { "io.github.tyxmatty.jays.window.dev" } else { "io.github.tyxmatty.jays.window" };
 
 /// `rgba`: `size` x `size` pixels, 4 bytes each (straight alpha), as from a canvas.
@@ -50,7 +54,8 @@ pub fn set_taskbar_icon(window: tauri::WebviewWindow, rgba: Vec<u8>, size: u32) 
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     rgba.hash(&mut hasher);
     let dir = window.app_handle().path().app_local_data_dir().map_err(|e| e.to_string())?;
-    let ico_path = dir.join(format!("window-icon-{kind}-{:016x}.ico", hasher.finish()));
+    let hash = hasher.finish();
+    let ico_path = dir.join(format!("window-icon-{kind}-{hash:016x}.ico"));
     if !ico_path.exists() {
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         std::fs::write(&ico_path, ico(&rgba, size)).map_err(|e| e.to_string())?;
@@ -78,18 +83,11 @@ pub fn set_taskbar_icon(window: tauri::WebviewWindow, rgba: Vec<u8>, size: u32) 
     if !installed(&exe) {
         return Ok(());
     }
-    relaunch_with_icon(hwnd, &exe, &ico_path).map_err(|e| format!("taskbar properties: {e}"))?;
-    let raw = hwnd.0 as isize; // HWND isn't Send
-    let main = window.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(300));
-        let _ = main.run_on_main_thread(move || {
-            if let Err(e) = set_app_id(HWND(raw as _)) {
-                eprintln!("taskbar app ID: {e}");
-            }
-        });
-    });
-    Ok(())
+    relaunch_with_icon(hwnd, &exe, &ico_path, &app_id(hash)).map_err(|e| format!("taskbar properties: {e}"))
+}
+
+fn app_id(hash: u64) -> String {
+    format!("{WINDOW_APP_ID}.{hash:016x}")
 }
 
 /// Where the installer (NSIS, current user) puts the app: `%LOCALAPPDATA%\Jay-S\jay-s.exe`.
@@ -98,22 +96,14 @@ fn installed(exe: &Path) -> bool {
     exe.parent().is_some_and(|dir| dir.as_os_str().eq_ignore_ascii_case(Path::new(&local).join("Jay-S").as_os_str()))
 }
 
-/// The relaunch properties, and the app ID cleared (set again by `set_app_id`).
-fn relaunch_with_icon(hwnd: HWND, exe: &Path, ico_path: &Path) -> windows::core::Result<()> {
+/// The relaunch properties, then the app ID: the taskbar reads them when the ID changes.
+fn relaunch_with_icon(hwnd: HWND, exe: &Path, ico_path: &Path, app_id: &str) -> windows::core::Result<()> {
     let store: IPropertyStore = unsafe { SHGetPropertyStoreForWindow(hwnd)? };
     set_text(&store, &PKEY_AppUserModel_RelaunchCommand, &format!("\"{}\"", exe.display()))?;
     set_text(&store, &PKEY_AppUserModel_RelaunchDisplayNameResource, "Jay-S")?;
     // "file,index", as the property is documented (a bare path loads too: measured in Jay-S).
     set_text(&store, &PKEY_AppUserModel_RelaunchIconResource, &format!("{},0", ico_path.display()))?;
-    unsafe {
-        store.SetValue(&PKEY_AppUserModel_ID, &PROPVARIANT::default())?;
-        store.Commit()
-    }
-}
-
-fn set_app_id(hwnd: HWND) -> windows::core::Result<()> {
-    let store: IPropertyStore = unsafe { SHGetPropertyStoreForWindow(hwnd)? };
-    set_text(&store, &PKEY_AppUserModel_ID, WINDOW_APP_ID)?;
+    set_text(&store, &PKEY_AppUserModel_ID, app_id)?;
     unsafe { store.Commit() }
 }
 
@@ -168,7 +158,14 @@ fn ico(rgba: &[u8], size: u32) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use super::ico;
+    use super::{app_id, ico};
+
+    #[test]
+    fn app_id_follows_the_picture() {
+        assert_ne!(app_id(1), app_id(2));
+        // Windows allows 128 characters, no spaces.
+        assert!(app_id(u64::MAX).len() <= 128 && !app_id(u64::MAX).contains(' '));
+    }
 
     #[test]
     fn ico_layout() {
