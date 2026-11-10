@@ -223,6 +223,13 @@ fn small_talk(question: &str) -> bool {
     !n.is_empty() && words.len() <= 8 && words.iter().all(|w| WORDS.contains(w))
 }
 
+/// A request about the chosen material as a whole ("faz um resumo do que anexei", "sobre o que é
+/// esse conteúdo?"): it names no subject, so no passage shares a word with it.
+fn overview(question: &str) -> bool {
+    let n = norm(question);
+    ["resum", "topicos", "visao geral", "sobre o que", "do que se trata", "do que fala", "principais pontos", "summar", "overview", "outline", "main points"].iter().any(|w| n.contains(w))
+}
+
 /// The option a sentence says is the right one ("a alternativa correta é a C", "gabarito: letra B").
 fn claimed_option(sentence: &str) -> Option<String> {
     let f = norm(sentence);
@@ -382,7 +389,18 @@ impl Store {
             }
             names.insert(0, attempt.title);
         }
-        let title = if names.is_empty() { String::new() } else { names.join(" · ").chars().take(120).collect() };
+        // Whole names only: cut at 120 characters, the title ended in "Aula 15.pdf · ".
+        let mut title = String::new();
+        for (i, name) in names.iter().enumerate() {
+            if i > 0 && title.chars().count() + name.chars().count() + 3 > 120 {
+                title.push('…');
+                break;
+            }
+            if i > 0 {
+                title.push_str(" · ");
+            }
+            title.extend(name.chars().take(120));
+        }
         let chat = Chat { id: id::new_id(), title, created: now_ms(), scope: Scope { materials, attempt: scope.attempt }, turns: vec![] };
         self.save_json("chats", &chat.id, &chat)?;
         Ok(chat)
@@ -394,6 +412,7 @@ impl Store {
         let mut named = vec![];
         let mut always = vec![];
         let mut pool: Vec<Passage> = vec![];
+        let mut openings: Vec<Passage> = vec![];
         if let Some(a) = &scope.attempt {
             let attempt = self.attempt(a)?;
             let exam = self.exam(&attempt.exam)?;
@@ -449,11 +468,20 @@ impl Store {
                 // A note too short to be cut into chunks is one passage, whole.
                 chunks.push(text.trim().chars().take(PASSAGE_CHARS).collect());
             }
-            pool.extend(chunks.into_iter().map(|text| Passage { label: name.clone(), text, key: None, student: None }));
+            let mut chunks = chunks.into_iter().map(|text| Passage { label: name.clone(), text, key: None, student: None });
+            openings.extend(chunks.next());
+            pool.extend(openings.last().cloned());
+            pool.extend(chunks);
         }
         let wanted = terms(about);
         let mut scored: Vec<(usize, Passage)> = pool.into_iter().map(|p| (terms(&p.text).intersection(&wanted).count(), p)).filter(|(s, _)| *s > 0).collect();
         scored.sort_by(|a, b| b.0.cmp(&a.0));
+        // "Summarize what I attached" matches nothing: it gets how each material opens.
+        // shortcut: the openings only (5 passages at most), not the whole material; a full summary
+        // is what Explain does. Upgrade to summaries per material if this is asked a lot.
+        if scored.is_empty() && overview(about) {
+            scored = openings.into_iter().map(|p| (0, p)).collect();
+        }
         let mut out = vec![];
         let mut used = 0;
         for p in named.into_iter().take(3).chain(always).chain(scored.into_iter().map(|(_, p)| p)) {
@@ -733,6 +761,35 @@ mod tests {
         assert_eq!(claimed_option("A alternativa correta é a C."), Some("C".into()));
         assert_eq!(claimed_option("O gabarito é a letra B"), Some("B".into()));
         assert_eq!(claimed_option("Veja a alternativa D com calma."), None);
+    }
+
+    #[test]
+    fn a_request_for_a_summary_gets_how_each_material_opens() {
+        for q in ["Pode fazer um resumo em tópicos desse conteúdo que anexei?", "Resuma o material.", "sobre o que é esse conteúdo?", "Give me an overview"] {
+            assert!(overview(q), "{q}");
+        }
+        for q in ["O que é fotossíntese?", "por que errei a questão 12?", "qual a capital da França?"] {
+            assert!(!overview(q), "{q}");
+        }
+        let root = std::env::temp_dir().join(format!("jay-study-chat-{}", id::new_id()));
+        let store = Store::open(&root).unwrap();
+        let text = |subject: &str| format!("{subject} é o assunto desta aula. ").repeat(60).into_bytes();
+        let a = store.import_bytes("aula-1.txt", crate::extract::Format::Text, text("A distribuição normal")).unwrap();
+        let b = store.import_bytes("aula-2.txt", crate::extract::Format::Text, text("A amostragem estratificada")).unwrap();
+        let scope = Scope { materials: vec![a.id, b.id], attempt: None };
+        // One opening per material, in the order chosen.
+        let got = store.passages(&scope, "Pode fazer um resumo em tópicos desse conteúdo que anexei?").unwrap();
+        assert_eq!(got.iter().map(|p| p.label.as_str()).collect::<Vec<_>>(), ["aula-1.txt", "aula-2.txt"]);
+        assert!(got[0].text.starts_with("A distribuição normal") && got[1].text.starts_with("A amostragem"));
+        // A question the sources say nothing about still finds nothing: no model, nothing invented.
+        assert!(store.passages(&scope, "Qual a capital da França?").unwrap().is_empty());
+        // A question with a subject is answered from the passages about it, as before.
+        assert!(store.passages(&scope, "o que é amostragem estratificada?").unwrap().iter().all(|p| p.label == "aula-2.txt"));
+        // The title keeps whole names.
+        let long: Vec<String> = (0..6).map(|i| store.import_bytes(&format!("Informática_Aula {i}_Solucao_Exemplos.pdf.txt"), crate::extract::Format::Text, text(&format!("x{i}"))).unwrap().id).collect();
+        let title = store.new_chat(Scope { materials: long, attempt: None }).unwrap().title;
+        assert!(title.chars().count() <= 121 && title.ends_with("…") && !title.contains("· …") && !title.trim_end_matches('…').ends_with(' '), "{title}");
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
