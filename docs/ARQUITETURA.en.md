@@ -11,7 +11,7 @@ The study app of the Jay line. The student attaches **content** and/or **exams**
 
 Separate tabs hold the **mock test** (optional: the chosen exam, with the time limit and style the student wants) and the **flashcards**, which adapt to the student's way of studying (short and direct or longer) and to what they got wrong in mock tests.
 
-Written on 2026-11-09, from Jay-C 0.4, Jay-A 0.3.3, Jay-E 0.2.1 and Jay-H 0.1.4. License: **MIT**, like the whole line. Stages 0 to 6 are done; of stage 7, the first release (0.1.0) is published, with the installer built by the CI, and Jay-S is in Jay-H's catalog; still missing are a Jay-H release with that catalog and seeing, outside the dev PC, Jay-H install and update Jay-S (section 8).
+Written on 2026-11-09, from Jay-C 0.4, Jay-A 0.3.3, Jay-E 0.2.1 and Jay-H 0.1.4. License: **MIT**, like the whole line. Stages 0 to 6 are done; of stage 7, the first release (0.1.0) is published, with the installer built by the CI, and Jay-S is in Jay-H's catalog; still missing are a Jay-H release with that catalog and seeing, outside the dev PC, Jay-H install and update Jay-S (section 8). Stage 8 (training a content-vs-exam classifier) has started with the tool that exports the signals.
 
 ## 1. Overview
 
@@ -265,6 +265,21 @@ The installer is Tauri's NSIS one, with no script of ours (`Jay-S_0.1.0_x64-setu
 9. **Network and exposure.** Same CSP and capabilities. The installed app opens no debugging port; one only exists if the person sets `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` in their own environment.
 10. **Adversarial tests and release criteria.** `frontend/test/installer.test.js` (in `npm test`): NSIS only, per user, no `resources` and no `externalBin` (no model, no `llama-server`, nobody's files inside the installer), no script of ours; CSP with no outside address; capabilities only `core:`. **Blocks the release:** that test failing; an installer over 15 MB (RNF-2); a tag that isn't the version (checked in the installer workflow); the CI's audit job failing (`npm audit` high or critical, `cargo audit` with a vulnerability, a secret found by gitleaks); `html-sinks.test.js` failing (a new place that takes HTML, or an `html:` that isn't one of the code's icons).
 
+### The signals exporter (stage 8)
+
+`crates/jay-study/examples/signals.rs` is a development tool: it is a Cargo example, and is in neither the app nor the installer. `classify.rs` gained `signals()`, which returns the numbers the rules already computed; the classification didn't change. By the 10 points:
+
+1. **Attack surface.** None in the app. The tool reads only the files given on the command line by whoever runs it and writes to standard output. Most realistic path to harm: publishing something from the training set by accident. So the output carries only the file name, the folder name (the label) and numbers; never the path or the text.
+2. **Access control / IDOR.** Doesn't apply: no `id`, no data folder.
+3. **Data permissions.** It doesn't open the student's data folder. The training set is public exams and handouts, with usage rights, outside the repository; signals and labels are published, never the files. **Limit:** the file name is published, so no file in the set may carry a person's name.
+4. **Untrusted input.** Files go through the app's own `extract` (size limit, ZIP bomb, truncated PDF); what fails goes to stderr and is skipped. The file name is quoted when it has a comma, a quote or a line break. **Limit:** a name starting with `=` isn't neutralized; the CSV is for pandas, not for a spreadsheet.
+5. **Exposed credentials.** None.
+6. **Authentication.** Doesn't apply.
+7. **Resource abuse and races.** One file at a time, in memory, under `extract`'s limits.
+8. **Supply chain.** Nothing new (`serde_json` was already the engine's).
+9. **Network and exposure.** No network.
+10. **Adversarial tests and release criteria.** `signals_are_the_numbers_the_rules_use` (`cargo test`) ties the signals to the rules' numbers, and `classify`'s tests keep passing; the CSV quoting is checked by an `assert` when the tool starts. When the trained weights enter the app, they count as code and get their own review.
+
 ## 8. Stages
 
 Each stage ends with something testable; at the end of each one: commit, summary, and the question whether to go on to the next.
@@ -279,6 +294,7 @@ Each stage ends with something testable; at the end of each one: commit, summary
 | 5 ✅ | Flashcards: generate, SM-2, rate the card, weak topics first | the SM-2 interval matches the reference table in the tests |
 | 6 ✅ | Profile and adaptation: learned length and tone, mock test analysis feeding cards and exams | after 10 "too long" ratings, new cards get shorter (measured in characters) |
 | 7 | Release: NSIS installer, Jay-S in Jay-H, CI with tests, audits and the adversarial tests | install on a test account; Jay-H installs and updates Jay-S |
+| 8 | Training: content-vs-exam classifier. (a) ✅ export to CSV the signals `classify.rs` computes (`examples/signals.rs`); (b) `ml/`: Python + scikit-learn, train/test split by file, fixed seeds, compared with the rules; (c) weights as embedded JSON (`include_str!`), inference in Rust with no new dependency; the rules stay as fallback | on a test set the model hasn't seen, precision, recall and confusion matrix measured next to the rules' (a tie is a valid result); the app's installer and RAM unchanged (RNF-1, RNF-2) |
 
 **Stage 0, measured (2026-11-09):** see the stage's commit.
 
@@ -328,6 +344,12 @@ Each stage ends with something testable; at the end of each one: commit, summary
 - **Uninstalling:** tested by hand by the author, on a real install; not measured here.
 - **What this doesn't prove:** the published installer wasn't run here: the install measured above was the local 0.0.1 build, in the private copy of AppData. Jay-H installing and updating Jay-S wasn't seen.
 - **Missing:** a Jay-H release with the new catalog; installing 0.1.0 from Explorer and from Jay-H, on a test account (pages, language choice, SmartScreen, taskbar icon); the final description (release notes and the summary in Jay-H).
+
+**Stage 8, measured (2026-11-09), the signals exporter (part a):**
+- **Tests:** `cargo test` in `jay-study`: 83 passed, 1 ignored (the one with the model). The new one, `signals_are_the_numbers_the_rules_use`: on a 20-question ENEM exam, 20 multiple-choice, 0 sum-type, 20 headers, a density of at least 0.3 and the first question before 5% of the text; on running prose, no questions, density 0 and `first_at` 1.
+- **The tool on two test files** (folders `content/` and `exam/`): `photosynthesis-handout.md,content,0,0,0,0,1393,0,1,content,true` and `"prova, de teste.txt",exam,10,0,10,0,1280,7.8125,0.04453125,exam,true` (the name with a comma came out quoted).
+- **What this doesn't prove:** nothing about the model: there is no dataset and no training yet. The tool wasn't run on a PDF or a DOCX (`extract` is the app's, measured in stage 1).
+- **Missing:** parts (b) and (c); before them, gathering the set (public exams and handouts, with usage rights).
 
 ## 9. Risks and spikes
 

@@ -11,7 +11,7 @@ O app de estudos da linha Jay. O estudante anexa **conteúdo** e/ou **provas**; 
 
 Em abas separadas ficam o **simulado** (opcional: a prova escolhida, com o tempo e o estilo que a pessoa quiser) e os **flashcards**, que se adaptam ao jeito do estudante (curtos e diretos ou mais longos) e ao que ele errou nos simulados.
 
-Escrito em 2026-11-09, a partir do Jay-C 0.4, Jay-A 0.3.3, Jay-E 0.2.1 e Jay-H 0.1.4. Licença: **MIT**, como a linha toda. As etapas 0 a 6 estão prontas; da 7, a primeira release (0.1.0) está publicada, com o instalador gerado pela CI, e o Jay-S entrou no catálogo do Jay-H; falta uma release do Jay-H com esse catálogo e ver, fora do PC de dev, o Jay-H instalar e atualizar o Jay-S (seção 8).
+Escrito em 2026-11-09, a partir do Jay-C 0.4, Jay-A 0.3.3, Jay-E 0.2.1 e Jay-H 0.1.4. Licença: **MIT**, como a linha toda. As etapas 0 a 6 estão prontas; da 7, a primeira release (0.1.0) está publicada, com o instalador gerado pela CI, e o Jay-S entrou no catálogo do Jay-H; falta uma release do Jay-H com esse catálogo e ver, fora do PC de dev, o Jay-H instalar e atualizar o Jay-S (seção 8). A etapa 8 (treinar um classificador conteúdo × prova) começou pela ferramenta que exporta os sinais.
 
 ## 1. Visão geral
 
@@ -264,6 +264,21 @@ O instalador é o NSIS do Tauri, sem script próprio (`Jay-S_0.1.0_x64-setup.exe
 9. **Rede e exposição.** CSP e *capabilities* iguais. O app instalado não abre porta de depuração; ela só existe se a própria pessoa definir `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` no ambiente dela.
 10. **Testes adversariais e critérios de release.** `frontend/test/installer.test.js` (no `npm test`): só NSIS, por usuário, sem `resources` nem `externalBin` (nem modelo, nem `llama-server`, nem arquivo de ninguém dentro do instalador), sem script próprio; CSP sem endereço externo; *capabilities* só `core:`. **Bloqueia a release:** esse teste falhando; instalador acima de 15 MB (RNF-2); tag diferente da versão (conferido no workflow do instalador); o job de audits da CI falhando (`npm audit` alto ou crítico, `cargo audit` com vulnerabilidade, segredo achado pelo gitleaks); `html-sinks.test.js` falhando (um lugar novo que recebe HTML, ou um `html:` que não é ícone do código).
 
+### O exportador de sinais (etapa 8)
+
+`crates/jay-study/examples/signals.rs` é uma ferramenta de desenvolvimento: é um exemplo do Cargo, não entra no app nem no instalador. O `classify.rs` ganhou `signals()`, que devolve os números que as regras já calculavam; a classificação não mudou. Pelos 10 pontos:
+
+1. **Superfície de ataque.** Nenhuma no app. A ferramenta lê só os arquivos passados na linha de comando por quem a roda e escreve na saída padrão. Caminho mais realista de dano: publicar sem querer algo do conjunto de treino. Por isso a saída leva só o nome do arquivo, o nome da pasta (o rótulo) e números; nunca o caminho nem o texto.
+2. **Controle de acesso / IDOR.** Não se aplica: sem `id`, sem pasta de dados.
+3. **Permissões de dados.** Não abre a pasta de dados do estudante. O conjunto de treino são provas e apostilas públicas, com direito de uso, fora do repositório; publica-se sinais e rótulos, nunca os arquivos. **Limite:** o nome do arquivo é publicado, então nenhum arquivo do conjunto pode ter nome de pessoa.
+4. **Entrada não confiável.** Os arquivos passam pelo mesmo `extract` do app (limite de tamanho, bomba ZIP, PDF truncado); o que falha vai para o stderr e é pulado. O nome do arquivo sai entre aspas quando tem vírgula, aspas ou quebra de linha. **Limite:** um nome começando com `=` não é neutralizado; o CSV é para o pandas, não para planilha.
+5. **Credenciais expostas.** Nenhuma.
+6. **Autenticação.** Não se aplica.
+7. **Abuso de recursos e corridas.** Um arquivo por vez, na memória, com os limites do `extract`.
+8. **Cadeia de dependências.** Nenhuma nova (`serde_json` já era do motor).
+9. **Rede e exposição.** Nenhuma rede.
+10. **Testes adversariais e critérios de release.** `signals_are_the_numbers_the_rules_use` (`cargo test`) prende os sinais aos números das regras, e os testes da `classify` seguem passando; as aspas do CSV são conferidas por um `assert` na partida da ferramenta. Quando os pesos treinados entrarem no app, eles contam como código e ganham revisão própria.
+
 ## 8. Etapas
 
 Cada etapa termina com algo testável; ao fim de cada uma, commit, resumo e a pergunta se segue para a próxima.
@@ -278,6 +293,7 @@ Cada etapa termina com algo testável; ao fim de cada uma, commit, resumo e a pe
 | 5 ✅ | Flashcards: gerar, SM-2, avaliar o cartão, tópicos fracos primeiro | o intervalo do SM-2 bate com a tabela de referência nos testes |
 | 6 ✅ | Perfil e adaptação: tamanho e tom aprendidos, análise do simulado alimentando cartões e provas | depois de 10 avaliações "longo demais", os cartões novos ficam mais curtos (medido em caracteres) |
 | 7 | Release: instalador NSIS, o Jay-S no Jay-H, CI com testes, audits e os testes adversariais | instalar numa conta de teste; o Jay-H instala e atualiza o Jay-S |
+| 8 | Treino: classificador conteúdo × prova. (a) ✅ exportar para CSV os sinais que o `classify.rs` calcula (`examples/signals.rs`); (b) `ml/`: Python + scikit-learn, divisão treino/teste por arquivo, sementes fixas, comparado com as regras; (c) pesos em JSON embutidos (`include_str!`), inferência em Rust sem dependência nova; as regras ficam de reserva | num conjunto de teste que o modelo não viu, precisão, recall e matriz de confusão medidos ao lado dos das regras (empatar é resultado válido); instalador e RAM do app iguais (RNF-1, RNF-2) |
 
 **Etapa 0, medido (2026-11-09):** ver o commit da etapa.
 
@@ -327,6 +343,12 @@ Cada etapa termina com algo testável; ao fim de cada uma, commit, resumo e a pe
 - **Desinstalar:** testado à mão pelo autor, numa instalação de verdade; não medido aqui.
 - **O que isso não prova:** o instalador publicado não foi rodado aqui: a instalação medida acima foi a do build local 0.0.1, na cópia privada do AppData. O Jay-H instalando e atualizando o Jay-S não foi visto.
 - **Falta:** uma release do Jay-H com o catálogo novo; instalar o 0.1.0 pelo Explorer e pelo Jay-H, numa conta de teste (páginas, escolha do idioma, SmartScreen, ícone da barra); a descrição definitiva (notas da release e o resumo no Jay-H).
+
+**Etapa 8, medido (2026-11-09), o exportador de sinais (parte a):**
+- **Testes:** `cargo test` no `jay-study`: 83 passaram, 1 ignorado (o do modelo). O novo, `signals_are_the_numbers_the_rules_use`: numa prova ENEM de 20 questões, 20 de múltipla escolha, 0 de somatória, 20 cabeçalhos, densidade de pelo menos 0,3 e a primeira questão antes de 5% do texto; num texto corrido, nenhuma questão, densidade 0 e `first_at` 1.
+- **A ferramenta em dois arquivos de teste** (pastas `content/` e `exam/`): `photosynthesis-handout.md,content,0,0,0,0,1393,0,1,content,true` e `"prova, de teste.txt",exam,10,0,10,0,1280,7.8125,0.04453125,exam,true` (o nome com vírgula saiu entre aspas).
+- **O que isso não prova:** nada sobre o modelo: ainda não há conjunto de dados nem treino. A ferramenta não foi rodada em PDF nem DOCX (o `extract` é o do app, medido na etapa 1).
+- **Falta:** as partes (b) e (c); antes, juntar o conjunto (provas e apostilas públicas, com direito de uso).
 
 ## 9. Riscos e spikes
 

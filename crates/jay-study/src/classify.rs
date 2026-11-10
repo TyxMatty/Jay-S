@@ -134,30 +134,55 @@ fn runs(lines: &[&str]) -> (Vec<usize>, Vec<usize>) {
     (choice_runs, sum_runs)
 }
 
-pub fn classify(text: &str) -> Classification {
-    if crate::exam::parse_answer_key(text).is_some() {
-        return Classification { kind: MaterialKind::Key, sure: true, choice_questions: 0, sum_questions: 0, headers: 0 };
-    }
+/// The numbers the rules decide on. `examples/signals.rs` exports them for training, so a model
+/// trained on them sees exactly what the app computes.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Signals {
+    /// Multiple-choice questions found (runs of choices).
+    pub choice_questions: u32,
+    /// Sum-type questions found (runs of 01, 02, 04…).
+    pub sum_questions: u32,
+    /// "Questão 12", "Exercício 3"… headers.
+    pub headers: u32,
+    /// How many of the exam words ("gabarito", "assinale"…) the text has.
+    pub exam_words: u32,
+    /// Non-blank characters.
+    pub chars: u32,
+    /// Questions per 1 000 non-blank characters: an exam has ~0.5 (ENEM's long base texts) or
+    /// more; a handout with a list of exercises at the end, ~0.1.
+    pub density: f32,
+    /// How far into the text (0 to 1) the first question starts; 1 when there is none.
+    pub first_at: f32,
+}
+
+pub fn signals(text: &str) -> Signals {
     let lines: Vec<&str> = text.split(['\n', '\x0c']).collect();
     let (choice_runs, sum_runs) = runs(&lines);
     let headers = lines.iter().filter(|l| is_question_header(l)).count() as u32;
     let questions = (choice_runs.len() + sum_runs.len()) as u32;
     let folded = fold(text);
-    let exam_words = ["gabarito", "assinale", "alternativa correta", "somatoria", "soma das", "marque a", "proposicoes corretas", "assinale a alternativa"].iter().filter(|w| folded.contains(*w)).count();
-    let chars = text.chars().filter(|c| !c.is_whitespace()).count().max(1) as f32;
-    // Questions per 1 000 letters: an exam has ~0.5 (ENEM's long base texts) or more; a handout
-    // with a list of exercises at the end, ~0.1.
-    let density = questions as f32 / (chars / 1000.0);
+    let exam_words = ["gabarito", "assinale", "alternativa correta", "somatoria", "soma das", "marque a", "proposicoes corretas", "assinale a alternativa"].iter().filter(|w| folded.contains(*w)).count() as u32;
+    let blank_free = |s: &str| s.chars().filter(|c| !c.is_whitespace()).count();
+    let chars = blank_free(text);
+    let per = chars.max(1) as f32;
     let first_line = choice_runs.iter().chain(&sum_runs).min().copied().unwrap_or(lines.len());
-    let first_at = lines[..first_line.min(lines.len())].iter().map(|l| l.chars().filter(|c| !c.is_whitespace()).count()).sum::<usize>() as f32 / chars;
-    let (kind, sure) = match questions {
+    let first_at = lines[..first_line.min(lines.len())].iter().map(|l| blank_free(l)).sum::<usize>() as f32 / per;
+    Signals { choice_questions: choice_runs.len() as u32, sum_questions: sum_runs.len() as u32, headers, exam_words, chars: chars as u32, density: questions as f32 / (per / 1000.0), first_at }
+}
+
+pub fn classify(text: &str) -> Classification {
+    if crate::exam::parse_answer_key(text).is_some() {
+        return Classification { kind: MaterialKind::Key, sure: true, choice_questions: 0, sum_questions: 0, headers: 0 };
+    }
+    let Signals { choice_questions, sum_questions, headers, exam_words, density, first_at, .. } = signals(text);
+    let (kind, sure) = match choice_questions + sum_questions {
         0 if headers >= 3 && exam_words >= 1 => (MaterialKind::Exam, false),
         0 => (MaterialKind::Content, headers == 0),
         1..=2 => (if first_at > 0.5 { MaterialKind::Both } else { MaterialKind::Content }, false),
         _ if density >= 0.2 && first_at < 0.35 => (MaterialKind::Exam, density >= 0.3 || exam_words >= 1),
         _ => (MaterialKind::Both, first_at > 0.3),
     };
-    Classification { kind, sure, choice_questions: choice_runs.len() as u32, sum_questions: sum_runs.len() as u32, headers }
+    Classification { kind, sure, choice_questions, sum_questions, headers }
 }
 
 #[cfg(test)]
@@ -200,6 +225,16 @@ mod tests {
         assert!(is_question_header("Questão nº 12"));
         assert!(is_question_header("Exercício 4:"));
         assert!(!is_question_header("Questões sociais do século XX"));
+    }
+
+    #[test]
+    fn signals_are_the_numbers_the_rules_use() {
+        let exam: String = (1..=20).map(enem_question).collect();
+        let s = signals(&exam);
+        assert_eq!((s.choice_questions, s.sum_questions, s.headers, s.exam_words), (20, 0, 20, 0));
+        assert!(s.density >= 0.3 && s.first_at < 0.05, "{s:?}");
+        let s = signals(&prose(3000));
+        assert_eq!((s.choice_questions, s.headers, s.density, s.first_at), (0, 0, 0.0, 1.0));
     }
 
     #[test]
