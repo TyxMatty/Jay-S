@@ -493,6 +493,14 @@ Depois da medida da lista, "se precisar" e "se quiser" sozinhos saíram dela ("S
 
 **Limites:** a lista de fechos é curta e só vê as frases escritas assim; um fecho novo passa até entrar na lista. Uma frase de fato curta com "se precisar" ou "se quiser" some. `drop_repeats` só vê frases iguais, não parecidas, e as fontes de uma frase tirada continuam listadas (atalho: não se renumeram).
 
+### Quem é quem na conversa (o chat)
+
+Medido com o Jay-AI, o modelo ainda trocava os papéis na conversa do apelido: chamava o aluno de "Jay-S" ("Tudo por aqui, Jay-S!", 2 de 3 rodadas), soltava o nome do exemplo do prompt ("Pode me chamar de Leo" numa saudação) e dava o apelido do Jay-AI ao aluno ("Seu nome é Matty", "Agora também posso te chamar de Matty"). Três guardas em Rust, sem modelo, na resposta de conversa (`talk_reply`): `without_vocative` tira também ", Jay-S" e ", Jay-AI" antes de `!`, `?`, `.` ou `,` (o aluno não é nenhum dos dois; "Eu sou o Jay-AI, do Jay-S." fica); o nome do exemplo é a constante `EXAMPLE_NAME` usada no prompt, e `talk_roles` tira a frase que o diz como palavra inteira se nem a mensagem do aluno nem os fatos o têm (nunca esvazia a resposta); com apelido conhecido (e diferente do nome do aluno), tira a frase que o dá ao aluno ("seu nome é X", "você se chama X", "te chamar de X", "te chamo de X", "chamar você de X", comparados por `norm`) e, se nada sobra, a resposta vira "Meu nome é Jay-AI, e você também pode me chamar de X." Pelos 10 pontos: **1** nenhum comando, campo de IPC, arquivo ou rede novos. **2, 3, 5, 6, 8, 9** nada novo. **4** os filtros só tiram texto do modelo; a única frase nova é fixa, com o apelido já limpo e aceito (só o que o aluno digitou). **7** comparações de texto na memória, sem chamada nova. **10** testes em `chat.rs`: `the_student_is_never_jay_s_nor_jay_ai` e `who_is_who_in_talk_replies` (os casos medidos, com as frases exatas; palavra parecida, nome igual e resposta de uma frase só ficam).
+
+Medido com o Jay-AI (`chat_probe`, a conversa do apelido, três rodadas): nenhuma resposta chamou o aluno de Jay-S (antes, 2 de 3 cumprimentos), nenhuma trouxe o "Leo" do exemplo, nenhuma deu o apelido ao aluno; as cinco mensagens saíram certas nas 3 rodadas (o pedido de apelido aceito como apelido do Jay-AI, a correção entendida, "Meu nome é Jay-AI, mas você pode me chamar de Matty também!", e o que o Jay-AI faz no Jay-S). O texto ainda escorrega na pessoa às vezes ("Seu nome é Jay-AI, do Jay-S.", "o material do aluno"), sem trocar quem é quem
+
+**Limites:** só as cinco formas listadas de dar o apelido ao aluno são pegas; outra redação passa. O nome do exemplo é uma palavra fixa: um aluno que se chame Leo só o vê se o disser.
+
 ## 8. Etapas
 
 Cada etapa termina com algo testável; ao fim de cada uma, commit, resumo e a pergunta se segue para a próxima.
