@@ -104,10 +104,31 @@ enum Outcome {
 /// either finds its words. docs/ARQUITETURA.md ("O Jay-AI conhece o Jay-S") says who keeps it true.
 const MANUALS: [&str; 2] = [include_str!("manual.pt.md"), include_str!("manual.en.md")];
 
-/// The passages sharing words with `about`, most shared first (none when nothing is shared).
-fn ranked(pool: Vec<Passage>, about: &str) -> Vec<(usize, Passage)> {
-    let wanted = terms(about);
-    let mut scored: Vec<(usize, Passage)> = pool.into_iter().map(|p| (terms(&p.text).intersection(&wanted).count(), p)).filter(|(s, _)| *s > 0).collect();
+/// The guide's paragraphs, one subject each (`generate::chunks` would glue neighbours together).
+fn manual_paragraphs(manual: &str) -> Vec<String> {
+    manual.replace('\r', "").split("\n\n").map(|p| p.split_whitespace().collect::<Vec<_>>().join(" ")).filter(|p| !p.is_empty()).collect()
+}
+
+/// Which paragraph of the guide a passage is, in either language (they are written in step).
+fn manual_index(text: &str) -> Option<usize> {
+    MANUALS.iter().find_map(|m| manual_paragraphs(m).iter().position(|p| p == text))
+}
+
+/// The words a passage is found by: `terms` with the plural folded ("provas" finds "prova").
+fn stems(s: &str) -> HashSet<String> {
+    terms(s).into_iter().map(|w| if w.chars().count() > 3 { w.strip_suffix('s').map(str::to_owned).unwrap_or(w) } else { w }).collect()
+}
+
+/// The passages sharing words with `about`, best first (none when nothing is shared). A word that
+/// few passages have says more about which one is meant than a word most of them have, and a word
+/// in a passage's `head` (the title of a paragraph of the guide) counts twice: by the count alone,
+/// "como faço flashcards de uma prova?" brought how to make an exam. Ties keep the pool's order.
+fn ranked(pool: Vec<Passage>, about: &str, head: fn(&Passage) -> &str) -> Vec<(usize, Passage)> {
+    let wanted = stems(about);
+    let found: Vec<HashSet<String>> = pool.iter().map(|p| stems(&p.text).intersection(&wanted).cloned().collect()).collect();
+    let weight = |w: &String| 100 + (100.0 * (pool.len() as f32 / found.iter().filter(|f| f.contains(w)).count().max(1) as f32).ln()) as usize;
+    let scores: Vec<usize> = pool.iter().zip(&found).map(|(p, f)| f.iter().map(|w| weight(w) * if stems(head(p)).contains(w) { 2 } else { 1 }).sum()).collect();
+    let mut scored: Vec<(usize, Passage)> = scores.into_iter().zip(pool).filter(|(s, _)| *s > 0).collect();
     scored.sort_by(|a, b| b.0.cmp(&a.0));
     scored
 }
@@ -126,13 +147,14 @@ fn fit(passages: impl Iterator<Item = Passage>) -> Vec<Passage> {
     out
 }
 
-/// The manual's chunks about `about`; when it shares no word with it, the overview (the Portuguese
-/// manual's opening).
+/// The guide's paragraphs about `about`, each once (in the language that matched it better); when
+/// it shares no word with them, the overview (the Portuguese guide's opening).
 fn manual_passages(about: &str) -> Vec<Passage> {
-    let pool: Vec<Passage> = MANUALS.iter().flat_map(|m| generate::chunks(m, PASSAGE_CHARS)).map(|text| Passage { label: "Jay-S".into(), text, key: None, student: None }).collect();
+    let pool: Vec<Passage> = MANUALS.iter().flat_map(|m| manual_paragraphs(m)).map(|text| Passage { label: "Jay-S".into(), text, key: None, student: None }).collect();
     let overview: Vec<Passage> = pool.iter().take(2).cloned().collect();
-    let scored = ranked(pool, about);
-    if scored.is_empty() { fit(overview.into_iter()) } else { fit(scored.into_iter().map(|(_, p)| p)) }
+    let mut seen = HashSet::new();
+    let scored: Vec<Passage> = ranked(pool, about, |p| p.text.split(':').next().unwrap_or("")).into_iter().map(|(_, p)| p).filter(|p| seen.insert(manual_index(&p.text))).collect();
+    if scored.is_empty() { fit(overview.into_iter()) } else { fit(scored.into_iter()) }
 }
 
 /// Whether the message asks how to use the app: what the classifier said or, when it failed, the
@@ -406,8 +428,8 @@ fn numbers(s: &str) -> HashSet<String> {
 const STOP: &[&str] = &[
     "que", "qual", "quais", "como", "onde", "quando", "quem", "por", "para", "pra", "com", "sem", "uma", "uns", "umas", "dos", "das", "nos", "nas", "aos", "pelo", "pela", "este", "esta", "esse",
     "essa", "isso", "isto", "aquele", "aquela", "ele", "ela", "eles", "elas", "seu", "sua", "meu", "minha", "sao", "foi", "ser", "tem", "ter", "mais", "menos", "muito", "sobre", "entre", "mas",
-    "nao", "sim", "tambem", "porque", "voce", "pode", "questao", "questoes", "explique", "explica", "explicar", "fale", "diga", "melhor", "exemplo", "the", "and", "what", "how", "why", "where",
-    "when", "who", "are", "for", "with", "does", "about", "this", "that", "question",
+    "nao", "sim", "tambem", "porque", "voce", "pode", "questao", "questoes", "explique", "explica", "explicar", "fale", "diga", "melhor", "exemplo", "faco", "fazer", "faz", "fiz", "the", "and",
+    "what", "how", "why", "where", "when", "who", "are", "for", "with", "does", "about", "this", "that", "question", "make",
 ];
 
 /// The words a passage is looked up by: 3+ letters, so "ATP", "DNA", "CO2" and "luz" count
@@ -1039,7 +1061,7 @@ impl Store {
             pool.extend(openings.last().cloned());
             pool.extend(chunks);
         }
-        let mut scored = ranked(pool, about);
+        let mut scored = ranked(pool, about, |_| "");
         // "Summarize what I attached" matches nothing: it gets how each material opens.
         // shortcut: the openings only (5 passages at most), not the whole material; a full summary
         // is what Explain does. Upgrade to summaries per material if this is asked a lot.
@@ -1959,13 +1981,11 @@ mod tests {
     fn the_manuals_exist_in_both_languages_and_every_paragraph_is_a_passage() {
         for m in MANUALS {
             assert!(m.len() > 5_000, "{}", m.len());
-            let chunks = generate::chunks(m, PASSAGE_CHARS);
-            assert!(chunks.len() >= 6 && chunks.iter().all(|c| c.len() <= PASSAGE_CHARS));
-            // `chunks` drops pieces with too little text: no paragraph of the manual may be lost.
-            let all = chunks.join("\n");
-            for para in m.split("\n\n").map(|p| p.split_whitespace().collect::<Vec<_>>().join(" ")).filter(|p| !p.is_empty()) {
-                assert!(all.contains(&para), "not in any passage: {}", para.chars().take(60).collect::<String>());
-            }
+            // Each paragraph is a passage by itself and fits the prompt budget.
+            let paras = manual_paragraphs(m);
+            assert!(paras.len() >= 6 && paras.iter().all(|p| p.len() <= PASSAGE_CHARS && p.len() <= BUDGET_CHARS));
+            // CRLF files split the same way.
+            assert_eq!(manual_paragraphs(&m.replace('\n', "\r\n")), paras);
             // The manual is ours, but a future edit could put a marker in it: none is there.
             assert!(!m.contains('<'));
         }
@@ -1986,8 +2006,34 @@ mod tests {
     }
 
     #[test]
+    fn the_paragraph_named_by_the_question_comes_first_and_each_goes_once() {
+        let title = |p: &Passage| p.text.split(':').next().unwrap().to_owned();
+        assert_eq!(title(&manual_passages("Como faço flashcards de uma prova que fiz?")[0]), "Flashcards");
+        assert_eq!(title(&manual_passages("como faço um simulado")[0]), "Simulado");
+        assert_eq!(title(&manual_passages("How do I attach a PDF?")[0]), "Attach material");
+        for q in ["Como faço flashcards de uma prova que fiz?", "how do I attach a PDF? Como anexo um PDF?", "jay prova provas material anexar simulado flashcards chat exam attach"] {
+            let got = manual_passages(q);
+            let idx: Vec<_> = got.iter().map(|p| manual_index(&p.text)).collect();
+            assert!(idx.iter().all(Option::is_some) && idx.iter().collect::<HashSet<_>>().len() == idx.len(), "{q}: {idx:?}");
+        }
+    }
+
+    #[test]
+    fn a_rare_shared_word_beats_common_ones_and_the_plural_is_folded() {
+        let p = |t: &str| Passage { label: "x".into(), text: t.into(), key: None, student: None };
+        let pool = vec![p("prova nota aula"), p("prova nota aula"), p("prova nota aula"), p("tabela aula"), p("prova"), p("prova nota"), p("prova nota"), p("nota"), p("aula"), p("aula")];
+        // "tabela" is in one passage, "prova" and "nota" in many: the one with the rare word wins.
+        let got = ranked(pool.clone(), "tabela, prova e nota", |_| "");
+        assert_eq!(got[0].1.text, "tabela aula");
+        // "provas" finds "prova", and equal scores keep the pool's order.
+        let got = ranked(pool, "provas", |_| "");
+        assert_eq!(got.len(), 6);
+        assert!(got.iter().all(|(s, _)| *s == got[0].0));
+    }
+
+    #[test]
     fn a_question_that_shares_nothing_gets_the_overview_and_limits_hold() {
-        let overview = generate::chunks(MANUALS[0], PASSAGE_CHARS);
+        let overview = manual_paragraphs(MANUALS[0]);
         let got = manual_passages("xyzzy plugh");
         assert_eq!(got.iter().map(|p| p.text.as_str()).collect::<Vec<_>>(), [overview[0].as_str(), overview[1].as_str()]);
         // Words every chunk shares: at most 5 passages, and the budget holds before the last one.

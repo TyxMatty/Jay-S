@@ -22,7 +22,7 @@ const SCOPED: [&str; 10] = [
     "Voltando ao começo: qual foi a definição de intervalo de confiança que você me deu?",
 ];
 
-const GENERAL: [&str; 2] = ["Como anexo um PDF?", "Quanto é (1,96 * 10 / 4)^2?"];
+const GENERAL: [&str; 3] = ["Como anexo um PDF?", "Quanto é (1,96 * 10 / 4)^2?", "Como faço flashcards de uma prova que fiz?"];
 
 /// A conversation a student really had, in a chat with no sources: a nickname for Jay-AI, then a
 /// correction when it was misread.
