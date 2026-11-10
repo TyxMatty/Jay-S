@@ -38,8 +38,9 @@ def main():
     y = np.array([r["label"] for r in rows], dtype=object)
     rules = np.array([r["rule_kind"] for r in rows], dtype=object)
     groups = np.array([t.edition(r["file"]) for r in rows], dtype=object)
+    assert set(y) == set(t.LABELS) and set(rules) <= set(t.KINDS)
     truth = t.kind(y)
-    questions = np.array([int(r["choice_questions"]) + int(r["sum_questions"]) for r in rows])
+    questions =np.array([int(r["choice_questions"]) + int(r["sum_questions"]) for r in rows])
     # Nothing to run: an exam or a handout where the reader finds no question (open exercises, a
     # scan), or an answer key with no answer read (an image). The right label changes nothing there.
     dead = ((truth != "content") & (truth != "key") & (questions == 0)) | ((truth == "key") & (rules != "key"))
