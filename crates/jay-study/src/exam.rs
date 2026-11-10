@@ -398,9 +398,93 @@ fn split_command(stem: &str) -> Option<(String, String)> {
     (command.chars().count() >= 15 && command.chars().count() <= 600 && passage.chars().count() >= 80).then(|| (passage.to_owned(), command.to_owned()))
 }
 
-/// An answer key's text ("46 C", "1 B A" for ENEM's two languages, "17 21" for sum-type): question
-/// number → the answers, in order. `None` when the text doesn't look like a key.
+/// The sum of a sum-type answer's true propositions ("01", "04", "16" → 21). `None` unless each one
+/// is a different power of two, written with two digits.
+fn propositions<'a>(parts: impl Iterator<Item = &'a str>) -> Option<u32> {
+    let mut sum = 0;
+    for part in parts {
+        let n = two_digits(part).filter(|n| n.is_power_of_two() && sum & n == 0)?;
+        sum |= n;
+    }
+    (sum > 0).then_some(sum)
+}
+
+fn two_digits(s: &str) -> Option<u32> {
+    (s.len() == 2 && s.bytes().all(|b| b.is_ascii_digit())).then(|| s.parse().ok()).flatten()
+}
+
+/// A sum-type key that lists each answer's true propositions, so every answer proves itself (19 is
+/// 01 + 02 + 16). UEM: "01 19 01-02-16" (question, sum, propositions), or "19 01-02-16" when the
+/// table left the PDF out of order and the question's number went elsewhere. UEPG: three lines, the
+/// questions' numbers, the propositions of each ("01 02 - - 16") and the sums. A key is at least 8
+/// proven answers that make up a third of the text or more (an exam with its key at the end isn't one).
+///
+/// These files often hold several exams, each counting from 1 again, and three foreign languages
+/// under the same numbers. Nothing here says which one the student's exam is, so a number answered in
+/// two different ways gets no answer at all: a missing answer goes to Jay-AI, a wrong one would grade
+/// the student wrongly.
+/// shortcut: a key of several exams is recognized but answers little, upgrade by matching each
+/// block's heading to the exam when students attach such keys.
+fn parse_sum_key(text: &str) -> Option<BTreeMap<u32, Vec<String>>> {
+    let lines: Vec<Vec<&str>> = text.split(['\n', '\x0c']).map(|l| l.split_whitespace().collect::<Vec<_>>()).filter(|l| !l.is_empty()).collect();
+    let size = |line: &[&str]| line.iter().map(|t| t.len()).sum::<usize>();
+    let numbers = |line: &[&str]| line.iter().map(|t| two_digits(t)).collect::<Option<Vec<u32>>>();
+    let mut found: Vec<(Option<u32>, u32)> = vec![];
+    let mut proven = 0;
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i].as_slice();
+        i += 1;
+        if let (Some(questions), Some(marks), Some(sums)) = (numbers(line), lines.get(i), lines.get(i + 1).and_then(|l| numbers(l))) {
+            let each = marks.len() / line.len();
+            if sums.len() == questions.len() && marks.len() % line.len() == 0 && (3..=7).contains(&each) {
+                let block: Vec<_> = questions
+                    .iter()
+                    .zip(marks.chunks(each))
+                    .zip(&sums)
+                    .filter(|((_, marks), sum)| propositions(marks.iter().copied().filter(|m| *m != "-")) == Some(**sum))
+                    .map(|((question, _), sum)| (Some(*question), *sum))
+                    .collect();
+                if !block.is_empty() {
+                    found.extend(block);
+                    proven += size(line) + size(marks) + size(&lines[i + 1]);
+                    i += 2;
+                    continue;
+                }
+            }
+        }
+        let (question, sum, parts) = match line {
+            [question, sum, parts] => match two_digits(question).filter(|q| *q > 0) {
+                Some(question) => (Some(question), sum, parts),
+                None => continue,
+            },
+            [sum, parts] => (None, sum, parts),
+            _ => continue,
+        };
+        // "16*": UEM marks a corrected answer.
+        if let Some(sum) = two_digits(sum.trim_end_matches('*')).filter(|sum| propositions(parts.split('-')) == Some(*sum)) {
+            found.push((question, sum));
+            proven += size(line);
+        }
+    }
+    if found.len() < 8 || proven * 3 < lines.iter().map(|l| size(l)).sum::<usize>() {
+        return None;
+    }
+    let mut answers: BTreeMap<u32, Option<u32>> = BTreeMap::new();
+    for (question, sum) in found.into_iter().filter_map(|(q, s)| Some((q?, s))) {
+        answers.entry(question).and_modify(|a| *a = a.filter(|a| *a == sum)).or_insert(Some(sum));
+    }
+    Some(answers.into_iter().filter_map(|(q, a)| Some((q, vec![format!("{:02}", a?)]))).collect())
+}
+
+/// An answer key's text ("46 C", "1 B A" for ENEM's two languages, "17 21" for sum-type, and the
+/// sum-type layouts of `parse_sum_key`): question number → the answers, in order. `None` when the
+/// text doesn't look like a key. A key can come out with few answers, or none: only the ones the text
+/// ties to one question are here.
 pub fn parse_answer_key(text: &str) -> Option<BTreeMap<u32, Vec<String>>> {
+    if let Some(key) = parse_sum_key(text) {
+        return Some(key);
+    }
     let mut key: BTreeMap<u32, Vec<String>> = BTreeMap::new();
     let mut lines = 0usize;
     for line in text.split(['\n', '\x0c']).map(str::trim).filter(|l| !l.is_empty()) {
@@ -417,13 +501,19 @@ pub fn parse_answer_key(text: &str) -> Option<BTreeMap<u32, Vec<String>>> {
 }
 
 /// Puts an answer key on split questions. A number that appears twice in the exam (ENEM's questions
-/// 1–5 in English, then in Spanish) takes the key's answers in the same order.
+/// 1–5 in English, then in Spanish) takes the key's answers in the same order. When the exam and the
+/// key don't have a number the same number of times (a misread number, a UEM exam with three
+/// languages), none of those questions gets an answer: which answer is whose would be a guess.
 pub fn apply_answer_key(questions: &mut [Question], key: &BTreeMap<u32, Vec<String>>) -> usize {
+    let mut times: BTreeMap<u32, usize> = BTreeMap::new();
+    for q in questions.iter() {
+        *times.entry(q.number).or_default() += 1;
+    }
     let mut seen: BTreeMap<u32, usize> = BTreeMap::new();
     let mut applied = 0;
     for q in questions.iter_mut() {
         let nth = seen.entry(q.number).or_default();
-        if let Some(answer) = key.get(&q.number).and_then(|a| a.get(*nth).or(a.first())) {
+        if let Some(answer) = key.get(&q.number).filter(|a| a.len() == times[&q.number]).and_then(|a| a.get(*nth)) {
             let valid = match q.kind {
                 QuestionKind::Choice => q.options.iter().any(|o| &o.label == answer),
                 QuestionKind::Sum => answer.parse::<u32>().is_ok_and(|s| s > 0 && s < (1 << q.options.len())),
@@ -585,6 +675,48 @@ mod tests {
     }
 
     #[test]
+    fn sum_keys_prove_each_answer_and_never_guess_the_question() {
+        let answer = |key: &BTreeMap<u32, Vec<String>>, n: u32| key.get(&n).map(|a| a.join(","));
+        // UEM: question, sum, true propositions. Three languages share 11 and 12; "16*" was corrected.
+        let uem = "GABARITO DEFINITIVO\nQuestão Resposta Alternativa(s) Correta(s)\n01 19 01-02-16\n02 26 02-08-16\n03 11 01-02-08\n04 18 02-16\n05 31 01-02-04-08-16\n06 25 01-08-16\n07 04 04\n08 18 02-16\n09 16* 16\n10 10 02-08\nE\nS\nP\n11 18 02-16\n12 19 01-02-16\nF\nR\n11 19 01-02-16\n12 19 01-02-16\n";
+        let key = parse_answer_key(uem).unwrap();
+        assert_eq!(answer(&key, 1).as_deref(), Some("19"));
+        assert_eq!(answer(&key, 7).as_deref(), Some("04"));
+        assert_eq!(answer(&key, 9).as_deref(), Some("16"));
+        // 11 has two answers (which language?): none. 12 has the same answer twice: that one.
+        assert_eq!(answer(&key, 11), None);
+        assert_eq!(answer(&key, 12).as_deref(), Some("19"));
+
+        // UEM with the table out of order: it's a key, but no line says which question it answers
+        // ("04 04" is the sum 4 and its proposition, not question 4).
+        let loose = "Resposta Alternativa(s) Correta(s)\n04 04\n25 01-08-16\n21 01-04-16\n08 08\n10 02-08\n16 16\n15 01-02-04-08\n06 02-04\n16\n17\nQuestão\n05\n06\n";
+        assert_eq!(parse_answer_key(loose).unwrap().len(), 0);
+
+        // UEPG: the numbers, each question's propositions, the sums. Question 03 says 03 for "01 - 04 -"
+        // (5): unproven, so no answer. A second exam in the same file counts from 01 again.
+        let uepg = "Número da questão\nAlternativas corretas\nsomatório correto\n01 02 03 04 05 06 07\n01 - - 08 01 - 04 - 01 - 04 - 01 02 04 08 - - 04 08 01 02 04 - - 02 - 08\n09 05 03 15 12 07 10\n08 09\n01 02 04 08 01 02 - -\n15 03\nQUÍMICA\n01 02\n- 02 04 - 01 02 - -\n06 03\n";
+        let key = parse_answer_key(uepg).unwrap();
+        assert_eq!(answer(&key, 1), None);
+        assert_eq!(answer(&key, 2), None);
+        assert_eq!(answer(&key, 3), None);
+        assert_eq!(answer(&key, 4).as_deref(), Some("15"));
+        assert_eq!(answer(&key, 9).as_deref(), Some("03"));
+
+        // Not keys: sums that don't add up, propositions that aren't powers of two or repeat, and an
+        // exam with its key on the last page (the key is a small part of the text).
+        let wrong = (1..=12).map(|n| format!("{n:02} 20 01-02-16\n")).collect::<String>();
+        assert!(parse_sum_key(&wrong).is_none());
+        let dates = (1..=12).map(|n| format!("{n:02} 21 03-06-12\n")).collect::<String>();
+        assert!(parse_sum_key(&dates).is_none());
+        let twice = (1..=12).map(|n| format!("{n:02} 04 02-02\n")).collect::<String>();
+        assert!(parse_sum_key(&twice).is_none());
+        let exam = format!("{}{uem}", "Assinale o que for correto sobre a fotossíntese e some as proposições verdadeiras.\n".repeat(12));
+        assert!(parse_answer_key(&exam).is_none());
+        // Seven proven answers aren't enough.
+        assert!(parse_sum_key("01 19 01-02-16\n02 26 02-08-16\n03 11 01-02-08\n04 18 02-16\n05 31 01-02-04-08-16\n06 25 01-08-16\n07 04 04\n").is_none());
+    }
+
+    #[test]
     fn keys_go_to_the_right_questions_including_enems_two_languages() {
         let q = |n: u32| Question {
             number: n,
@@ -603,6 +735,11 @@ mod tests {
         let key = BTreeMap::from([(1, vec!["B".to_string(), "A".to_string()]), (6, vec!["D".to_string()]), (7, vec!["Z".to_string()])]);
         assert_eq!(apply_answer_key(&mut qs, &key), 3);
         assert_eq!(qs.iter().map(|q| q.answer.clone()).collect::<Vec<_>>(), [Some("B".into()), Some("A".into()), Some("D".into()), None]);
+        // A number twice in the exam and once in the key (or the other way round): whose answer is it?
+        let mut qs = vec![q(1), q(6), q(6), q(8)];
+        let key = BTreeMap::from([(1, vec!["B".to_string(), "A".to_string()]), (6, vec!["D".to_string()]), (8, vec!["C".to_string()])]);
+        assert_eq!(apply_answer_key(&mut qs, &key), 1);
+        assert_eq!(qs.iter().map(|q| q.answer.clone()).collect::<Vec<_>>(), [None, None, None, Some("C".into())]);
     }
 
     #[test]

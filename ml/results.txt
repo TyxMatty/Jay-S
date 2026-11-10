@@ -1,14 +1,14 @@
 228 files, 109 editions, 5 folds by edition, seed 8
 scikit-learn 1.9.1, numpy 2.5.4
 
-rules (the app today): 196 of 228 right
+rules (the app today): 218 of 228 right
  label / said  content     exam     both      key   recall
       content       69        0        3        0     0.96
          exam        1      111        1        0     0.98
          both        3        2        2        0     0.29
-          key       22        0        0       14     0.39
-    precision     0.73     0.98     0.33     1.00
-  where the rules say sure: 194 of 222; unsure: 2 of 6
+          key        0        0        0       36     1.00
+    precision     0.95     0.98     0.33     1.00
+  where the rules say sure: 216 of 222; unsure: 2 of 6
   on the 192 files that are not keys: 182
 
 logistic, 5 labels: 210 of 228 right
@@ -29,7 +29,7 @@ logistic + key parser, as the app's 4 kinds: 210 of 228 right
     precision     0.97     0.99     0.21     0.90
   without the key parser: 210 right
   on the 192 files that are not keys: 174
-  against the rules: right where they are wrong in 25, wrong where they are right in 11
+  against the rules: right where they are wrong in 3, wrong where they are right in 11
   where the rules say sure: 207 of 222
   where the rules say unsure: 3 of 6
   over 10 other splits (seeds 0-9): 210 to 218 right; not keys: 174 to 182
@@ -43,19 +43,19 @@ tree, 5 labels: 212 of 228 right
           key        0        0        0        1       35     0.97
     precision     0.93     1.00     0.99     0.23     1.00
 
-tree + key parser, as the app's 4 kinds: 213 of 228 right
+tree + key parser, as the app's 4 kinds: 214 of 228 right
  label / said  content     exam     both      key   recall
       content       63        0        9        0     0.88
          exam        1      112        0        0     0.99
          both        4        0        3        0     0.43
-          key        0        0        1       35     0.97
-    precision     0.93     1.00     0.23     1.00
+          key        0        0        0       36     1.00
+    precision     0.93     1.00     0.25     1.00
   without the key parser: 213 right
   on the 192 files that are not keys: 178
-  against the rules: right where they are wrong in 26, wrong where they are right in 9
-  where the rules say sure: 211 of 222
+  against the rules: right where they are wrong in 5, wrong where they are right in 9
+  where the rules say sure: 212 of 222
   where the rules say unsure: 2 of 6
-  over 10 other splits (seeds 0-9): 208 to 214 right; not keys: 173 to 179
+  over 10 other splits (seeds 0-9): 209 to 215 right; not keys: 173 to 179
 
 tree on all files (chars, headers and question counts are ln(1 + n)):
 |--- density <= 0.54
