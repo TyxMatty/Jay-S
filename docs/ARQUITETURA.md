@@ -11,7 +11,7 @@ O app de estudos da linha Jay. O estudante anexa **conteúdo** e/ou **provas**; 
 
 Em abas separadas ficam o **simulado** (opcional: a prova escolhida, com o tempo e o estilo que a pessoa quiser) e os **flashcards**, que se adaptam ao jeito do estudante (curtos e diretos ou mais longos) e ao que ele errou nos simulados.
 
-Escrito em 2026-11-09, a partir do Jay-C 0.4, Jay-A 0.3.3, Jay-E 0.2.1 e Jay-H 0.1.4. Licença: **MIT**, como a linha toda. As etapas 0 a 6 estão prontas; da 7, o instalador está gerado e medido e os audits estão na CI, e faltam a instalação de verdade, o Jay-H e a primeira release (seção 8).
+Escrito em 2026-11-09, a partir do Jay-C 0.4, Jay-A 0.3.3, Jay-E 0.2.1 e Jay-H 0.1.4. Licença: **MIT**, como a linha toda. As etapas 0 a 6 estão prontas; da 7, a primeira release (0.1.0) está publicada, com o instalador gerado pela CI, e o Jay-S entrou no catálogo do Jay-H; falta uma release do Jay-H com esse catálogo e ver, fora do PC de dev, o Jay-H instalar e atualizar o Jay-S (seção 8).
 
 ## 1. Visão geral
 
@@ -251,11 +251,11 @@ Arrastar arquivos sobre a janela, em qualquer seção, mostra três áreas: **Co
 
 ### O instalador (etapa 7)
 
-O instalador é o NSIS do Tauri, sem script próprio (`Jay-S_0.0.1_x64-setup.exe`, 4,48 MiB). Pelos 10 pontos:
+O instalador é o NSIS do Tauri, sem script próprio (`Jay-S_0.1.0_x64-setup.exe`, 4,48 MiB). Pelos 10 pontos:
 
 1. **Superfície de ataque.** Uma fronteira nova: o `.exe` do instalador, baixado do GitHub (pela pessoa ou pelo Jay-H) e rodado no PC. Caminho mais realista: um instalador trocado, vindo de um site que não é o do projeto. Ele **não é assinado**: o Windows não diz quem o fez e o SmartScreen avisa "editor desconhecido". O que vale hoje: release só no GitHub do projeto, por HTTPS, com o SHA-256 nas notas. Assinar o código é decisão aberta (custa dinheiro; a linha toda está sem).
 2. **Controle de acesso / IDOR.** Sem contas. A instalação é por usuário (`installMode: currentUser`): grava em `%LOCALAPPDATA%\Jay-S`, em `HKCU` e nos atalhos do próprio perfil; não pede administrador e não toca em outra conta do PC.
-3. **Permissões de dados.** O instalador não leva nem cria dados do estudante: a pasta instalada tem `jay-s.exe` e `uninstall.exe` (medido), e a pasta de dados (`%APPDATA%\io.github.tyxmatty.jays`) nasce no primeiro uso. Desinstalar mantém a pasta de dados, a menos que a pessoa marque a caixa "apagar os dados do aplicativo" do desinstalador do Tauri (desmarcada por padrão); uma atualização não apaga. **Não medido:** a desinstalação não foi rodada.
+3. **Permissões de dados.** O instalador não leva nem cria dados do estudante: a pasta instalada tem `jay-s.exe` e `uninstall.exe` (medido), e a pasta de dados (`%APPDATA%\io.github.tyxmatty.jays`) nasce no primeiro uso. Desinstalar mantém a pasta de dados, a menos que a pessoa marque a caixa "apagar os dados do aplicativo" do desinstalador do Tauri (desmarcada por padrão); uma atualização não apaga. **Não medido aqui:** a desinstalação foi testada à mão pelo autor, numa instalação de verdade (2026-11-09); o que foi conferido não está registrado.
 4. **Entrada não confiável.** Nenhuma entrada nova: sem modelo NSIS próprio, sem `installerHooks`, sem argumentos nossos. O atalho e o "relaunch" da barra de tarefas apontam para o caminho do próprio `.exe`, entre aspas.
 5. **Credenciais expostas.** Nenhuma no instalador nem no workflow que o gera (`permissions: contents: read`; publicar a release é um passo manual).
 6. **Autenticação.** Não se aplica.
@@ -317,8 +317,16 @@ Cada etapa termina com algo testável; ao fim de cada uma, commit, resumo e a pe
 - **Audits neste PC:** `npm audit --audit-level=high`: 0 vulnerabilidades. `cargo audit`: 0 vulnerabilidades nos dois `Cargo.lock` (5 avisos de crates só de Linux, seção 7). gitleaks 8.30.1 no histórico: 13 commits, nenhum segredo.
 - **Busca por `innerHTML` como teste** (`frontend/test/html-sinks.test.js`, no `npm test`, agora 18): HTML só entra na página em 3 lugares revistos (`ui/dom.js`, `ui/app-shell.js`, `ui/viewer.js`) e todo `html:` do `h()` é um ícone do código. Conferido por mutação: um `el.innerHTML = y` plantado reprova o teste.
 - **Na CI:** job `audit` (os três audits, a cada push, em PR e toda segunda-feira) e as Actions dos dois workflows por SHA.
-- **O que isso não prova:** os workflows não rodaram depois da mudança (rodam no primeiro push) nem foram lidos por um leitor de YAML neste PC; o que foi medido aqui são os mesmos comandos, à mão.
-- **Falta:** instalar de verdade, rodando o instalador pelo Explorer (páginas, escolha do idioma, SmartScreen, ícone da barra), e numa conta de teste; desinstalar; o Jay-S no catálogo do Jay-H; a primeira release (versão e tag).
+
+**Etapa 7, medido (2026-11-09), a release 0.1.0:**
+- **CI no commit da release** (`60445d1`, execução 42724703233): os três jobs passaram (testes de JS, testes de Rust no Windows, audits). É a primeira execução completa dos workflows depois da mudança da CI; a do commit anterior foi cancelada pelo push seguinte (`cancel-in-progress`), não reprovada.
+- **Teste com o servidor de verdade, à mão** (seção 7, item 10: a CI não roda): `cargo test -- --ignored server` com o modelo, 1 passou em 3,82 s.
+- **Instalador pela CI** (`installer.yml` na tag `v0.1.0`, execução 42727640106, ~8,5 min): `Jay-S_0.1.0_x64-setup.exe` com **4.696.362 bytes (4,48 MiB)**, dentro do RNF-2; SHA-256 `f88a7fa47fc9ebe6be35f644bc58e81457974a74f1eece41260c6fd7ca1c265e`; não assinado.
+- **Release publicada:** https://github.com/TyxMatty/Jay-S/releases/tag/v0.1.0, com esse arquivo (o tamanho e o SHA-256 que o GitHub mostra são os do arquivo baixado da CI); `releases/latest`, que é o que o Jay-H consulta, aponta para ela. As notas levam o SHA-256 e 4 imagens do app em inglês, que carregam (HTTP 200) pelo endereço da tag. O texto das notas é provisório.
+- **Jay-H:** o Jay-S entrou no catálogo (`products.json`, com ícone e resumo); lá, `npm test` 16/16 e `catalog_is_valid` passam. O catálogo é compilado dentro do Jay-H: só chega às pessoas numa release nova dele.
+- **Desinstalar:** testado à mão pelo autor, numa instalação de verdade; não medido aqui.
+- **O que isso não prova:** o instalador publicado não foi rodado aqui: a instalação medida acima foi a do build local 0.0.1, na cópia privada do AppData. O Jay-H instalando e atualizando o Jay-S não foi visto.
+- **Falta:** uma release do Jay-H com o catálogo novo; instalar o 0.1.0 pelo Explorer e pelo Jay-H, numa conta de teste (páginas, escolha do idioma, SmartScreen, ícone da barra); a descrição definitiva (notas da release e o resumo no Jay-H).
 
 ## 9. Riscos e spikes
 

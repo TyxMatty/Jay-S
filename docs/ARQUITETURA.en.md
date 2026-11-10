@@ -11,7 +11,7 @@ The study app of the Jay line. The student attaches **content** and/or **exams**
 
 Separate tabs hold the **mock test** (optional: the chosen exam, with the time limit and style the student wants) and the **flashcards**, which adapt to the student's way of studying (short and direct or longer) and to what they got wrong in mock tests.
 
-Written on 2026-11-09, from Jay-C 0.4, Jay-A 0.3.3, Jay-E 0.2.1 and Jay-H 0.1.4. License: **MIT**, like the whole line. Stages 0 to 6 are done; of stage 7, the installer is built and measured and the audits are in the CI, and the real install, Jay-H and the first release are missing (section 8).
+Written on 2026-11-09, from Jay-C 0.4, Jay-A 0.3.3, Jay-E 0.2.1 and Jay-H 0.1.4. License: **MIT**, like the whole line. Stages 0 to 6 are done; of stage 7, the first release (0.1.0) is published, with the installer built by the CI, and Jay-S is in Jay-H's catalog; still missing are a Jay-H release with that catalog and seeing, outside the dev PC, Jay-H install and update Jay-S (section 8).
 
 ## 1. Overview
 
@@ -252,11 +252,11 @@ Dragging files over the window, in any section, shows three areas: **Content**, 
 
 ### The installer (stage 7)
 
-The installer is Tauri's NSIS one, with no script of ours (`Jay-S_0.0.1_x64-setup.exe`, 4.48 MiB). By the 10 points:
+The installer is Tauri's NSIS one, with no script of ours (`Jay-S_0.1.0_x64-setup.exe`, 4.48 MiB). By the 10 points:
 
 1. **Attack surface.** One new boundary: the installer `.exe`, downloaded from GitHub (by the person or by Jay-H) and run on the PC. Most realistic path: a swapped installer, from a site that isn't the project's. It is **not signed**: Windows can't say who made it and SmartScreen warns "unknown publisher". What holds today: releases only on the project's GitHub, over HTTPS, with the SHA-256 in the notes. Code signing is an open decision (it costs money; the whole line goes without).
 2. **Access control / IDOR.** No accounts. The install is per user (`installMode: currentUser`): it writes to `%LOCALAPPDATA%\Jay-S`, to `HKCU` and to the profile's own shortcuts; it doesn't ask for administrator and doesn't touch another account on the PC.
-3. **Data permissions.** The installer neither carries nor creates student data: the installed folder holds `jay-s.exe` and `uninstall.exe` (measured), and the data folder (`%APPDATA%\io.github.tyxmatty.jays`) is created on first use. Uninstalling keeps the data folder, unless the person ticks the "delete the application data" box of Tauri's uninstaller (unticked by default); an update doesn't delete it. **Not measured:** the uninstall wasn't run.
+3. **Data permissions.** The installer neither carries nor creates student data: the installed folder holds `jay-s.exe` and `uninstall.exe` (measured), and the data folder (`%APPDATA%\io.github.tyxmatty.jays`) is created on first use. Uninstalling keeps the data folder, unless the person ticks the "delete the application data" box of Tauri's uninstaller (unticked by default); an update doesn't delete it. **Not measured here:** the uninstall was tested by hand by the author, on a real install (2026-11-09); what they checked isn't recorded.
 4. **Untrusted input.** No new input: no NSIS template of ours, no `installerHooks`, no arguments of ours. The shortcut and the taskbar "relaunch" point at the `.exe`'s own path, in quotes.
 5. **Exposed credentials.** None in the installer or in the workflow that builds it (`permissions: contents: read`; publishing the release is a manual step).
 6. **Authentication.** Doesn't apply.
@@ -318,8 +318,16 @@ Each stage ends with something testable; at the end of each one: commit, summary
 - **Audits on this PC:** `npm audit --audit-level=high`: 0 vulnerabilities. `cargo audit`: 0 vulnerabilities in both `Cargo.lock` files (5 warnings from Linux-only crates, section 7). gitleaks 8.30.1 over the history: 13 commits, no secrets.
 - **The `innerHTML` search as a test** (`frontend/test/html-sinks.test.js`, in `npm test`, now 18): HTML only enters the page at 3 reviewed places (`ui/dom.js`, `ui/app-shell.js`, `ui/viewer.js`) and every `html:` of `h()` is one of the code's icons. Checked by mutation: a planted `el.innerHTML = y` fails the test.
 - **In the CI:** job `audit` (the three audits, on every push, on PRs and every Monday) and the Actions of both workflows by SHA.
-- **What this doesn't prove:** the workflows haven't run since the change (they run on the first push) and weren't read by a YAML parser on this PC; what was measured here are the same commands, by hand.
-- **Missing:** a real install, running the installer from Explorer (pages, language choice, SmartScreen, taskbar icon), and on a test account; uninstalling; Jay-S in Jay-H's catalog; the first release (version and tag).
+
+**Stage 7, measured (2026-11-09), the 0.1.0 release:**
+- **CI on the release commit** (`60445d1`, run 42724703233): the three jobs passed (JS tests, Rust tests on Windows, audits). It is the first full run of the workflows since the CI change; the run of the commit before it was cancelled by the next push (`cancel-in-progress`), not failed.
+- **The real-server test, by hand** (section 7, item 10: the CI doesn't run it): `cargo test -- --ignored server` with the model, 1 passed in 3.82 s.
+- **Installer from the CI** (`installer.yml` on tag `v0.1.0`, run 42727640106, ~8.5 min): `Jay-S_0.1.0_x64-setup.exe` with **4,696,362 bytes (4.48 MiB)**, within RNF-2; SHA-256 `f88a7fa47fc9ebe6be35f644bc58e81457974a74f1eece41260c6fd7ca1c265e`; not signed.
+- **Release published:** https://github.com/TyxMatty/Jay-S/releases/tag/v0.1.0, with that file (the size and SHA-256 GitHub shows are those of the file downloaded from the CI); `releases/latest`, which is what Jay-H queries, points at it. The notes carry the SHA-256 and 4 pictures of the app in English, which load (HTTP 200) from the tag's address. The text of the notes is provisional.
+- **Jay-H:** Jay-S is in the catalog (`products.json`, with an icon and a summary); there, `npm test` 16/16 and `catalog_is_valid` pass. The catalog is compiled into Jay-H: it only reaches people in a new Jay-H release.
+- **Uninstalling:** tested by hand by the author, on a real install; not measured here.
+- **What this doesn't prove:** the published installer wasn't run here: the install measured above was the local 0.0.1 build, in the private copy of AppData. Jay-H installing and updating Jay-S wasn't seen.
+- **Missing:** a Jay-H release with the new catalog; installing 0.1.0 from Explorer and from Jay-H, on a test account (pages, language choice, SmartScreen, taskbar icon); the final description (release notes and the summary in Jay-H).
 
 ## 9. Risks and spikes
 
