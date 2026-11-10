@@ -112,9 +112,11 @@ impl Profile {
 /// Cards from one piece of content, at the student's length.
 fn write_cards(server: &Server, chunk: &str, focus_topics: &[String], card_length: i32, avoid: &[String], n: usize, cancel: &AtomicBool) -> Result<Vec<(String, String, String)>, AiError> {
     let text = |max: u32| json!({ "type": "string", "minLength": 1, "maxLength": max });
+    // serde_json sorts keys and llama-server writes them in that order: with "back"/"front"/"topic"
+    // the answer came before its question (and was often just the topic). These sort as read.
     let schema = json!({
         "type": "object",
-        "properties": { "cards": { "type": "array", "items": { "type": "object", "properties": { "front": text(200), "back": text(700), "topic": text(60) }, "required": ["front", "back", "topic"] }, "minItems": 1, "maxItems": n } },
+        "properties": { "cards": { "type": "array", "items": { "type": "object", "properties": { "pergunta": text(200), "resposta": text(700), "tema": text(60) }, "required": ["pergunta", "resposta", "tema"] }, "minItems": 1, "maxItems": n } },
         "required": ["cards"],
     });
     let focus = if focus_topics.is_empty() { String::new() } else { format!("\nPriorize estes temas, em que o aluno errou mais: {}.", focus_topics.join("; ")) };
@@ -135,7 +137,7 @@ fn write_cards(server: &Server, chunk: &str, focus_topics: &[String], card_lengt
         .flatten()
         .filter_map(|c| {
             let get = |k: &str, max: usize| c[k].as_str().map(str::trim).filter(|s| !s.is_empty() && s.chars().count() <= max).map(str::to_owned);
-            clean_card(get("front", 300)?, get("back", 900)?, get("topic", 80)?)
+            clean_card(get("pergunta", 300)?, get("resposta", 900)?, get("tema", 80)?)
         })
         .collect())
 }
@@ -150,6 +152,13 @@ fn clean_card(front: String, back: String, topic: String) -> Option<(String, Str
     {
         front = front[a.len() + 2..].trim().to_owned();
         back = back[b.len() + 2..].trim().to_owned();
+    }
+    // The model sometimes writes the topic in the back, alone or before the answer: it goes.
+    let n = topic.chars().count();
+    let rest: String = back.chars().skip(n).collect();
+    let after = rest.trim_start_matches([' ', '\t']);
+    if crate::classify::fold(&back.chars().take(n).collect::<String>()) == crate::classify::fold(&topic) && (after.is_empty() || after.starts_with([':', '-', '–', '—', '.', '\n', '\r'])) {
+        back = rest.trim_start_matches([':', '-', '–', '—', '.', ' ', '\n', '\r', '\t']).to_owned();
     }
     let useless = back.ends_with('?') || generate::similar(&front, &back) || back.split_whitespace().count() < 2;
     (!useless && !front.is_empty()).then_some((front, back, topic))
@@ -283,6 +292,15 @@ mod tests {
         assert_eq!((c.0.as_str(), c.1.as_str()), ("O que é?", "Processo que transforma luz em glicose."));
         assert!(clean_card("O que é a fotossíntese e qual a equação geral?".into(), "Biologia: O que é a fotossíntese?".into(), "t".into()).is_none());
         assert!(clean_card("Onde ocorre a fase clara?".into(), "Nos tilacoides.".into(), "t".into()).is_some());
+        // The topic as the back (the card goes, build_deck asks again) or before the answer (stripped).
+        let topic = || "Biologia: fotossíntese".to_owned();
+        assert!(clean_card("Onde ocorre a fase escura?".into(), "Biologia: fotossíntese".into(), topic()).is_none());
+        assert!(clean_card("Onde ocorre a fase escura?".into(), "biologia: Fotossintese.".into(), topic()).is_none());
+        let c = clean_card("Onde ocorre a fase escura?".into(), "Biologia: fotossíntese\n\nNo estroma do cloroplasto.".into(), topic()).unwrap();
+        assert_eq!(c.1, "No estroma do cloroplasto.");
+        // A back that merely shares a first word with the topic stays whole.
+        let c = clean_card("Qual é a área?".into(), "Biologia molecular estuda o DNA.".into(), "Biologia".into()).unwrap();
+        assert_eq!(c.1, "Biologia molecular estuda o DNA.");
     }
 
     #[test]
