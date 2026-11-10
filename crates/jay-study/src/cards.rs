@@ -112,8 +112,8 @@ impl Profile {
 /// Cards from one piece of content, at the student's length.
 fn write_cards(server: &Server, chunk: &str, focus_topics: &[String], card_length: i32, avoid: &[String], n: usize, cancel: &AtomicBool) -> Result<Vec<(String, String, String)>, AiError> {
     let text = |max: u32| json!({ "type": "string", "minLength": 1, "maxLength": max });
-    // serde_json sorts keys and llama-server writes them in that order: with "back"/"front"/"topic"
-    // the answer came before its question (and was often just the topic). These sort as read.
+    // llama-server makes the model write the fields in this order: with the answer before its
+    // question, the back was often just the topic.
     let schema = json!({
         "type": "object",
         "properties": { "cards": { "type": "array", "items": { "type": "object", "properties": { "pergunta": text(200), "resposta": text(700), "tema": text(60) }, "required": ["pergunta", "resposta", "tema"] }, "minItems": 1, "maxItems": n } },

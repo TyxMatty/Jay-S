@@ -545,12 +545,13 @@ impl Store {
         let schema = json!({
             "type": "object",
             "properties": {
-                "summary": { "type": "string", "maxLength": 1500 },
                 "strengths": { "type": "array", "items": { "type": "string", "maxLength": 200 }, "maxItems": 4 },
                 "review": { "type": "array", "items": { "type": "object", "properties": { "topic": { "type": "string", "maxLength": 80 }, "why": { "type": "string", "maxLength": 300 }, "tip": { "type": "string", "maxLength": 300 } }, "required": ["topic", "why", "tip"] }, "maxItems": 5 },
                 "next": { "type": "array", "items": { "type": "string", "maxLength": 200 }, "maxItems": 4 },
+                // Last: written first, the summary sometimes carried the lists that come after it.
+                "summary": { "type": "string", "maxLength": 1500 },
             },
-            "required": ["summary", "strengths", "review", "next"],
+            "required": ["strengths", "review", "next", "summary"],
         });
         // Stems, options, explanations, topics and the title came from files or the model.
         let (topics, right, wrong) = (data(&topics), marked(&right), marked(&wrong));

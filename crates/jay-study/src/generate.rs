@@ -65,6 +65,9 @@ fn letters(n: usize) -> Vec<String> {
 }
 
 /// The schema of one new question in `style`.
+/// The explanation comes last, after the options it explains: written first (as when the keys were
+/// sorted) the model agreed with its own answer more often (85% against 69% at the first try), but the
+/// explanation described how the question was made, or named a letter that was not the answer.
 pub fn question_schema(style: &Style) -> Value {
     let n = style.options as usize;
     let text = |max: u32| json!({ "type": "string", "minLength": 1, "maxLength": max });
@@ -246,11 +249,11 @@ pub fn solve(server: &Server, q: &Question, cancel: &AtomicBool) -> Result<(Stri
     let body = data(&question_text(q));
     let (schema, ask) = match q.kind {
         QuestionKind::Choice => (
-            json!({ "type": "object", "properties": { "answer": { "type": "string", "enum": q.options.iter().map(|o| o.label.clone()).collect::<Vec<_>>() }, "explanation": { "type": "string", "maxLength": 600 } }, "required": ["answer", "explanation"] }),
+            json!({ "type": "object", "properties": { "explanation": { "type": "string", "maxLength": 600 }, "answer": { "type": "string", "enum": q.options.iter().map(|o| o.label.clone()).collect::<Vec<_>>() } }, "required": ["explanation", "answer"] }),
             "Resolva a questão. Dê a letra certa e explique em poucas frases.",
         ),
         QuestionKind::Sum => (
-            json!({ "type": "object", "properties": { "true": { "type": "array", "items": { "type": "string", "enum": q.options.iter().map(|o| o.label.clone()).collect::<Vec<_>>() } }, "explanation": { "type": "string", "maxLength": 800 } }, "required": ["true", "explanation"] }),
+            json!({ "type": "object", "properties": { "explanation": { "type": "string", "maxLength": 800 }, "true": { "type": "array", "items": { "type": "string", "enum": q.options.iter().map(|o| o.label.clone()).collect::<Vec<_>>() } } }, "required": ["explanation", "true"] }),
             "Resolva a questão de somatória. Liste os números das proposições verdadeiras e explique em poucas frases.",
         ),
     };
@@ -343,6 +346,17 @@ pub fn tag_topics(server: &Server, questions: &[Question], cancel: &AtomicBool) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The model writes the fields in the schema's order (llama-server's grammar): the question
+    /// before its explanation, an option's text before whether it is right. Without serde_json's
+    /// `preserve_order` they would reach it sorted.
+    #[test]
+    fn schemas_keep_the_order_written() {
+        let s = question_schema(&crate::exam::style("enem").unwrap()).to_string();
+        let at = |key: &str| s.find(&format!("\"{key}\":")).unwrap();
+        assert!(at("topic") < at("stem") && at("stem") < at("options") && at("options") < at("explanation"), "{s}");
+        assert!(at("text") < at("correct"), "{s}");
+    }
     use crate::exam::style;
 
     #[test]

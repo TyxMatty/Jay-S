@@ -9,7 +9,9 @@ rust-version = "1.90"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# preserve_order: a schema's fields reach llama-server in the order written here, and the model
+# writes them in that order (sorted, the answer came before its question).
+serde_json = { version = "1", features = ["preserve_order"] }
 # Random ids and the llama-server key (the OS's random source).
 getrandom = "0.3"
 # PDF text: pure Rust, `unsafe` forbidden (Jay-E's spike S1); the 14 standard fonts and the CMaps

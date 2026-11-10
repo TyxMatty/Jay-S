@@ -340,10 +340,11 @@ fn schema(general: bool, n: usize) -> Value {
         json!({ "type": "object", "properties": { "text": { "type": "string", "minLength": 1, "maxLength": 400 } }, "required": ["text"] })
     } else {
         json!({ "type": "object", "properties": {
-            "text": { "type": "string", "minLength": 1, "maxLength": 400 },
-            "source": { "type": "integer", "minimum": 0, "maximum": n },
+            // The model writes the fields in this order: the quote first, then the sentence it backs.
             "quote": { "type": "string", "maxLength": 300 },
-        }, "required": ["text", "source", "quote"] })
+            "source": { "type": "integer", "minimum": 0, "maximum": n },
+            "text": { "type": "string", "minLength": 1, "maxLength": 400 },
+        }, "required": ["quote", "source", "text"] })
     };
     json!({ "type": "object", "properties": { "sentences": { "type": "array", "minItems": 1, "maxItems": 8, "items": sentence } }, "required": ["sentences"] })
 }
