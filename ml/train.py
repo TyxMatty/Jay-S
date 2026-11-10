@@ -21,8 +21,8 @@ from sklearn.tree import DecisionTreeClassifier, export_text
 
 SEED = 8
 FOLDS = 5
-FEATURES = ["choice_questions", "sum_questions", "headers", "exam_words", "chars", "density", "first_at"]
-LOGGED = {"choice_questions", "sum_questions", "headers", "chars"}  # counts that span orders of magnitude
+FEATURES = ["choice_questions", "sum_questions", "headers", "exam_words", "chars", "density", "first_at", "longest_prose"]
+LOGGED = {"choice_questions", "sum_questions", "headers", "chars", "longest_prose"}  # counts that span orders of magnitude
 LABELS = ["content", "exam", "exam_sum", "both", "key"]
 KINDS = ["content", "exam", "both", "key"]  # what the app knows: exam_sum is an exam
 

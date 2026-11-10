@@ -153,6 +153,10 @@ pub struct Signals {
     pub density: f32,
     /// How far into the text (0 to 1) the first question starts; 1 when there is none.
     pub first_at: f32,
+    /// The longest stretch, in non-blank characters, with no question starting in it: before the
+    /// first one, between two, or from the last one to the end (the whole text when there is
+    /// none). An exam has at most ~11 000 (a long instructions page); a handout, a chapter.
+    pub longest_prose: u32,
 }
 
 pub fn signals(text: &str) -> Signals {
@@ -167,14 +171,32 @@ pub fn signals(text: &str) -> Signals {
     let per = chars.max(1) as f32;
     let first_line = choice_runs.iter().chain(&sum_runs).min().copied().unwrap_or(lines.len());
     let first_at = lines[..first_line.min(lines.len())].iter().map(|l| blank_free(l)).sum::<usize>() as f32 / per;
-    Signals { choice_questions: choice_runs.len() as u32, sum_questions: sum_runs.len() as u32, headers, exam_words, chars: chars as u32, density: questions as f32 / (per / 1000.0), first_at }
+    let mut starts: Vec<usize> = choice_runs.iter().chain(&sum_runs).copied().collect();
+    starts.sort_unstable();
+    let (mut longest_prose, mut stretch, mut next) = (0, 0, 0);
+    for (i, line) in lines.iter().enumerate() {
+        if starts.get(next) == Some(&i) {
+            longest_prose = longest_prose.max(stretch);
+            stretch = 0;
+            while starts.get(next) == Some(&i) {
+                next += 1;
+            }
+        }
+        stretch += blank_free(line);
+    }
+    let longest_prose = longest_prose.max(stretch) as u32;
+    Signals { choice_questions: choice_runs.len() as u32, sum_questions: sum_runs.len() as u32, headers, exam_words, chars: chars as u32, density: questions as f32 / (per / 1000.0), first_at, longest_prose }
 }
+
+/// A stretch this long with no question (about five pages) is a chapter: content. Measured on the
+/// training set: 11 040 at most in the 144 exams, 23 994 at least in the 12 handouts.
+const CHAPTER_CHARS: u32 = 15_000;
 
 pub fn classify(text: &str) -> Classification {
     if crate::exam::parse_answer_key(text).is_some() {
         return Classification { kind: MaterialKind::Key, sure: true, choice_questions: 0, sum_questions: 0, headers: 0 };
     }
-    let Signals { choice_questions, sum_questions, headers, exam_words, chars, density, first_at } = signals(text);
+    let Signals { choice_questions, sum_questions, headers, exam_words, chars, density, first_at, longest_prose } = signals(text);
     let (kind, sure) = match choice_questions + sum_questions {
         // Many question headers and almost no options read: an exam read by OCR, which loses the
         // option letters drawn inside circles (ENCCEJA 2017, a scanned ENEM). Headers as dense as
@@ -183,9 +205,14 @@ pub fn classify(text: &str) -> Classification {
         0..=2 if headers >= 20 && headers as f32 >= 0.2 * chars as f32 / 1000.0 => (MaterialKind::Exam, false),
         0 if headers >= 3 && exam_words >= 1 => (MaterialKind::Exam, false),
         0 => (MaterialKind::Content, headers == 0),
-        1..=2 => (if first_at > 0.5 { MaterialKind::Both } else { MaterialKind::Content }, false),
-        _ if density >= 0.2 && first_at < 0.35 => (MaterialKind::Exam, density >= 0.3 || exam_words >= 1),
-        _ => (MaterialKind::Both, first_at > 0.3),
+        // One or two runs of "a) b) c) d)" are a list or an example, not something to study from.
+        1..=2 => (MaterialKind::Content, false),
+        // A few of them in a long text (under 1 per 25 000 characters): lists, again.
+        _ if density < 0.04 => (MaterialKind::Content, false),
+        // Questions and a chapter of prose: a handout. A short one has its exercises in the second
+        // half (an exam's first question comes in the first 40%, formula sheet included).
+        _ if longest_prose >= CHAPTER_CHARS || first_at >= 0.5 => (MaterialKind::Both, longest_prose >= CHAPTER_CHARS),
+        _ => (MaterialKind::Exam, density >= 0.3 || exam_words >= 1),
     };
     Classification { kind, sure, choice_questions, sum_questions, headers }
 }
@@ -238,8 +265,15 @@ mod tests {
         let s = signals(&exam);
         assert_eq!((s.choice_questions, s.sum_questions, s.headers, s.exam_words), (20, 0, 20, 0));
         assert!(s.density >= 0.3 && s.first_at < 0.05, "{s:?}");
+        // The longest stretch with no question starting in it is one question long.
+        assert!(s.longest_prose > 100 && s.longest_prose < s.chars / 15, "{s:?}");
         let s = signals(&prose(3000));
-        assert_eq!((s.choice_questions, s.headers, s.density, s.first_at), (0, 0, 0.0, 1.0));
+        assert_eq!((s.choice_questions, s.headers, s.density, s.first_at, s.longest_prose), (0, 0, 0.0, 1.0, s.chars));
+        // A chapter between two questions is the longest stretch, whatever comes before and after.
+        let chapter = prose(4000);
+        let s = signals(&format!("{}{}{chapter}{}{}", enem_question(1), enem_question(2), enem_question(3), enem_question(4)));
+        let letters = chapter.chars().filter(|c| !c.is_whitespace()).count() as u32;
+        assert!(s.longest_prose > letters && s.longest_prose < letters + 400, "{s:?}");
     }
 
     #[test]
@@ -280,6 +314,38 @@ mod tests {
         let text = format!("{}\n{}", enem_question(1), prose(3000));
         let c = classify(&text);
         assert!(!c.sure);
+    }
+
+    #[test]
+    fn a_handout_is_questions_and_a_chapter() {
+        let questions = |r: std::ops::RangeInclusive<u32>| r.map(enem_question).collect::<String>();
+        // As dense in questions as an exam, with a chapter in the middle: a handout, for sure.
+        let c = classify(&format!("{}{}{}", questions(1..=40), prose(4000), questions(41..=80)));
+        assert_eq!((c.kind, c.sure), (MaterialKind::Both, true));
+        // The same questions with a long text in the middle that is not a chapter yet: an exam.
+        let c = classify(&format!("{}{}{}", questions(1..=40), prose(2000), questions(41..=80)));
+        assert_eq!((c.kind, c.sure), (MaterialKind::Exam, true));
+        // An exam that opens with a formula sheet: the first question at 40% of the text.
+        let sheet = format!("{}{}", prose(250), questions(1..=12));
+        assert!((0.3..0.5).contains(&signals(&sheet).first_at), "{:?}", signals(&sheet));
+        assert_eq!(classify(&sheet).kind, MaterialKind::Exam);
+        // A short handout: under a chapter of text, the exercises at the end. Both, to check.
+        let c = classify(&format!("{}{}", prose(1500), questions(1..=5)));
+        assert_eq!((c.kind, c.sure), (MaterialKind::Both, false));
+    }
+
+    #[test]
+    fn a_few_lettered_lists_in_a_text_are_content() {
+        // Two runs of options, at the end of a text: an example, not exercises.
+        let c = classify(&format!("{}{}{}", prose(3000), enem_question(1), enem_question(2)));
+        assert_eq!((c.kind, c.sure), (MaterialKind::Content, false));
+        // Five in a book of 150 000 characters: lists that look like options.
+        let book: String = (1..=5).map(|n| format!("{}{}", prose(5500), enem_question(n))).collect();
+        let c = classify(&book);
+        assert_eq!((c.kind, c.sure, c.choice_questions), (MaterialKind::Content, false, 5));
+        // Thirty in the same book: a handout.
+        let book: String = (1..=30).map(|n| format!("{}{}", prose(900), enem_question(n))).collect::<String>() + &prose(4000);
+        assert_eq!(classify(&book).kind, MaterialKind::Both);
     }
 
     /// What the reader gets from an exam whose options it can't read: the headers and loose letters.

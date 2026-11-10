@@ -12,7 +12,7 @@ fn field(s: &str) -> String {
 
 fn main() {
     assert_eq!(field("a,\"b\".pdf"), "\"a,\"\"b\"\".pdf\"");
-    println!("file,label,choice_questions,sum_questions,headers,exam_words,chars,density,first_at,rule_kind,rule_sure");
+    println!("file,label,choice_questions,sum_questions,headers,exam_words,chars,density,first_at,longest_prose,rule_kind,rule_sure");
     for arg in std::env::args().skip(1) {
         let path = std::path::Path::new(&arg);
         let name = |p: Option<&std::ffi::OsStr>| p.map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
@@ -37,7 +37,7 @@ fn main() {
         let (s, c) = (signals(&text), classify(&text));
         let kind = serde_json::to_string(&c.kind).unwrap();
         println!(
-            "{},{},{},{},{},{},{},{},{},{},{}",
+            "{},{},{},{},{},{},{},{},{},{},{},{}",
             field(&name(path.file_name())),
             field(&name(path.parent().and_then(|p| p.file_name()))),
             s.choice_questions,
@@ -47,6 +47,7 @@ fn main() {
             s.chars,
             s.density,
             s.first_at,
+            s.longest_prose,
             kind.trim_matches('"'),
             c.sure
         );
