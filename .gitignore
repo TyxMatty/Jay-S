@@ -19,3 +19,6 @@ desktop.ini
 
 # Machine-local Cargo config (target-dir outside OneDrive)
 /.cargo/
+
+# Python (ml/)
+__pycache__/
