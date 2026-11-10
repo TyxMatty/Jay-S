@@ -58,6 +58,9 @@ fn main() {
                     for s in &r.sentences {
                         println!("  [{:?} {:?}] {}", s.status, s.sources, s.text);
                     }
+                    if let Some(c) = &r.code {
+                        println!("  CODE[{}]<<<\n{}\n>>>CODE", c.language, c.text);
+                    }
                 }
                 Err(e) => println!("\n> {q}\n  ERROR {e:?} time={:.1}s", t.elapsed().as_secs_f32()),
             }

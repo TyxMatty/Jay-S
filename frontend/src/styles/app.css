@@ -2888,6 +2888,42 @@ button.chat-chip:hover {
   font-weight: 600;
 }
 
+/* Code from Jay-AI: text to read and copy. It scrolls inside its own box, never the page. */
+.chat-code {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.chat-code-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.chat-code-lang {
+  color: var(--text-muted);
+  font: 700 12px/1 var(--font-mono);
+  text-transform: uppercase;
+}
+
+.chat-code pre {
+  margin: 0;
+  padding: var(--space-3);
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  font: 13px/1.5 var(--font-mono);
+  white-space: pre;
+  tab-size: 4;
+}
+
+.chat-code .hint {
+  margin: 0;
+}
+
 .chat-sources {
   padding-top: var(--space-3);
   border-top: 1px dashed var(--border);

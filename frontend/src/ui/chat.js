@@ -63,6 +63,33 @@ export function goTarget(r) {
   return r.kind === 'app' && typeof r.go === 'string' && Object.hasOwn(GO_LABELS, r.go) ? r.go : null;
 }
 
+const CODE_LANGUAGES = ['python', 'r', 'javascript', 'sql', 'c', 'java'];
+
+/** The code block of a general reply, or null: text only (through `h()`), copied to the clipboard only when the student clicks. */
+export function codeBlock(r) {
+  const c = r.code;
+  if (!c || typeof c !== 'object' || typeof c.text !== 'string' || !c.text) return null;
+  const copy = h('button', { type: 'button', class: 'btn btn-secondary chat-code-copy' }, t('Copy'));
+  copy.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(c.text);
+    } catch {
+      return;
+    }
+    copy.textContent = t('Copied');
+    setTimeout(() => (copy.textContent = t('Copy')), 1500);
+  });
+  // The label is ours: the page accepts only its own list, whatever a stored chat file says.
+  const language = CODE_LANGUAGES.includes(c.language) ? c.language : null;
+  return h(
+    'div',
+    { class: 'chat-code' },
+    h('div', { class: 'chat-code-bar' }, h('span', { class: 'chat-code-lang' }, language ?? ''), copy),
+    h('pre', {}, h('code', {}, c.text)),
+    h('p', { class: 'hint' }, t('Code written by Jay-AI, not tested: check it before using it.')),
+  );
+}
+
 function replyEl(r) {
   const { confirmed, badge, banner } = replyNotes(r);
   // From the sources or from the app's guide: both are checked against quotes.
@@ -80,6 +107,8 @@ function replyEl(r) {
     sources.querySelector(`[data-n="${n}"]`)?.focus();
   };
   if (r.sentences.length) parts.push(answerEl(r.sentences, showSource, r.list === true));
+  const code = codeBlock(r);
+  if (code) parts.push(code);
   const go = goTarget(r);
   if (go) parts.push(h('button', { type: 'button', class: 'btn btn-secondary chat-go', onClick: () => window.dispatchEvent(new CustomEvent('jay-s:go', { detail: go })) }, t('Open {section}', { section: t(GO_LABELS[go]) })));
   if (r.sources.length) {
