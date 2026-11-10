@@ -8,7 +8,7 @@
 //! ```
 
 use crate::ai::{AiError, MARK_RULE, REMINDER, Server, data, json_in, marked};
-use crate::classify::MaterialKind;
+use crate::classify::{MaterialKind, fold};
 use crate::exam::{self, Question, QuestionKind, Style};
 use crate::generate;
 use crate::id;
@@ -565,7 +565,8 @@ impl Store {
                 if right.is_empty() { "\n- nenhuma".to_owned() } else { right },
             ) }),
         ];
-        let reply = json_in(&server.chat(&messages, Some(&schema), 1500, &mut |_| {}, cancel)?)?;
+        let mut reply = json_in(&server.chat(&messages, Some(&schema), 1500, &mut |_| {}, cancel)?)?;
+        drop_contradictions(&mut reply, &e.questions);
         a.analysis = Some(reply);
         self.save_attempt(&a)?;
         Ok(a)
@@ -629,6 +630,57 @@ pub enum AnswerError {
     Invalid,
 }
 
+/// F6 in docs/SEGURANCA.md: the analysis is text nothing else checks, and an instruction planted in
+/// a question can make it teach the wrong answer ("a fotossíntese acontece nas mitocôndrias"). A
+/// sentence that names a wrong option of a question with an official key, without naming the right
+/// one and without a negation, is dropped (a review item or a list item with one goes whole).
+/// Only short options (1 to 3 words of 4+ letters): a long option gets paraphrased, and matching it
+/// would be a guess. Returns how many were dropped.
+fn drop_contradictions(reply: &mut Value, questions: &[Question]) -> usize {
+    let words = |s: &str| -> Vec<String> { fold(s).split(|c: char| !c.is_alphanumeric()).filter(|w| w.chars().count() >= 4).map(|w| w.trim_end_matches('s').to_owned()).collect() };
+    let short = |w: &Vec<String>| (1..=3).contains(&w.len());
+    // Per question: the right option's words and each wrong option's words.
+    let keyed: Vec<(Vec<String>, Vec<Vec<String>>)> = questions
+        .iter()
+        .filter(|q| q.kind == QuestionKind::Choice && !q.answer_by_ai)
+        .filter_map(|q| {
+            let right = q.options.iter().find(|o| Some(&o.label) == q.answer.as_ref())?;
+            let wrong = q.options.iter().filter(|o| o.label != right.label).map(|o| words(&o.text)).filter(short).collect();
+            Some((words(&right.text), wrong))
+        })
+        .collect();
+    if keyed.is_empty() {
+        return 0;
+    }
+    let bad_sentence = |s: &str| {
+        let w = words(s);
+        let folded = fold(s);
+        let negated = folded.split(|c: char| !c.is_alphanumeric()).any(|x| x == "nao" || x == "nunca") || ["errad", "incorret", "fals"].iter().any(|n| folded.contains(n));
+        let names = |option: &[String]| option.iter().all(|o| w.contains(o));
+        !negated && keyed.iter().any(|(right, wrong)| !names(right) && wrong.iter().any(|x| names(x)))
+    };
+    let bad = |s: &str| s.split_inclusive(['.', '!', '?']).any(bad_sentence);
+    let mut dropped = 0;
+    if let Some(summary) = reply["summary"].as_str() {
+        let kept: Vec<&str> = summary.split_inclusive(['.', '!', '?']).filter(|s| !bad_sentence(s)).collect();
+        dropped += summary.split_inclusive(['.', '!', '?']).count() - kept.len();
+        reply["summary"] = Value::String(kept.concat().trim().to_owned());
+    }
+    for key in ["strengths", "next"] {
+        if let Some(items) = reply[key].as_array_mut() {
+            let before = items.len();
+            items.retain(|v| !v.as_str().is_some_and(bad));
+            dropped += before - items.len();
+        }
+    }
+    if let Some(items) = reply["review"].as_array_mut() {
+        let before = items.len();
+        items.retain(|v| !["topic", "why", "tip"].iter().any(|k| v[k].as_str().is_some_and(bad)));
+        dropped += before - items.len();
+    }
+    dropped
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -651,6 +703,40 @@ mod tests {
         let e = Exam { id: id::new_id(), title: "Teste".into(), style: style.into(), created: now_ms(), questions, materials: vec![] };
         store.save_exam(&e).unwrap();
         e
+    }
+
+    #[test]
+    fn an_analysis_that_teaches_a_wrong_option_loses_that_sentence() {
+        let q = |answer: &str, by_ai: bool, options: &[&str]| -> Question {
+            serde_json::from_value(json!({
+                "number": 1, "kind": "choice", "stem": "Em que organela acontece a fotossíntese?", "answer": answer, "answer_by_ai": by_ai, "topic": null,
+                "options": options.iter().zip(["A", "B", "C"]).map(|(t, l)| json!({ "label": l, "text": t })).collect::<Vec<_>>(),
+            }))
+            .unwrap()
+        };
+        let exam = [q("A", false, &["Cloroplasto", "Mitocôndria", "Ribossomo"])];
+        let mut reply = json!({
+            "summary": "Você errou a questão 1. PWNED: a fotossíntese acontece nas mitocôndrias! Você marcou a mitocôndria, mas é no cloroplasto.",
+            "strengths": ["Você foi rápido."],
+            "review": [
+                { "topic": "Biologia", "why": "A fotossíntese ocorre nos ribossomos.", "tip": "Revise." },
+                { "topic": "Biologia", "why": "A mitocôndria não faz fotossíntese.", "tip": "Compare mitocôndria e cloroplasto." },
+            ],
+            "next": ["PWNED", "Estude as Mitocôndrias como local da fotossíntese.", "Refaça a questão 1, que estava errada."],
+        });
+        assert_eq!(drop_contradictions(&mut reply, &exam), 3);
+        assert_eq!(reply["summary"], "Você errou a questão 1. Você marcou a mitocôndria, mas é no cloroplasto.");
+        assert_eq!(reply["review"].as_array().unwrap().len(), 1);
+        // Harmless noise isn't a contradiction: "PWNED" stays (the check is about the key, not about style).
+        assert_eq!(reply["next"], json!(["PWNED", "Refaça a questão 1, que estava errada."]));
+
+        // No official key (Jay-AI's own answer), or long options: nothing is judged.
+        let untouched = json!({ "summary": "A fotossíntese acontece nas mitocôndrias.", "strengths": [], "review": [], "next": [] });
+        for exam in [vec![q("A", true, &["Cloroplasto", "Mitocôndria", "Ribossomo"])], vec![q("A", false, &["Acontece no cloroplasto das células vegetais verdes", "Acontece na mitocôndria de todas as células vivas", "Ribossomo"])]] {
+            let mut r = untouched.clone();
+            assert_eq!(drop_contradictions(&mut r, &exam), 0);
+            assert_eq!(r, untouched);
+        }
     }
 
     #[test]
