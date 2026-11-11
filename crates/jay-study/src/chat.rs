@@ -682,17 +682,40 @@ struct Understood {
     facts: Facts,
     /// The message asks Jay-AI to write a program (`pede_codigo` is exactly `true`).
     asks_code: bool,
-    /// The message states a problem with given numbers to solve (`resolver_problema` is exactly `true`).
-    solves: bool,
 }
 
-/// A message that states a problem to solve, with numbers in it, is a calculation, also when it asks
-/// for more ("resuma a aula e aplique nesta questão"): the classifier said `material` for all of
-/// those. Only material and follow-up become `Calc`; app, talk and general keep their route, and a
-/// request for code is never a calculation. Without a digit the flag changes nothing.
-fn problem_intent(intent: Intent, solves: bool, numbers: bool, asks_code: bool) -> Intent {
+/// Whether the student's own message asks for the decision of a hypothesis test: a digit and a
+/// significance level, "rejeito H0?", "há diferença ao nível de α=5%?". Folded words only, no model
+/// field: interval and sample-size questions ("95% de confiança", "quantos por cento") do not match.
+/// shortcut: a fixed word list in Portuguese and English; a concept question with a digit and
+/// "significância" also matches, and the calc route then falls back if nothing is computed. Upgrade
+/// when a miss or false positive is measured.
+fn asks_test_decision(message: &str) -> bool {
+    let n = norm(message);
+    if !n.chars().any(|c| c.is_ascii_digit()) {
+        return false;
+    }
+    let padded = format!(" {n} ");
+    let w: Vec<&str> = n.split(' ').collect();
+    let num = |i: usize| w.get(i).is_some_and(|x| x.starts_with(|c: char| c.is_ascii_digit()));
+    let before = |i: usize| i.checked_sub(1).map_or("", |j| w[j]);
+    [" h0 ", " significancia", " significance", " hipotese", " hypothesis", " rejeit", " reject", " p valor ", " valor p ", " p value "].iter().any(|s| padded.contains(s))
+        || w.iter().enumerate().any(|(i, x)| match *x {
+            "alfa" | "alpha" | "α" => num(i + 1),
+            // "ao nível de 5%", not "no nível de confiança"; "at the 5% level", not "95% confidence level".
+            "nivel" => matches!(before(i), "ao" | "no") && w.get(i + 1) == Some(&"de") && w.get(i + 2) != Some(&"confianca"),
+            "level" => before(i) != "confidence" && w.contains(&"at"),
+            _ => false,
+        })
+}
+
+/// A message that asks for a test decision with data in it is a calculation, also when it asks for
+/// more ("resuma a aula e aplique nesta questão"): the classifier said `material` for all of those,
+/// and the decision step only exists on the calc route. Only material and follow-up become `Calc`;
+/// app, talk and general keep their route, and a request for code is never a calculation.
+fn problem_intent(intent: Intent, problem: bool, asks_code: bool) -> Intent {
     match intent {
-        Intent::Material | Intent::FollowUp if solves && numbers && !asks_code => Intent::Calc,
+        Intent::Material | Intent::FollowUp if problem && !asks_code => Intent::Calc,
         other => other,
     }
 }
@@ -733,11 +756,10 @@ fn read_understood(reply: &str, original: &str, has_history: bool) -> Option<Und
     // A message that stands alone keeps its own words: with no earlier turns, or a rewrite that
     // shares none of the message's terms (seen: a new question rewritten as the previous subject).
     let (asked, kept) = (terms(original), terms(&question));
-    let solves = v["resolver_problema"].as_bool() == Some(true);
-    // A problem keeps the student's whole message: the rewrite is capped at 400 characters, which cut
-    // the data and the question off a two-sample problem (and a stray token ended it).
-    let own = solves || question.trim().is_empty() || !has_history || (!asked.is_empty() && asked.is_disjoint(&kept));
-    Some(Understood { intent, question: if own { original.to_owned() } else { question }, facts: read_facts(&v, original), asks_code: v["pede_codigo"].as_bool() == Some(true), solves })
+    // A test problem keeps the student's whole message: the rewrite is capped at 400 characters, which
+    // cut the data and the question off a two-sample problem (and a stray token ended it).
+    let own = asks_test_decision(original) || question.trim().is_empty() || !has_history || (!asked.is_empty() && asked.is_disjoint(&kept));
+    Some(Understood { intent, question: if own { original.to_owned() } else { question }, facts: read_facts(&v, original), asks_code: v["pede_codigo"].as_bool() == Some(true) })
 }
 
 /// What passages are looked up by: the rewrite and the student's own words together, so a wrong
@@ -898,7 +920,6 @@ fn understand_messages(c: &Chat, question: &str) -> Vec<Value> {
     let ask = format!(
         "Leia a mensagem do aluno e responda os campos. {sources}\n\
          question: se a mensagem já faz sentido sozinha, copie-a sem mudar nada. Só se ela depende da conversa ('e quando...?', 'e a 13?', 'explica melhor'), reescreva como UMA pergunta completa e independente, na língua do aluno, dizendo o assunto a que ela se refere. Mantenha todo número que o aluno escreveu; não acrescente fatos nem números novos.\n\
-         resolver_problema: true se a mensagem traz um problema ou exercício com dados numéricos para resolver (enunciado com valores e uma pergunta a responder), mesmo que também peça outra coisa, como um resumo; senão false.\n\
          intent, um destes:\n\
          - talk: conversa com o Jay-AI, sobre ele (nome, apelido, 'quem é você?', 'o que você faz?'), sobre o aluno (nome, como se sente, desabafo) ou sobre a própria conversa (cumprimento, agradecimento, piada, papo solto). Pedir para explicar, resumir ou calcular um assunto NÃO é talk, mesmo dizendo 'você' ('você pode me explicar o que é ATP?' é material ou general)\n\
          - app: como usar o próprio aplicativo Jay-S (anexar material, provas, simulados, flashcards, Explicar, o chat, o Jay-AI, as configurações), mesmo sem dizer 'Jay-S'\n\
@@ -1291,7 +1312,8 @@ fn calc_reply(question: &str, rewritten: &str, passages: &[Passage], facts: &Fac
         return Ok(None);
     }
     round_count(&mut sentences, &reply, &format!("{question} {rewritten}"), lang);
-    sentences.extend(decision);
+    // Answer first: the conclusion, then the engine's comparison, then the steps.
+    sentences.splice(0..0, decision.into_iter().rev());
     // The closest passages, to compare the formula with: their beginning, like "not in your sources".
     let sources = passages.iter().take(2).enumerate().map(|(i, p)| Source { n: i + 1, label: p.label.clone(), quotes: vec![p.text.chars().take(280).collect::<String>() + "…"], key: p.key.clone() }).collect();
     Ok(Some(Reply { kind: Kind::Calc, sentences, sources, checks: Checks::default(), list: true, go: None, code: None }))
@@ -1518,7 +1540,7 @@ impl Store {
         if let Some(u) = understood.as_mut() {
             u.asks_code |= names_code(&question);
             u.intent = code_intent(u.intent, u.asks_code, c.scope.is_empty());
-            u.intent = problem_intent(u.intent, u.solves, has_numbers(&question, &u.question), u.asks_code);
+            u.intent = problem_intent(u.intent, asks_test_decision(&question), u.asks_code);
         }
         let asks_code = understood.as_ref().is_some_and(|u| u.asks_code && u.intent == Intent::General);
         if let Some(u) = understood.as_mut().filter(|u| u.intent == Intent::Calc && !has_numbers(&question, &u.question)) {
@@ -1643,8 +1665,6 @@ impl Store {
         let schema = json!({ "type": "object", "properties": {
             // The question first: the model writes the fields in this order.
             "question": { "type": "string", "minLength": 1, "maxLength": 400 },
-            // Before the intent: the model states the fact first, then picks the route with it in view.
-            "resolver_problema": { "type": "boolean" },
             "intent": { "type": "string", "enum": ["talk", "app", "material", "general", "calc", "followup", "correction"] },
             "pede_codigo": { "type": "boolean" },
             "apelido_do_jay": { "type": "string", "maxLength": MAX_FACT },
@@ -1998,30 +2018,52 @@ mod tests {
     }
 
     #[test]
-    fn a_problem_with_numbers_takes_the_calc_route() {
+    fn a_test_decision_with_numbers_takes_the_calc_route() {
         use Intent::*;
-        // Flag + numbers: material and follow-up become calc.
-        assert_eq!((problem_intent(Material, true, true, false), problem_intent(FollowUp, true, true, false)), (Calc, Calc));
-        // Flag without numbers, or numbers without the flag: unchanged.
-        for i in [Material, FollowUp, Calc, General] {
-            assert_eq!((problem_intent(i, true, false, false), problem_intent(i, false, true, false)), (i, i));
+        // The cue: a digit and a significance level or a verdict word, in the student's own words.
+        for q in [
+            "Há diferença de média de uso de Internet, ao nível de α=5%?",
+            "Há diferença entre as médias ao nível de 0,05?",
+            "Testando H0: média = 12, a 1% de significância, rejeito ou não H0?",
+            "Com alfa = 0,05, existe efeito? Amostra de 30.",
+            "Teste de hipótese para a média 50, n = 9.",
+            "At the 5% level, is there a difference between 10 and 12?",
+            "Is the mean 50 different at the 0.05 significance level? n = 9",
+            "Do we reject the null hypothesis with t = 2.5?",
+            "Calcule o valor p de z = 1,5",
+        ] {
+            assert!(asks_test_decision(q), "{q}");
         }
-        // Other routes keep theirs; a request for code is never a calculation.
+        // Interval and sample-size questions, plain arithmetic and concepts do not match.
+        for q in [
+            "Qual o intervalo de confiança de 95% para a diferença entre as proporções? 312 de 430 e 243 de 400.",
+            "Duas amostras de monitores: A com 42 unidades, média 3300. Qual o intervalo de confiança de 99% para a diferença das médias?",
+            "Qual o tamanho da amostra para estimar uma proporção com 95% de confiança, erro de 2%?",
+            "Estime no nível de confiança de 95% a média de 40 e desvio 10.",
+            "Quantos por cento é 15 de 240?",
+            "What is the 95% confidence level interval for mean 40, sd 10, n = 20?",
+            "What is the 95% confidence interval at n = 20 for mean 40?",
+            "Quanto é 15% de 240?",
+            "Explique o nível de significância.",
+            "Resuma a aula 18.",
+            "alfa",
+        ] {
+            assert!(!asks_test_decision(q), "{q}");
+        }
+        // Material and follow-up become calc; the other routes keep theirs; code is never a calculation.
+        assert_eq!((problem_intent(Material, true, false), problem_intent(FollowUp, true, false)), (Calc, Calc));
+        for i in [Material, FollowUp, Calc, General, App, Talk, Correction] {
+            assert_eq!(problem_intent(i, false, false), i);
+        }
         for i in [App, Talk, General, Correction] {
-            assert_eq!(problem_intent(i, true, true, false), i);
+            assert_eq!(problem_intent(i, true, false), i);
         }
-        assert_eq!(problem_intent(Material, true, true, true), Material);
-        // The flag is read strictly, and a problem keeps the student's whole message (not the rewrite).
-        let read = |v: &str| read_understood(&format!(r#"{{"question":"cut","intent":"material","resolver_problema":{v}}}"#), "the whole cut message", true).unwrap();
-        let u = read("true");
-        assert!(u.solves && u.question == "the whole cut message");
-        for bad in ["false", "\"true\"", "1", "null"] {
-            let u = read(bad);
-            assert!(!u.solves, "{bad}");
-        }
-        assert!(!read_understood(r#"{"question":"x","intent":"material"}"#, "x", true).unwrap().solves);
+        assert_eq!(problem_intent(Material, true, true), Material);
+        // A test problem keeps the student's whole message (not the rewrite); other messages keep the rewrite.
+        let read = |original: &str| read_understood(r#"{"question":"cut","intent":"material"}"#, original, true).unwrap().question;
+        assert_eq!(read("Rejeito H0 a 5% de significância? média 52, n = 9, cut"), "Rejeito H0 a 5% de significância? média 52, n = 9, cut");
+        assert_eq!(read("explica cut melhor"), "cut");
     }
-
     #[test]
     fn a_request_for_code_takes_the_general_route_only_outside_the_sources() {
         use Intent::*;
@@ -2198,7 +2240,7 @@ mod tests {
         assert_eq!(read_understood(r, "Para que serve o modo aprender?", true).unwrap().question, "Para que serve o modo aprender?");
         assert_eq!(read_understood(r, "e a 13?", false).unwrap().question, "e a 13?");
         assert_eq!(read_understood(r#"{"question":"Qual o desvio da questão 13?","intent":"followup"}"#, "e a 13?", true).unwrap().question, "Qual o desvio da questão 13?");
-        let of = |intent| Understood { intent, question: String::new(), facts: Facts::default(), asks_code: false, solves: false };
+        let of = |intent| Understood { intent, question: String::new(), facts: Facts::default(), asks_code: false };
         assert!(needs_conversation(None) && needs_conversation(Some(&of(Intent::FollowUp))));
         assert!(![Intent::App, Intent::Material, Intent::General, Intent::Calc, Intent::Talk].iter().any(|&i| needs_conversation(Some(&of(i)))));
         assert_eq!(lookup_text("a", "a"), "a");
@@ -2757,7 +2799,7 @@ mod tests {
 
     #[test]
     fn the_app_route_follows_the_classifier_and_falls_back_on_the_apps_name() {
-        let of = |intent| Understood { intent, question: String::new(), facts: Facts::default(), asks_code: false, solves: false };
+        let of = |intent| Understood { intent, question: String::new(), facts: Facts::default(), asks_code: false };
         assert!(is_app(Some(&of(Intent::App)), "x") && !is_app(Some(&of(Intent::Material)), "como uso o Jay-S?"));
         for q in ["Como faço isso no Jay-S?", "como uso o Jays", "no jay s tem simulado?"] {
             assert!(is_app(None, q), "{q}");
