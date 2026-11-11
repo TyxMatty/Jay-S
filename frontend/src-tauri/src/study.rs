@@ -157,6 +157,27 @@ pub fn exam_build(app: AppHandle, plan: BuildPlan) -> Result<(), Failure> {
 }
 
 #[tauri::command]
+pub fn catalog_list(library: State<Library>) -> Vec<jay_study::catalog::CatalogItem> {
+    library.store.catalog()
+}
+
+/// Gets a ready-made exam: the page sends a catalogue id and nothing else (the address, the checks
+/// and the key are in Rust). Runs as the one job; `job_cancel` stops it; the exam's id comes back in
+/// the `Done` event.
+#[tauri::command]
+pub fn catalog_get(app: AppHandle, id: String) -> Result<(), Failure> {
+    spawn_job(&app, "catalog", move |app| {
+        let library = app.state::<Library>();
+        let cancel = app.state::<Ai>().download_cancel();
+        let mut progress = |done, total| emit_job(app, JobEvent::Progress { kind: "catalog", step: BuildStep::Downloading { done, total } });
+        emit_job(app, match library.store.get_ready_made(&id, &mut progress, &cancel).map_err(Failure::from) {
+            Ok(exam) => JobEvent::Done { kind: "catalog", id: exam },
+            Err(error) => JobEvent::Error { kind: "catalog", id: None, error },
+        });
+    })
+}
+
+#[tauri::command]
 pub fn exams_list(library: State<Library>) -> Vec<ExamSummary> {
     library.store.exams()
 }
@@ -275,7 +296,7 @@ pub fn attempts_list(library: State<Library>) -> Vec<AttemptSummary> {
         .into_iter()
         .map(|a| AttemptSummary {
             points: a.result.as_ref().map(|r| r.points),
-            total: a.answers.len(),
+            total: a.result.as_ref().map_or(a.answers.len(), |r| r.total as usize),
             answered: a.answers.iter().filter(|x| x.is_some()).count(),
             analyzed: a.analysis.is_some(),
             id: a.id,

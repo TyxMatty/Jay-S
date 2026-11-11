@@ -52,11 +52,13 @@ pub struct OpenQuestion {
     pub stem: String,
     pub options: Vec<exam::QOption>,
     pub topic: Option<String>,
+    pub annulled: bool,
+    pub void: u32,
 }
 
 impl From<&Question> for OpenQuestion {
     fn from(q: &Question) -> Self {
-        Self { number: q.number, kind: q.kind, passage: q.passage.clone(), stem: q.stem.clone(), options: q.options.clone(), topic: q.topic.clone() }
+        Self { number: q.number, kind: q.kind, passage: q.passage.clone(), stem: q.stem.clone(), options: q.options.clone(), topic: q.topic.clone(), annulled: q.annulled, void: q.void }
     }
 }
 
@@ -77,6 +79,9 @@ pub struct Graded {
     pub points: f32,
     pub explanation: Option<String>,
     pub topic: Option<String>,
+    /// Annulled by the board: no points, and it is out of every total.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub annulled: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -136,6 +141,8 @@ impl Profile {
 #[serde(tag = "step", rename_all = "lowercase")]
 pub enum BuildStep {
     Reading,
+    /// A ready-made exam coming down (bytes).
+    Downloading { done: u64, total: u64 },
     Solving { done: usize, total: usize },
     Tagging,
     Writing { done: usize, total: usize },
@@ -255,14 +262,13 @@ impl Store {
 
     /// The questions of an exam material, with its key's answers when one is given.
     pub fn material_questions(&self, material: &str, key: Option<&str>) -> Result<Vec<Question>, StoreError> {
-        let mut questions = exam::split_questions(&self.text(material, usize::MAX)?);
+        let text = self.text(material, usize::MAX)?;
+        let mut questions = exam::split_questions(&text);
         for q in &mut questions {
             q.source = Some(exam::Source { material: material.to_owned(), number: Some(q.number) });
         }
         if let Some(key) = key {
-            if let Some(parsed) = exam::parse_answer_key(&self.text(key, usize::MAX)?) {
-                exam::apply_answer_key(&mut questions, &parsed);
-            }
+            exam::apply_key(&mut questions, &self.text(key, usize::MAX)?, &text);
         }
         Ok(questions)
     }
@@ -274,7 +280,8 @@ impl Store {
     /// whose file name shares more with the exam's wins; a tie picks none (Jay-AI answers instead).
     pub fn best_key(&self, material: &str) -> Option<String> {
         let exam_name = self.material(material).ok()?.name;
-        let questions = exam::split_questions(&self.text(material, usize::MAX).ok()?);
+        let text = self.text(material, usize::MAX).ok()?;
+        let questions = exam::split_questions(&text);
         if questions.is_empty() {
             return None;
         }
@@ -283,9 +290,9 @@ impl Store {
             .into_iter()
             .filter(|m| m.kind == MaterialKind::Key && !years_differ(&exam_name, &m.name))
             .filter_map(|m| {
-                let key = exam::parse_answer_key(&self.text(&m.id, usize::MAX).ok()?)?;
+                let key = self.text(&m.id, usize::MAX).ok()?;
                 let mut probe = questions.clone();
-                let answered = exam::apply_answer_key(&mut probe, &key);
+                let answered = exam::apply_key(&mut probe, &key, &text);
                 (answered * 5 >= questions.len() * 4).then(|| (shared_name_tokens(&exam_name, &m.name), m.id))
             })
             .collect();
@@ -324,7 +331,7 @@ impl Store {
             chosen.sort();
             questions = chosen.into_iter().map(|i| all[i].clone()).collect();
             if let Some(server) = server {
-                let missing: Vec<usize> = (0..questions.len()).filter(|&i| questions[i].answer.is_none()).collect();
+                let missing: Vec<usize> = (0..questions.len()).filter(|&i| questions[i].answer.is_none() && !questions[i].annulled).collect();
                 for (done, &i) in missing.iter().enumerate() {
                     progress(BuildStep::Solving { done, total: missing.len() });
                     if cancel.load(Ordering::Relaxed) {
@@ -351,7 +358,7 @@ impl Store {
                 }
             }
             // A question nobody could answer can't be graded.
-            questions.retain(|q| q.answer.is_some());
+            questions.retain(|q| q.answer.is_some() || q.annulled);
         }
         if plan.new > 0 {
             let server = server.ok_or(AiError::NotInstalled)?;
@@ -482,7 +489,7 @@ impl Store {
         let sc = scoring(&e);
         let questions: Vec<Graded> = e.questions.iter().enumerate().map(|(i, q)| graded(q, a.answers.get(i).unwrap_or(&None), sc)).collect();
         let mut topics: BTreeMap<String, (f32, u32)> = BTreeMap::new();
-        for g in &questions {
+        for g in questions.iter().filter(|g| !g.annulled) {
             let entry = topics.entry(g.topic.clone().unwrap_or_else(|| "—".into())).or_default();
             entry.0 += g.points;
             entry.1 += 1;
@@ -495,7 +502,7 @@ impl Store {
         }
         a.result = Some(AttemptResult {
             points: questions.iter().map(|g| g.points).sum(),
-            total: questions.len() as u32,
+            total: questions.iter().filter(|g| !g.annulled).count() as u32,
             topics: topics.into_iter().map(|(topic, (points, total))| TopicScore { topic, points, total }).collect(),
             questions,
         });
@@ -514,6 +521,9 @@ impl Store {
         let mut wrong = String::new();
         let mut right = String::new();
         for (i, (g, q)) in result.questions.iter().zip(&e.questions).enumerate() {
+            if g.annulled {
+                continue;
+            }
             if g.points >= 1.0 {
                 right.push_str(&format!("\n- Questão {} ({}): {}", i + 1, g.topic.as_deref().unwrap_or("sem tema"), q.stem.chars().take(160).collect::<String>()));
             }
@@ -569,7 +579,7 @@ impl Store {
         let mut reply = json_in(&server.chat(&messages, Some(&schema), 1500, &mut |_| {}, cancel)?)?;
         drop_contradictions(&mut reply, &e.questions);
         if !result.questions.iter().any(|g| g.points >= 1.0) {
-            no_hits(&mut reply, result.questions.iter().filter(|g| g.marked.is_none()).count(), result.questions.len());
+            no_hits(&mut reply, result.questions.iter().filter(|g| !g.annulled && g.marked.is_none()).count(), result.total as usize);
         }
         a.analysis = Some(reply);
         self.save_attempt(&a)?;
@@ -616,11 +626,15 @@ pub fn grade_one(q: &Question, marked: &Option<String>, style: &str) -> Graded {
 }
 
 fn graded(q: &Question, marked: &Option<String>, scoring: exam::Scoring) -> Graded {
+    // Annulled propositions leave both the official sum and the student's marks: marking one neither
+    // helps nor hurts. Marking only those leaves 0, which grades as a blank.
+    let unvoid = |s: &str| if q.void == 0 { s.to_owned() } else { s.trim().parse::<u32>().map_or_else(|_| s.to_owned(), |v| (v & !q.void).to_string()) };
     let points = match (&q.answer, marked) {
-        (Some(answer), Some(m)) => exam::grade(q.kind, if q.kind == QuestionKind::Choice { exam::Scoring::Single } else { scoring }, answer, m),
+        _ if q.annulled => 0.0,
+        (Some(answer), Some(m)) => exam::grade(q.kind, if q.kind == QuestionKind::Choice { exam::Scoring::Single } else { scoring }, &unvoid(answer), &unvoid(m)),
         _ => 0.0,
     };
-    Graded { marked: marked.clone(), answer: q.answer.clone(), answer_by_ai: q.answer_by_ai, points, explanation: q.explanation.clone(), topic: q.topic.clone() }
+    Graded { marked: marked.clone(), answer: q.answer.clone(), answer_by_ai: q.answer_by_ai, points, explanation: q.explanation.clone(), topic: q.topic.clone(), annulled: q.annulled }
 }
 
 #[derive(Debug)]
@@ -640,7 +654,7 @@ fn without_false_praise(mut a: Attempt) -> Attempt {
         && !result.questions.iter().any(|g| g.points >= 1.0)
         && analysis["strengths"].as_array().is_some_and(|s| !s.is_empty())
     {
-        no_hits(analysis, result.questions.iter().filter(|g| g.marked.is_none()).count(), result.questions.len());
+        no_hits(analysis, result.questions.iter().filter(|g| !g.annulled && g.marked.is_none()).count(), result.total as usize);
     }
     a
 }
@@ -723,7 +737,7 @@ mod tests {
             QuestionKind::Choice => "ABCDE".chars().map(|c| QOption { label: c.to_string(), text: format!("opção {c}") }).collect(),
             QuestionKind::Sum => [1, 2, 4, 8, 16].iter().map(|n| QOption { label: format!("{n:02}"), text: format!("proposição {n}") }).collect(),
         };
-        Question { number: 1, kind, passage: None, stem: "?".into(), options, answer: Some(answer.into()), answer_by_ai: false, topic: Some(topic.into()), explanation: Some("porque sim".into()), source: Some(Source { material: "m".into(), number: Some(1) }) }
+        Question { number: 1, kind, passage: None, stem: "?".into(), options, answer: Some(answer.into()), answer_by_ai: false, topic: Some(topic.into()), explanation: Some("porque sim".into()), source: Some(Source { material: "m".into(), number: Some(1) }), annulled: false, void: 0 }
     }
 
     fn exam_in(store: &Store, style: &str, questions: Vec<Question>) -> Exam {
@@ -792,6 +806,42 @@ mod tests {
         assert_eq!(done.times, [1000, 2500]);
         assert!(matches!(store.answer(&a.id, 0, Some("A".into()), 1), Err(AnswerError::Finished)));
         assert_eq!(store.profile().topics["Bio"], (1.0, 1));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn annulled_questions_and_propositions_are_left_out_of_the_grade() {
+        let sum = |answer: &str, void: u32| Question { options: (0..5).map(|i| QOption { label: format!("{:02}", 1 << i), text: "x".into() }).collect(), void, ..question(QuestionKind::Sum, answer, "Fis") };
+        let pts = |q: &Question, marked: &str, style: &str| grade_one(q, &Some(marked.into()), style).points;
+        // Física 38: answer 30, proposition 01 annulled. 31 grades like 30; 01 alone is a blank (0, never negative).
+        let f38 = sum("30", 1);
+        assert_eq!((pts(&f38, "31", "uepg"), pts(&f38, "30", "uepg"), pts(&f38, "01", "uepg")), (1.0, 1.0, 0.0));
+        assert_eq!(pts(&f38, "29", "uepg"), 0.75, "03 true propositions of 4 marked");
+        // Física 40: answer 12, true 04 and 08. 13 is 12; 05 is half.
+        let f40 = sum("12", 1);
+        assert_eq!((pts(&f40, "13", "uepg"), pts(&f40, "05", "uepg")), (1.0, 0.5));
+        assert_eq!(pts(&f40, "14", "uepg"), 0.0, "02 is still wrong");
+        // Exact scoring: the same masking.
+        let exact = |m: &str| graded(&f40, &Some(m.into()), exam::Scoring::SumExact).points;
+        assert_eq!((exact("13"), exact("05"), exact("12")), (1.0, 0.0, 1.0));
+        // An annulled question: shown, no points, out of every total.
+        let (store, root) = temp_store();
+        let mut gone = question(QuestionKind::Choice, "C", "Bio");
+        gone.annulled = true;
+        gone.answer = None;
+        let e = exam_in(&store, "enem", vec![question(QuestionKind::Choice, "C", "Bio"), gone, question(QuestionKind::Choice, "A", "Hist")]);
+        let (a, _) = store.start_attempt(&e.id, Mode::Exam, None).unwrap();
+        store.answer(&a.id, 0, Some("C".into()), 1).unwrap();
+        store.answer(&a.id, 1, Some("C".into()), 1).unwrap();
+        let r = store.finish_attempt(&a.id).unwrap().result.unwrap();
+        assert_eq!((r.points, r.total), (1.0, 2));
+        assert!(r.questions[1].annulled && r.questions[1].points == 0.0);
+        assert_eq!(r.topics.iter().map(|t| (t.topic.as_str(), t.total)).collect::<Vec<_>>(), [("Bio", 1), ("Hist", 1)]);
+        assert_eq!(store.profile().topics["Bio"], (1.0, 1));
+        // Exams and attempts saved before these fields existed load unchanged.
+        let old: Question = serde_json::from_str(r#"{"number":1,"kind":"sum","stem":"?","options":[],"answer":"21"}"#).unwrap();
+        assert!(!old.annulled && old.void == 0);
+        assert!(!serde_json::to_string(&old).unwrap().contains("void"));
         std::fs::remove_dir_all(root).unwrap();
     }
 

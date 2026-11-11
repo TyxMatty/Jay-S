@@ -83,6 +83,8 @@ fn main() {
             study::styles_list,
             study::exam_material_info,
             study::exam_build,
+            study::catalog_list,
+            study::catalog_get,
             study::exams_list,
             study::exam_delete,
             study::attempt_start,

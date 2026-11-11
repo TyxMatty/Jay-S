@@ -55,7 +55,7 @@ export function createRunner(started, onFinished, onLeave) {
     nav.replaceChildren(
       ...questions.map((q, i) => {
         const g = graded[i];
-        const state = g ? (g.points >= 1 ? 'right' : g.points > 0 ? 'partial' : 'wrong') : answers[i] != null ? 'answered' : 'open';
+        const state = q.annulled ? 'open' : g ? (g.points >= 1 ? 'right' : g.points > 0 ? 'partial' : 'wrong') : answers[i] != null ? 'answered' : 'open';
         return h('button', { type: 'button', role: 'listitem', class: 'runner-dot', 'data-state': state, 'aria-current': i === current ? 'true' : null, 'aria-label': t('Question {n}', { n: i + 1 }), onClick: () => go(i) }, String(i + 1));
       }),
     );
@@ -82,7 +82,7 @@ export function createRunner(started, onFinished, onLeave) {
   }
 
   function feedback(q, g) {
-    if (!g) return null;
+    if (!g || g.annulled) return null;
     const right = g.points >= 1;
     return h(
       'div',
@@ -101,6 +101,7 @@ export function createRunner(started, onFinished, onLeave) {
     const g = graded[current];
     const locked = learn && g != null;
     const header = h('p', { class: 'runner-meta' }, t('Question {n} of {total}', { n: current + 1, total: questions.length }), q.topic ? ` · ${q.topic}` : '');
+    const annulled = q.annulled ? h('p', { class: 'hint' }, t('Annulled by the university: it does not count in the score.')) : '';
     const passage = q.passage ? h('blockquote', { class: 'runner-passage' }, q.passage) : null;
     const stem = h('p', { class: 'runner-stem' }, q.stem);
     let options;
@@ -150,8 +151,9 @@ export function createRunner(started, onFinished, onLeave) {
             if (learn) pending = chosen.size ? String(sumOf(chosen)).padStart(2, '0') : null;
             if (!learn) save(current, chosen.size ? String(sumOf(chosen)).padStart(2, '0') : null);
           });
-          const mark = g && ((right & v) && (Number(g.marked) & v) ? 'right' : right & v ? 'missed' : Number(g.marked) & v ? 'wrong' : null);
-          return h('label', { class: 'runner-option', 'data-mark': mark }, input, h('span', { class: 'runner-label' }, o.label), h('span', {}, o.text));
+          const void_ = (q.void & v) !== 0;
+          const mark = g && !g.annulled && !void_ && ((right & v) && (Number(g.marked) & v) ? 'right' : right & v ? 'missed' : Number(g.marked) & v ? 'wrong' : null);
+          return h('label', { class: 'runner-option', 'data-mark': mark }, input, h('span', { class: 'runner-label' }, o.label), h('span', {}, o.text), void_ ? h('span', { class: 'badge', 'data-status': 'check' }, t('Annulled')) : '');
         }),
       );
       showSum();
@@ -164,7 +166,7 @@ export function createRunner(started, onFinished, onLeave) {
         } }, t('Check'));
       }
     }
-    body.replaceChildren(header, passage ?? '', stem, options, confirm ?? '', feedback(q, g) ?? '');
+    body.replaceChildren(header, annulled, passage ?? '', stem, options, confirm ?? '', feedback(q, g) ?? '');
     prev.disabled = current === 0;
     next.disabled = current === questions.length - 1;
     renderNav();
@@ -183,7 +185,7 @@ export function createRunner(started, onFinished, onLeave) {
   async function end(timeUp) {
     if (finished) return;
     await keepPending();
-    const open = answers.filter((a) => a == null).length;
+    const open = answers.filter((a, i) => a == null && !questions[i].annulled).length;
     if (!timeUp && open && !confirm(t('{n} questions are still blank. Finish anyway?', { n: open }))) return;
     finished = true;
     clearInterval(tick);
@@ -296,15 +298,16 @@ export function createResult(attempt, questions, { onBack }) {
     { class: 'review-list' },
     r.questions.map((g, i) => {
       const q = questions[i];
-      const tone = g.points >= 1 ? 'right' : g.points > 0 ? 'partial' : 'wrong';
+      const tone = g.annulled ? 'annulled' : g.points >= 1 ? 'right' : g.points > 0 ? 'partial' : 'wrong';
       return h(
         'li',
         { 'data-tone': tone },
         h('details', {},
-          h('summary', {}, h('span', { class: 'review-mark' }, tone === 'right' ? '✓' : tone === 'partial' ? '½' : '✗'), ' ', (q?.stem ?? '').slice(0, 140)),
+          h('summary', {}, h('span', { class: 'review-mark' }, tone === 'right' ? '✓' : tone === 'partial' ? '½' : tone === 'annulled' ? '–' : '✗'), ' ', (q?.stem ?? '').slice(0, 140)),
+          g.annulled ? h('p', { class: 'hint' }, t('Annulled by the university: it does not count in the score.')) : '',
           q?.passage ? h('blockquote', { class: 'runner-passage' }, q.passage) : '',
           q ? h('p', {}, q.stem) : '',
-          q ? h('ul', { class: 'review-options' }, q.options.map((o) => h('li', {}, h('strong', {}, o.label), ' ', o.text))) : '',
+          q ? h('ul', { class: 'review-options' }, q.options.map((o) => h('li', {}, h('strong', {}, o.label), ' ', o.text, (q.void & Number(o.label)) ? [' ', h('span', { class: 'badge', 'data-status': 'check' }, t('Annulled'))] : ''))) : '',
           h('p', {}, t('You marked: {marked}', { marked: g.marked ?? t('blank') }), ' · ', t('Answer: {answer}', { answer: g.answer ?? '?' }), g.answer_by_ai ? h('span', { class: 'badge', 'data-status': 'check' }, t('answer by Jay-AI')) : ''),
           g.explanation ? h('p', { class: 'hint' }, g.explanation) : '',
         ),

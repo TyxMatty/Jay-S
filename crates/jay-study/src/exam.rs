@@ -50,6 +50,20 @@ pub struct Question {
     /// Where it came from: the material id and, for a reused question, its number there.
     #[serde(default)]
     pub source: Option<Source>,
+    /// Annulled by the board: shown, but not graded and out of the total.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub annulled: bool,
+    /// Sum questions: the annulled propositions as a bitmask (0 = none). They are ignored in grading.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub void: u32,
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
+fn is_zero(n: &u32) -> bool {
+    *n == 0
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -180,6 +194,8 @@ impl Draft {
             topic: None,
             explanation: None,
             source: None,
+            annulled: false,
+            void: 0,
         })
     }
 
@@ -422,9 +438,7 @@ fn two_digits(s: &str) -> Option<u32> {
 /// These files often hold several exams, each counting from 1 again, and three foreign languages
 /// under the same numbers. Nothing here says which one the student's exam is, so a number answered in
 /// two different ways gets no answer at all: a missing answer goes to Jay-AI, a wrong one would grade
-/// the student wrongly.
-/// shortcut: a key of several exams is recognized but answers little, upgrade by matching each
-/// block's heading to the exam when students attach such keys.
+/// the student wrongly. (UEPG's edital, whose tables have headings, is `parse_edital`'s.)
 fn parse_sum_key(text: &str) -> Option<BTreeMap<u32, Vec<String>>> {
     let lines: Vec<Vec<&str>> = text.split(['\n', '\x0c']).map(|l| l.split_whitespace().collect::<Vec<_>>()).filter(|l| !l.is_empty()).collect();
     let size = |line: &[&str]| line.iter().map(|t| t.len()).sum::<usize>();
@@ -477,11 +491,179 @@ fn parse_sum_key(text: &str) -> Option<BTreeMap<u32, Vec<String>>> {
     Some(answers.into_iter().filter_map(|(q, a)| Some((q, vec![format!("{:02}", a?)]))).collect())
 }
 
+/// A row of an edital: `(sum, annulled propositions)`; a sum of `None` is an annulled question.
+type EditalRow = (Option<u32>, u32);
+
+/// One group of tables in UEPG's edital, which holds the keys of several exams under headings and
+/// counts from 01 in each: a subject and the groups that have it, or a language.
+struct EditalBlock {
+    /// The folded last word of the subject ("portuguesa"), "ingles" or "espanhol", or "" (the
+    /// Conhecimentos Gerais questions 01–55).
+    name: String,
+    groups: Vec<u32>,
+    /// The first question number the block's tables list, proven or not.
+    first: u32,
+    /// `None`: the row doesn't agree with itself, or the number is listed twice.
+    rows: BTreeMap<u32, Option<EditalRow>>,
+}
+
+/// A table row: one mark per proposition (its value, "-" for false, "A" for annulled) and the sum.
+/// It counts only when the marks add up to the sum; "ANULADA" needs all-false marks.
+fn edital_row(marks: &[&str], sum: &str) -> Option<EditalRow> {
+    let (mut total, mut void) = (0, 0);
+    for (p, mark) in marks.iter().enumerate() {
+        match *mark {
+            "-" => {}
+            "A" => void |= 1 << p,
+            m if two_digits(m) == Some(1 << p) => total |= 1 << p,
+            _ => return None,
+        }
+    }
+    if sum == "ANULADA" {
+        return (total | void == 0).then_some((None, 0));
+    }
+    (total > 0 && two_digits(sum) == Some(total)).then_some((Some(total), void))
+}
+
+/// UEPG's edital: per table, three lines (numbers, marks, sums) under a heading. `None` unless it
+/// has several headed blocks and at least 8 proven rows.
+fn parse_edital(text: &str) -> Option<Vec<EditalBlock>> {
+    let lines: Vec<Vec<&str>> = text.split(['\n', '\x0c']).map(|l| l.split_whitespace().collect::<Vec<_>>()).filter(|l| !l.is_empty()).collect();
+    let (mut name, mut groups, mut caps) = (String::new(), Vec::<u32>::new(), String::new());
+    let mut blocks: Vec<EditalBlock> = vec![];
+    let mut i = 0;
+    while i < lines.len() {
+        let line = &lines[i];
+        // "24*" is a correction mark, not part of the number.
+        let numbers = line.iter().map(|t| two_digits(t.trim_end_matches('*'))).collect::<Option<Vec<u32>>>();
+        if let (Some(numbers), Some(marks), Some(sums)) = (numbers, lines.get(i + 1), lines.get(i + 2)) {
+            let each = marks.len() / line.len();
+            if (4..=5).contains(&each) && marks.len() == each * line.len() && sums.len() == line.len() && sums.iter().all(|s| two_digits(s).is_some() || *s == "ANULADA") {
+                if blocks.last().is_none_or(|b| b.name != name || b.groups != groups) {
+                    blocks.push(EditalBlock { name: name.clone(), groups: groups.clone(), first: numbers[0], rows: BTreeMap::new() });
+                }
+                let block = blocks.last_mut().unwrap();
+                for ((n, marks), sum) in numbers.iter().zip(marks.chunks(each)).zip(sums) {
+                    block.rows.entry(*n).and_modify(|r| *r = None).or_insert_with(|| edital_row(marks, sum));
+                }
+                i += 3;
+                continue;
+            }
+        }
+        i += 1;
+        let words = line.join(" ");
+        let folded = fold(&words);
+        if words.contains("ANEXO") {
+            (name, caps) = (String::new(), String::new());
+            groups.clear();
+        } else if matches!(folded.as_str(), "ingles" | "espanhol") {
+            (name, groups) = (folded, vec![]);
+        } else if folded.starts_with("grupo") {
+            groups = words.split(|c: char| !c.is_ascii_digit()).filter_map(|s| s.parse().ok()).collect();
+            name = std::mem::take(&mut caps);
+        } else if words.chars().all(|c| c.is_uppercase() || c == ' ') {
+            caps = fold(line.last()?);
+        }
+    }
+    let proven = blocks.iter().flat_map(|b| b.rows.values()).flatten().count();
+    (blocks.len() >= 2 && proven >= 8 && blocks.iter().any(|b| !b.name.is_empty())).then_some(blocks)
+}
+
+/// "PORTUGUÊS" in the exam, "LÍNGUA PORTUGUESA" in the key: the same subject when the folded names
+/// start alike and are about as long.
+fn same_subject(a: &str, b: &str) -> bool {
+    a.len() >= 6 && b.len() >= 6 && a.len().abs_diff(b.len()) <= 2 && a[..6] == b[..6]
+}
+
+/// The edital's blocks that are the exam's, in the exam's order, or `None`: the exam says what it
+/// holds by its headings. A group exam: the block of each subject heading, one block per heading,
+/// numbers rising from 01, and the groups lines naming exactly one group in common. Conhecimentos
+/// Gerais (its Inglês and Espanhol headings): the 01–55 block, then each language's. Anything else
+/// (no heading fits, two blocks fit, the groups disagree) is not an exam the edital can answer.
+fn edital_choice<'a>(blocks: &'a [EditalBlock], exam_text: &str) -> Option<Vec<&'a EditalBlock>> {
+    let heads: Vec<String> = exam_text.split(['\n', '\x0c']).map(str::trim).filter(|l| !l.chars().any(|c| c.is_lowercase() || c.is_ascii_digit())).map(fold).collect();
+    let languages: Vec<&str> = heads.iter().map(String::as_str).filter(|h| matches!(*h, "ingles" | "espanhol")).collect();
+    if !languages.is_empty() {
+        let [first, second] = languages[..] else { return None };
+        let only = |keep: &dyn Fn(&EditalBlock) -> bool| match blocks.iter().filter(|b| keep(b)).collect::<Vec<_>>()[..] {
+            [b] => Some(b),
+            _ => None,
+        };
+        return (first != second).then(|| Some(vec![only(&|b| b.name.is_empty() && b.groups.is_empty() && b.first == 1)?, only(&|b| b.name == first)?, only(&|b| b.name == second)?])).flatten();
+    }
+    let mut chosen: Vec<&EditalBlock> = vec![];
+    for head in &heads {
+        match blocks.iter().filter(|b| !b.groups.is_empty() && same_subject(&b.name, head)).collect::<Vec<_>>()[..] {
+            [] => {}
+            [b] => chosen.push(b),
+            _ => return None,
+        }
+    }
+    let common = chosen.first()?.groups.iter().filter(|g| chosen.iter().all(|b| b.groups.contains(g))).count();
+    (common == 1 && chosen[0].first == 1 && chosen.windows(2).all(|w| w[0].first < w[1].first)).then_some(chosen)
+}
+
+/// "vestibular 2025" as the text says it (folded, one space), or `None`.
+fn vestibular_year(text: &str) -> Option<String> {
+    let text = fold(text).split_whitespace().collect::<Vec<_>>().join(" ");
+    text.match_indices("vestibular ").find_map(|(at, _)| text.get(at..at + 15).filter(|s| s[11..].bytes().all(|b| b.is_ascii_digit())).map(str::to_owned))
+}
+
+/// Puts an edital on the exam it's attached to: the sums, the annulled questions and the annulled
+/// propositions, as the catalogue does. Answers nothing unless the edital and the exam name the same
+/// vestibular year and `edital_choice` finds one block per part of the exam: a wrong key would grade
+/// the student wrongly, a missing one only sends the question to Jay-AI. Returns the questions it
+/// settled (answered or annulled).
+fn apply_edital(questions: &mut [Question], blocks: &[EditalBlock], key_text: &str, exam_text: &str) -> usize {
+    if vestibular_year(key_text).is_none_or(|y| vestibular_year(exam_text) != Some(y)) {
+        return 0;
+    }
+    let Some(chosen) = edital_choice(blocks, exam_text) else { return 0 };
+    // Each number's rows in the exam's order: the k-times rule of `apply_answer_key` then gives
+    // Inglês's 56–60 to the first and Espanhol's to the second.
+    let mut rows: BTreeMap<u32, Vec<Option<EditalRow>>> = BTreeMap::new();
+    for block in chosen {
+        for (number, row) in &block.rows {
+            rows.entry(*number).or_default().push(*row);
+        }
+    }
+    let sums = rows.iter().map(|(n, r)| (*n, r.iter().map(|r| r.and_then(|r| r.0).map_or(String::new(), |s| format!("{s:02}"))).collect())).collect();
+    let mut settled = apply_answer_key(questions, &sums);
+    let mut times: BTreeMap<u32, usize> = BTreeMap::new();
+    for q in questions.iter() {
+        *times.entry(q.number).or_default() += 1;
+    }
+    let mut seen: BTreeMap<u32, usize> = BTreeMap::new();
+    for q in questions.iter_mut() {
+        let nth = seen.entry(q.number).or_default();
+        let row = rows.get(&q.number).filter(|r| r.len() == times[&q.number]).and_then(|r| r[*nth]).filter(|r| r.1 < 1 << q.options.len());
+        *nth += 1;
+        if let (Some((sum, void)), QuestionKind::Sum) = (row, q.kind) {
+            (q.annulled, q.void) = (sum.is_none(), void);
+            settled += usize::from(q.annulled);
+        }
+    }
+    settled
+}
+
+/// Puts the key in `key_text` on an exam's questions (`exam_text`: its whole text) and returns how
+/// many it settled. An edital is chosen by the exam's headings; any other key goes by number.
+pub fn apply_key(questions: &mut [Question], key_text: &str, exam_text: &str) -> usize {
+    match parse_edital(key_text) {
+        Some(blocks) => apply_edital(questions, &blocks, key_text, exam_text),
+        None => parse_answer_key(key_text).map_or(0, |key| apply_answer_key(questions, &key)),
+    }
+}
+
 /// An answer key's text ("46 C", "1 B A" for ENEM's two languages, "17 21" for sum-type, and the
 /// sum-type layouts of `parse_sum_key`): question number → the answers, in order. `None` when the
 /// text doesn't look like a key. A key can come out with few answers, or none: only the ones the text
-/// ties to one question are here.
+/// ties to one question are here. An edital is a key with no answers here: which block is the
+/// exam's depends on the exam (`apply_key`), and by number alone it would answer any exam.
 pub fn parse_answer_key(text: &str) -> Option<BTreeMap<u32, Vec<String>>> {
+    if parse_edital(text).is_some() {
+        return Some(BTreeMap::new());
+    }
     if let Some(key) = parse_sum_key(text) {
         return Some(key);
     }
@@ -716,6 +898,93 @@ mod tests {
         assert!(parse_sum_key("01 19 01-02-16\n02 26 02-08-16\n03 11 01-02-08\n04 18 02-16\n05 31 01-02-04-08-16\n06 25 01-08-16\n07 04 04\n").is_none());
     }
 
+    fn sum_questions(numbers: &[u32], props: usize) -> Vec<Question> {
+        numbers
+            .iter()
+            .map(|&n| Question {
+                number: n,
+                kind: QuestionKind::Sum,
+                passage: None,
+                stem: "?".into(),
+                options: [1, 2, 4, 8, 16][..props].iter().map(|p| QOption { label: format!("{p:02}"), text: "x".into() }).collect(),
+                answer: None,
+                answer_by_ai: false,
+                topic: None,
+                explanation: None,
+                source: None,
+                annulled: false,
+                void: 0,
+            })
+            .collect()
+    }
+
+    /// UEPG's edital in miniature: the same headings and three-line tables, other numbers.
+    const EDITAL: &str = "Manual do Candidato do Vestibular 2025 da UEPG\nANEXO 1 DO EDITAL N\no\n 51/2025\nGABARITO DA PROVA DE CONHECIMENTOS GERAIS\nNúmero da questão\n01 02 03 04\n01 - - - - 02 - - 01 02 - - - - 04 08\n01 02 03 12\nInglês\n56 57\n01 - - - - 02 - -\n01 02\nEspanhol\n56 57\n- 02 - - 01 - - -\n02 01\nANEXO 2 DO EDITAL N\nGABARITO DAS PROVAS VOCACIONADAS\nLÍNGUA\nPORTUGUESA\nGrupos 1, 2, 3 e 6\n01 02 03* 04\n- 02 - - 16 01 - - - - A 02 04 - - 01 - - - 16\n18 01 06 20\nMATEMÁTICA\nGrupos 1, 2 e 5\n16 17 18\n- - - - - 01 02 - - - - - 04 - -\nANULADA 03 04\nHISTÓRIA\nGrupos 1, 3 e 6\n31 32\n01 - - - - - 02 - - -\n01 02\nQUÍMICA\nGrupos 4 e 5\n01 02\n01 - - - - - 02 - - -\n01 02\n";
+
+    fn answers(qs: &[Question]) -> Vec<(u32, Option<&str>, bool, u32)> {
+        qs.iter().map(|q| (q.number, q.answer.as_deref(), q.annulled, q.void)).collect()
+    }
+
+    #[test]
+    fn an_edital_answers_the_exam_its_headings_name() {
+        // The edital is a key (the classifier sees it) that answers no exam by number alone.
+        assert_eq!(parse_answer_key(EDITAL), Some(BTreeMap::new()));
+        // A group exam: Português, Matemática and História are the groups 1, 2, 3, 6 / 1, 2, 5 / 1, 3, 6: Grupo 1.
+        let exam = "VESTIBULAR 2025\nPORTUGUÊS\ntexto\nMATEMÁTICA\ntexto\nHISTÓRIA\ntexto\n";
+        let mut qs = sum_questions(&[1, 2, 3, 4, 16, 17, 18, 31, 32], 5);
+        // 4: the marks add up to 17, not 20: no answer. 16: annulled. 3: proposition 01 annulled, sum 06.
+        assert_eq!(apply_key(&mut qs, EDITAL, exam), 8);
+        assert_eq!(
+            answers(&qs),
+            [(1, Some("18"), false, 0), (2, Some("01"), false, 0), (3, Some("06"), false, 1), (4, None, false, 0), (16, None, true, 0), (17, Some("03"), false, 0), (18, Some("04"), false, 0), (31, Some("01"), false, 0), (32, Some("02"), false, 0)]
+        );
+        // Conhecimentos Gerais: 01–55 once, then 56–57 for Inglês and again for Espanhol, in the exam's order.
+        let mut qs = sum_questions(&[1, 2, 3, 4], 4);
+        qs.extend(sum_questions(&[56, 57, 56, 57], 4));
+        assert_eq!(apply_key(&mut qs, EDITAL, "Vestibular 2025\nINGLÊS\ntext\nESPANHOL\ntext\n"), 8);
+        assert_eq!(qs.iter().map(|q| q.answer.as_deref().unwrap()).collect::<Vec<_>>(), ["01", "02", "03", "12", "01", "02", "02", "01"]);
+        // The other order in the exam: the answers follow it.
+        let mut qs = sum_questions(&[56, 57, 56, 57], 4);
+        apply_key(&mut qs, EDITAL, "Vestibular 2025\nESPANHOL\nINGLÊS\n");
+        assert_eq!(qs.iter().map(|q| q.answer.as_deref().unwrap()).collect::<Vec<_>>(), ["02", "01", "01", "02"]);
+    }
+
+    #[test]
+    fn an_edital_that_cannot_tell_the_exam_answers_nothing() {
+        let apply = |numbers: &[u32], exam: &str| {
+            let mut qs = sum_questions(numbers, 5);
+            (apply_key(&mut qs, EDITAL, exam), qs.iter().all(|q| q.answer.is_none() && !q.annulled && q.void == 0))
+        };
+        let nothing = (0, true);
+        // The groups in common: two (Português + Matemática), none (with Química), or too many (one subject).
+        assert_eq!(apply(&[1, 16], "Vestibular 2025\nPORTUGUÊS\nMATEMÁTICA\n"), nothing);
+        assert_eq!(apply(&[1, 16], "Vestibular 2025\nPORTUGUÊS\nMATEMÁTICA\nQUÍMICA\n"), nothing);
+        assert_eq!(apply(&[1], "Vestibular 2025\nPORTUGUÊS\n"), nothing);
+        // The numbers must rise from 01 in the exam's order, and a heading must not repeat.
+        assert_eq!(apply(&[16, 31], "Vestibular 2025\nMATEMÁTICA\nHISTÓRIA\n"), nothing);
+        assert_eq!(apply(&[1, 16, 31], "Vestibular 2025\nPORTUGUÊS\nHISTÓRIA\nMATEMÁTICA\n"), nothing);
+        assert_eq!(apply(&[1, 16, 31], "Vestibular 2025\nPORTUGUÊS\nPORTUGUÊS\nMATEMÁTICA\nHISTÓRIA\n"), nothing);
+        // Another year, or none, in the exam; no headings at all.
+        let groups = "PORTUGUÊS\nMATEMÁTICA\nHISTÓRIA\n";
+        assert_eq!(apply(&[1, 16, 31], &format!("VESTIBULAR 2024\n{groups}")), nothing);
+        assert_eq!(apply(&[1, 16, 31], groups), nothing);
+        assert_eq!(apply(&[1, 16, 31], "Vestibular 2025\nUm texto qualquer.\n"), nothing);
+        // Conhecimentos Gerais needs both languages, once each.
+        assert_eq!(apply(&[56], "Vestibular 2025\nINGLÊS\n"), nothing);
+        assert_eq!(apply(&[56, 56], "Vestibular 2025\nINGLÊS\nINGLÊS\n"), nothing);
+        // Two blocks for one heading (a Matemática for the group 3 as well): which one is the exam's?
+        let twice = format!("{EDITAL}MATEMÁTICA\nGrupos 3\n19 20\n01 - - - - - 02 - - -\n01 02\n");
+        let mut qs = sum_questions(&[1, 16, 31], 5);
+        assert_eq!(apply_key(&mut qs, &twice, &format!("Vestibular 2025\n{groups}")), 0);
+        assert!(qs.iter().all(|q| q.answer.is_none()));
+        // A choice question is never given a sum, an annulment or a proposition.
+        let mut qs = sum_questions(&[16], 5);
+        qs[0].kind = QuestionKind::Choice;
+        qs[0].options = "ABCDE".chars().map(|c| QOption { label: c.to_string(), text: "x".into() }).collect();
+        assert_eq!(apply_key(&mut qs, EDITAL, &format!("Vestibular 2025\n{groups}")), 0);
+        assert!(!qs[0].annulled);
+    }
+
     #[test]
     fn keys_go_to_the_right_questions_including_enems_two_languages() {
         let q = |n: u32| Question {
@@ -729,6 +998,8 @@ mod tests {
             topic: None,
             explanation: None,
             source: None,
+            annulled: false,
+            void: 0,
         };
         // Questions 1 (English), 1 (Spanish), 6.
         let mut qs = vec![q(1), q(1), q(6), q(7)];

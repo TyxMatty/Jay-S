@@ -141,6 +141,12 @@ impl Ai {
         self.cancel_request.store(true, Ordering::Relaxed);
     }
 
+    /// A fresh Stop flag for a download that is not the model's (`cancel` sets it).
+    pub fn download_cancel(&self) -> Arc<AtomicBool> {
+        self.cancel_download.store(false, Ordering::Relaxed);
+        self.cancel_download.clone()
+    }
+
     /// Stops the server (its memory comes back at once). A request in progress is cancelled first,
     /// and this waits for it to let go: call it off the main thread (`stop_off_main`), or the window
     /// freezes while a long job finishes (it did: "Liberar a memória" during an exam build).

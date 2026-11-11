@@ -201,6 +201,8 @@ pub fn parse_question(style: &Style, reply: &Value, number: u32, material: &str)
         topic: Some(topic),
         explanation: Some(explanation),
         source: Some(Source { material: material.to_owned(), number: None }),
+        annulled: false,
+        void: 0,
     })
 }
 
