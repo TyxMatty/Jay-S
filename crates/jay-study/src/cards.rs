@@ -55,7 +55,8 @@ impl Card {
                 2 => 6.0,
                 _ => (self.interval * self.ease).round(),
             };
-            self.due = now + (self.interval * DAY_MS as f32) as u64;
+            // Saturating: after dozens of "good" in a row the interval overflows a u64 of ms.
+            self.due = now.saturating_add((self.interval * DAY_MS as f32) as u64);
         }
         self.ease = (self.ease + (0.1 - (5.0 - q) * (0.08 + (5.0 - q) * 0.02))).max(1.3);
     }
@@ -95,7 +96,25 @@ pub struct Deck {
     pub created: u64,
     pub materials: Vec<String>,
     pub cards: Vec<Card>,
+    /// The last `MAX_LOG` ratings; absent in old files and in decks never reviewed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub log: Vec<Review>,
 }
+
+/// One rating: the card (index in the deck), when (ms since 1970), the rating, and the ms from
+/// showing the card to flipping it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Review {
+    pub card: u32,
+    pub at: u64,
+    pub quality: u8,
+    pub ms: u32,
+}
+
+/// A thinking time above this is clamped: someone who walked away.
+pub const MAX_THINK_MS: u32 = 10 * 60 * 1000;
+/// A deck keeps its last 2000 reviews (~120 KB); the oldest go first.
+pub const MAX_LOG: usize = 2000;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct DeckSummary {
@@ -239,13 +258,16 @@ impl Store {
     }
 
     /// Rates a card; `again` is a repeat of one forgotten earlier in the session (`Card::relearn`).
-    pub fn review_card(&self, deck: &str, index: usize, quality: u8, again: bool) -> Result<Reviewed, StoreError> {
+    pub fn review_card(&self, deck: &str, index: usize, quality: u8, again: bool, ms: u32) -> Result<Reviewed, StoreError> {
         let mut d = self.deck(deck)?;
         let card = d.cards.get_mut(index).ok_or(StoreError::NotFound)?;
         let now = now_ms();
         if again { card.relearn(quality, now) } else { card.review(quality, now) }
         // What the buttons show if the card comes back in this session.
         let reviewed = Reviewed { due_in: card.due.saturating_sub(now), next: card.preview(now, quality < 3) };
+        d.log.push(Review { card: index as u32, at: now, quality, ms: ms.min(MAX_THINK_MS) });
+        let extra = d.log.len().saturating_sub(MAX_LOG);
+        d.log.drain(..extra);
         self.save_deck(&d)?;
         Ok(reviewed)
     }
@@ -306,7 +328,7 @@ impl Store {
         if cards.is_empty() {
             return Err(BuildError::Empty);
         }
-        let deck = Deck { id: id::new_id(), title: title.chars().take(120).collect(), created: now, materials: materials.to_vec(), cards };
+        let deck = Deck { id: id::new_id(), title: title.chars().take(120).collect(), created: now, materials: materials.to_vec(), cards, log: vec![] };
         self.save_deck(&deck)?;
         Ok(deck)
     }
@@ -406,18 +428,58 @@ mod tests {
         c.review(3, now);
         c.review(1, now);
         c.due = now - 1;
-        let deck = Deck { id: id::new_id(), title: "Bio".into(), created: now, materials: vec![], cards: vec![c, Card::new("c".into(), "d".into(), "t".into(), now - 2)] };
+        let deck = Deck { id: id::new_id(), title: "Bio".into(), created: now, materials: vec![], cards: vec![c, Card::new("c".into(), "d".into(), "t".into(), now - 2)], log: vec![] };
         store.save_deck(&deck).unwrap();
         let path = root.join("decks").join(format!("{}.json", deck.id));
         let bytes = std::fs::read(&path).unwrap();
         let before = store.deck(&deck.id).unwrap();
-        store.review_card(&deck.id, 0, 4, false).unwrap();
+        store.review_card(&deck.id, 0, 4, false, 0).unwrap();
         assert_ne!(std::fs::read(&path).unwrap(), bytes);
         store.restore_deck(&before).unwrap();
         assert_eq!(std::fs::read(&path).unwrap(), bytes);
         store.delete_deck(&deck.id).unwrap();
         assert!(matches!(store.restore_deck(&before), Err(StoreError::NotFound)));
         assert!(!path.exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn review_log_is_bounded() {
+        let root = std::env::temp_dir().join(format!("jay-study-log-{}", id::new_id()));
+        let store = Store::open(&root).unwrap();
+        let now = now_ms();
+        let deck = Deck { id: id::new_id(), title: "Bio".into(), created: now, materials: vec![], cards: vec![Card::new("a".into(), "b".into(), "t".into(), now - 1)], log: vec![] };
+        store.save_deck(&deck).unwrap();
+        store.review_card(&deck.id, 0, 4, false, u32::MAX).unwrap();
+        assert_eq!(store.deck(&deck.id).unwrap().log[0].ms, MAX_THINK_MS);
+        // `ms` doubles as the review's number, to tell which one is first.
+        for k in 1..(MAX_LOG as u32 + 5) {
+            store.review_card(&deck.id, 0, 1, false, k).unwrap();
+        }
+        let log = store.deck(&deck.id).unwrap().log;
+        assert_eq!(log.len(), MAX_LOG);
+        assert_eq!(log[0].ms, 5);
+        assert_eq!(log[MAX_LOG - 1].ms, MAX_LOG as u32 + 4);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn old_deck_files_still_load() {
+        let root = std::env::temp_dir().join(format!("jay-study-old-{}", id::new_id()));
+        let store = Store::open(&root).unwrap();
+        let now = now_ms();
+        let deck = Deck { id: id::new_id(), title: "Bio".into(), created: now, materials: vec![], cards: vec![Card::new("a".into(), "b".into(), "t".into(), now - 1)], log: vec![] };
+        // Saved without a log, as every file was before it existed.
+        store.save_deck(&deck).unwrap();
+        let path = store.item("decks", &deck.id).unwrap();
+        let old = std::fs::read(&path).unwrap();
+        assert!(!String::from_utf8_lossy(&old).contains("\"log\""));
+        let before = store.deck(&deck.id).unwrap();
+        assert!(before.log.is_empty());
+        store.review_card(&deck.id, 0, 4, false, 1500).unwrap();
+        assert!(String::from_utf8_lossy(&std::fs::read(&path).unwrap()).contains("\"log\""));
+        store.restore_deck(&before).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), old);
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -457,7 +519,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!("jay-study-cards-{}", id::new_id()));
         let store = Store::open(&root).unwrap();
         let now = now_ms();
-        let deck = Deck { id: id::new_id(), title: "Bio".into(), created: now, materials: vec![], cards: vec![Card::new("a".into(), "b".into(), "Fotossíntese".into(), now - 1), Card::new("c".into(), "d".into(), "Mitose".into(), now - 2)] };
+        let deck = Deck { id: id::new_id(), title: "Bio".into(), created: now, materials: vec![], cards: vec![Card::new("a".into(), "b".into(), "Fotossíntese".into(), now - 1), Card::new("c".into(), "d".into(), "Mitose".into(), now - 2)], log: vec![] };
         store.save_deck(&deck).unwrap();
         // Weak topic first, even though the other is more overdue.
         let mut p = Profile::default();
@@ -466,12 +528,12 @@ mod tests {
         let due = store.due_cards(&deck.id, 10).unwrap();
         assert_eq!(due.iter().map(|c| c.topic.as_str()).collect::<Vec<_>>(), ["Fotossíntese", "Mitose"]);
         assert!(due.iter().all(|c| c.next.len() == 4));
-        let reviewed = store.review_card(&deck.id, 0, 4, false).unwrap();
+        let reviewed = store.review_card(&deck.id, 0, 4, false, 0).unwrap();
         assert_eq!(reviewed.due_in, DAY_MS);
         assert_eq!(reviewed.next.len(), 4);
         assert_eq!(store.due_cards(&deck.id, 10).unwrap().len(), 1);
         assert_eq!(store.decks()[0].due, 1);
-        assert!(matches!(store.review_card(&deck.id, 9, 4, false), Err(StoreError::NotFound)));
+        assert!(matches!(store.review_card(&deck.id, 9, 4, false, 0), Err(StoreError::NotFound)));
         assert!(matches!(store.deck("../profile"), Err(StoreError::NotFound)));
         std::fs::remove_dir_all(root).unwrap();
     }

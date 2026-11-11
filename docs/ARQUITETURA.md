@@ -158,7 +158,7 @@ Navegação lateral como o Jay-A: **Materiais**, **Provas**, **Simulado**, **Fla
 │                \text.json        # texto extraído, trechos, tipo (conteúdo/prova), questões separadas
 ├─ exams\<id>.json                 # prova gerada: estilo, questões, gabarito, origem de cada questão
 ├─ attempts\<id>.json              # simulado: respostas, tempos, resultado por tópico (salvo a cada resposta)
-├─ decks\<id>.json                 # cartões + estado do SM-2
+├─ decks\<id>.json                 # cartões + estado do SM-2 + as últimas notas (hora, nota, tempo até virar)
 ├─ chats\<id>.json                 # conversas com o Jay-AI: fontes escolhidas e turnos conferidos
 ├─ profile.json                    # perfil do estudante (tamanho/tom preferidos, tópicos fracos)
 └─ ai\                             # llama-server e modelo baixados
@@ -599,6 +599,23 @@ Pelos 10 pontos:
 - **RAM** (a árvore do app, build de release, sem a variável de depuração, ociosa na primeira tela 20 s depois de abrir; duas rodadas cada, memória privada): antes, de 111,5 a 118,4 MB (mediana 112,2; 6 rodadas, fora uma em que o `llama-server` tinha sido ligado por outro motivo); depois, de 111,3 a 140,9 MB (mediana 116,6; 5 rodadas: as duas primeiras com 134 e 141 MB, as três intercaladas com o antes com 111 a 117). A diferença está num processo de renderização do WebView2, não no `jay-s.exe` (5,6 a 6,9 MB nos dois); intercaladas, as medidas se sobrepõem. Todas abaixo dos 150 MB do RNF-1; o *working set* da árvore ficou perto de 355 MB nos dois. O `jay-s.exe` de release passou de 15.240.192 para 15.328.768 bytes (+87 KB).
 
 **Limites:** o caminho inteiro (baixar, rodar o setup, o NSIS fechar e reabrir o Jay-S) só se prova com uma release mais nova que o app instalado, rodada por fora deste ambiente (aqui o AppData é privado e um instalador deixaria atalhos quebrados). O SHA-256 vem do GitHub, não do código. O relógio de um simulado continua contando enquanto o app se atualiza.
+
+### O tempo de cada cartão (revisão dos flashcards)
+
+Dado novo do estudante: cada nota dada a um cartão fica no próprio baralho (`decks\<id>.json`, campo `log`): o número do cartão no baralho, a hora, a nota e os milissegundos entre o cartão aparecer e ser virado. A página mede esse tempo com um cronômetro que para quando a janela some ou o estudante sai da tela (o mesmo que mostra o relógio discreto da sessão, sem contagem regressiva) e manda o número junto com a nota; o resumo do fim da sessão lê daí. Pelos 10 pontos:
+
+1. **Superfície de ataque.** Um campo novo no `card_review` (`ms`, inteiro sem sinal de 32 bits); nenhum comando, arquivo, rede ou processo novo. O texto dos cartões não entra no `log`.
+2. **Controle de acesso / IDOR.** Nada muda: o baralho continua pelo `id` conferido e o cartão pelo índice conferido no Rust (`not_found` fora do baralho).
+3. **Permissões de dados.** O `log` mora no arquivo do baralho, na pasta de dados do perfil do Windows, e vai embora junto quando o baralho é apagado. Não sai da máquina.
+4. **Entrada não confiável.** O `ms` vem da página: o `serde` recusa negativo, fração e número acima de `u32`; o motor corta em 10 minutos (`MAX_THINK_MS`: mais que isso é alguém que saiu de perto). A página pode mentir o tempo, mas só para si mesma (um usuário, nada é pontuado contra ele).
+5. **Credenciais expostas.** Nenhuma.
+6. **Autenticação.** Não se aplica.
+7. **Abuso de recursos e corridas.** O `log` guarda as últimas 2.000 notas do baralho (`MAX_LOG`, cerca de 120 KB; as mais velhas saem primeiro), então o arquivo não cresce sem limite. A gravação é a mesma de antes (uma por nota, atômica, sob a trava de escrita). Desfazer grava o baralho inteiro de antes, `log` incluído.
+8. **Cadeia de dependências.** Nada novo.
+9. **Rede e exposição.** Nada novo.
+10. **Testes adversariais.** `review_log_is_bounded` (um `ms` de `u32::MAX` vira 10 minutos; depois de 2.005 notas ficam 2.000, as últimas), `old_deck_files_still_load` (um baralho gravado antes desta mudança, sem `log`, abre; avaliar e desfazer devolve o arquivo idêntico byte a byte, sem um `"log"` vazio), `rate_then_undo_is_byte_identical`. Um baralho nunca avaliado é gravado como antes (o `log` vazio não é escrito).
+
+**Limites:** o tempo é medido na página (o Rust confere só o formato e o teto). O cronômetro confere a cada segundo se a tela está visível, então até 1 s fora da tela pode contar.
 
 ## 8. Etapas
 

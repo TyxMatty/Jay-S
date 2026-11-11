@@ -10,8 +10,8 @@ const out = { result, seconds: Math.round((performance.now() - t0) / 1000) };
 if (result.state !== 'done') return out;
 const due = await invoke('deck_due', { id: result.id });
 out.cards = due.map((c) => ({ front: c.front, back: c.back, topic: c.topic }));
-await invoke('card_review', { deck: result.id, index: due[0].index, quality: 4 });
+await invoke('card_review', { deck: result.id, index: due[0].index, quality: 4, again: false, ms: 0 });
 out.dueAfter = (await invoke('deck_due', { id: result.id })).length;
-try { await invoke('card_review', { deck: result.id, index: 0, quality: 9 }); out.badQuality = 'ACCEPTED?!'; } catch (e) { out.badQuality = e.code; }
+try { await invoke('card_review', { deck: result.id, index: 0, quality: 9, again: false, ms: 0 }); out.badQuality = 'ACCEPTED?!'; } catch (e) { out.badQuality = e.code; }
 out.vote = (await invoke('card_vote', { tooLong: true })).card_length;
 return out;

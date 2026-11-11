@@ -5,6 +5,7 @@ import { icons } from './icons.js';
 import { cardTitle } from './card-title.js';
 import { inTime } from './card-time.js';
 import { requeueAt } from './card-queue.js';
+import { stopwatch, clockText } from './stopwatch.js';
 import { invoke, listenJobs, isTauri } from '../core/bridge.js';
 import { aiReady } from '../core/ai.js';
 import { t, language } from '../core/i18n.js';
@@ -25,6 +26,13 @@ function review(deck, cards, onDone) {
   let flipped = false;
   let rated = 0;
   let busy = false;
+  // The session clock only runs while the window and this screen are visible.
+  const clock = stopwatch();
+  let shownAt = 0;
+  let thinkMs = null; // set on the first flip of the card shown
+  const clockLabel = t('Time in this session');
+  const clockValue = h('span', {}, '0:00');
+  const clockEl = h('span', { class: 'review-clock', title: clockLabel, 'aria-label': clockLabel }, h('span', { class: 'review-clock-icon', html: icons.timer, 'aria-hidden': 'true' }), clockValue);
   const topic = h('span', { class: 'flip-topic' });
   const front = h('p', { class: 'card-front' });
   const backQuestion = h('p', { class: 'card-back-question' });
@@ -81,6 +89,7 @@ function review(deck, cards, onDone) {
   function flip(to = !flipped) {
     if (to === flipped) return;
     flipped = to;
+    if (to && thinkMs === null) thinkMs = clock.elapsed() - shownAt;
     // The lift is an animation of its own (styles/app.css .is-flipping), restarted on every flip.
     card.classList.remove('is-flipping');
     void card.offsetWidth;
@@ -99,6 +108,8 @@ function review(deck, cards, onDone) {
     const c = queue[pos]?.card;
     if (!c) return done();
     flip(false);
+    shownAt = clock.elapsed();
+    thinkMs = null;
     topic.textContent = c.topic;
     front.textContent = c.front;
     backQuestion.textContent = c.front;
@@ -119,7 +130,7 @@ function review(deck, cards, onDone) {
   }
 
   function done() {
-    document.removeEventListener('keydown', keys);
+    stop();
     el.replaceChildren(
       h('div', { class: 'panel-head' }, h('h1', {}, deck.title)),
       h('div', { class: 'deck-done' },
@@ -153,7 +164,7 @@ function review(deck, cards, onDone) {
       const k = RATINGS.findIndex((r) => r[0] === quality);
       const tone = RATINGS[k][3];
       const entry = queue[pos];
-      const reply = await invoke('card_review', { deck: deck.id, index: entry.card.index, quality, again: entry.again });
+      const reply = await invoke('card_review', { deck: deck.id, index: entry.card.index, quality, again: entry.again, ms: Math.round(thinkMs ?? 0) });
       entry.card.next = reply.next; // in case the card is shown again
       let insertedAt = -1;
       if (quality === 1) {
@@ -215,11 +226,25 @@ function review(deck, cards, onDone) {
   }
   document.addEventListener('keydown', keys);
 
+  function tick() {
+    if (!el.isConnected) return stop();
+    if (document.hidden || el.offsetParent === null) clock.pause();
+    else clock.resume();
+    clockValue.textContent = clockText(clock.elapsed());
+  }
+  const ticker = setInterval(tick, 1000);
+  document.addEventListener('visibilitychange', tick);
+  function stop() {
+    clearInterval(ticker);
+    document.removeEventListener('visibilitychange', tick);
+    document.removeEventListener('keydown', keys);
+  }
+
   const el = h(
     'section',
     { class: 'app-panel is-single review' },
-    h('div', { class: 'panel-head' }, h('h1', {}, deck.title), h('button', { type: 'button', class: 'btn btn-secondary', onClick: () => { document.removeEventListener('keydown', keys); onDone(); } }, t('Back'))),
-    h('div', { class: 'review-progress' }, counter, bar),
+    h('div', { class: 'panel-head' }, h('h1', {}, deck.title), h('button', { type: 'button', class: 'btn btn-secondary', onClick: () => { stop(); onDone(); } }, t('Back'))),
+    h('div', { class: 'review-progress' }, counter, bar, clockEl),
     pile,
     h('div', { class: 'review-actions' }, show, rate, vote, message, undoButton),
   );

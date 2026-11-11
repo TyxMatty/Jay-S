@@ -1662,6 +1662,26 @@ fieldset > h3 {
   white-space: nowrap;
 }
 
+.review-clock {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.review-clock-icon {
+  display: inline-flex;
+}
+
+.review-clock-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
 .card-pile {
   position: relative;
   width: min(560px, 100%);

@@ -159,7 +159,7 @@ Side navigation like Jay-A: **Materials**, **Exams**, **Mock test**, **Flashcard
 │                \text.json        # extracted text, chunks, kind (content/exam), split questions
 ├─ exams\<id>.json                 # built exam: style, questions, answer key, origin of each question
 ├─ attempts\<id>.json              # attempt: answers, times, result per topic (saved on every answer)
-├─ decks\<id>.json                 # cards + SM-2 state
+├─ decks\<id>.json                 # cards + SM-2 state + the latest ratings (time, rating, time to flip)
 ├─ chats\<id>.json                 # Jay-AI conversations: chosen sources and checked turns
 ├─ profile.json                    # student profile (preferred length/tone, weak topics)
 └─ ai\                             # downloaded llama-server and model
@@ -600,6 +600,23 @@ By the 10 points:
 - **RAM** (the app's tree, release build, without the debugging variable, idle on the first screen 20 s after opening; two runs each, private memory): before, 111.5 to 118.4 MB (median 112.2; 6 runs, leaving out one where `llama-server` had been started for another reason); after, 111.3 to 140.9 MB (median 116.6; 5 runs: the first two at 134 and 141 MB, the three interleaved with the before runs at 111 to 117). The difference is in a WebView2 renderer process, not in `jay-s.exe` (5.6 to 6.9 MB in both); interleaved, the measurements overlap. All under RNF-1's 150 MB; the tree's working set stayed near 355 MB in both. The release `jay-s.exe` went from 15,240,192 to 15,328,768 bytes (+87 KB).
 
 **Limits:** the whole path (download, run the setup, NSIS closing and reopening Jay-S) is only proven with a release newer than the installed app, run outside this environment (here AppData is private and an installer would leave broken shortcuts). The SHA-256 comes from GitHub, not from the code. A mock test's clock keeps counting while the app updates.
+
+### Time per card (the flashcard review)
+
+New student data: every rating given to a card is kept in its own deck (`decks\<id>.json`, field `log`): the card's number in the deck, the time, the rating and the milliseconds from the card showing to being flipped. The page measures that time with a stopwatch that stops when the window is hidden or the student leaves the screen (the same one behind the quiet session clock, no countdown) and sends the number with the rating; the end-of-session summary reads from there. By the 10 points:
+
+1. **Attack surface.** One new field in `card_review` (`ms`, an unsigned 32-bit integer); no new command, file, network or process. The cards' text does not go into the `log`.
+2. **Access control / IDOR.** Unchanged: the deck still goes by the checked `id` and the card by the index checked in Rust (`not_found` outside the deck).
+3. **Data permissions.** The `log` lives in the deck's file, in the data folder of the Windows profile, and goes with the deck when it is deleted. It never leaves the machine.
+4. **Untrusted input.** `ms` comes from the page: `serde` refuses negatives, fractions and numbers above `u32`; the engine caps it at 10 minutes (`MAX_THINK_MS`: longer means someone walked away). The page can lie about the time, but only to itself (one user, nothing is scored against them).
+5. **Exposed credentials.** None.
+6. **Authentication.** Not applicable.
+7. **Resource abuse and races.** The `log` keeps the deck's last 2,000 ratings (`MAX_LOG`, about 120 KB; the oldest go first), so the file does not grow without bound. Writing is the same as before (one per rating, atomic, under the write lock). Undo writes back the whole deck as it was, `log` included.
+8. **Dependency chain.** Nothing new.
+9. **Network and exposure.** Nothing new.
+10. **Adversarial tests.** `review_log_is_bounded` (an `ms` of `u32::MAX` becomes 10 minutes; after 2,005 ratings 2,000 remain, the latest), `old_deck_files_still_load` (a deck written before this change, without `log`, opens; rating and undoing gives back the file byte for byte, without an empty `"log"`), `rate_then_undo_is_byte_identical`. A deck never rated is written as before (an empty `log` is not written).
+
+**Limits:** the time is measured in the page (Rust checks only the format and the cap). The stopwatch checks once a second whether the screen is visible, so up to 1 s off screen can count.
 
 ## 8. Stages
 

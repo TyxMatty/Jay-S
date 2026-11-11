@@ -242,6 +242,7 @@ export default {
   "Comes back in this session, in a few cards.": "Volta nesta sessão, daqui a alguns cartões.",
   "{n} left": "Faltam {n}",
   "Undo": "Desfazer",
+  "Time in this session": "Tempo nesta sessão",
   "Rating undone.": "Avaliação desfeita.",
   "This card was:": "Este cartão estava:",
   "All reviewed for now!": "Tudo revisado por agora!",

@@ -346,13 +346,13 @@ pub fn deck_due(library: State<Library>, id: String) -> Result<Vec<DueCard>, Fai
 }
 
 #[tauri::command]
-pub fn card_review(library: State<Library>, deck: String, index: usize, quality: u8, again: bool) -> Result<Reviewed, Failure> {
+pub fn card_review(library: State<Library>, deck: String, index: usize, quality: u8, again: bool, ms: u32) -> Result<Reviewed, Failure> {
     let _writing = library.writing();
     if !matches!(quality, 1 | 3 | 4 | 5) {
         return Err(Failure::new("invalid_answer", None));
     }
     let before = library.store.deck(&deck)?;
-    let reviewed = library.store.review_card(&deck, index, quality, again)?;
+    let reviewed = library.store.review_card(&deck, index, quality, again, ms)?;
     *library.last_review.lock().unwrap_or_else(|e| e.into_inner()) = Some((before, index, again));
     Ok(reviewed)
 }
