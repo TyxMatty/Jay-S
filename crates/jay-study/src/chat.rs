@@ -713,6 +713,19 @@ fn asks_test_decision(message: &str) -> bool {
 /// more ("resuma a aula e aplique nesta questão"): the classifier said `material` for all of those,
 /// and the decision step only exists on the calc route. Only material and follow-up become `Calc`;
 /// app, talk and general keep their route, and a request for code is never a calculation.
+/// The one fixed sentence a test-decision problem gets when the calc route could not stand and the
+/// message fell back to another route (`kind` is then not Calc). Never model text.
+fn calc_failed_note(tried: bool, kind: Kind, lang: Lang) -> Option<Sentence> {
+    if !tried || kind == Kind::Calc {
+        return None;
+    }
+    let text = match lang {
+        Lang::Pt => "Não consegui resolver este problema com contas conferidas; abaixo está o que os seus materiais dizem sobre ele.",
+        Lang::En => "I couldn't solve this problem with checked calculations; below is what your materials say about it.",
+    };
+    Some(Sentence { text: text.into(), sources: vec![], status: Status::Plain })
+}
+
 fn problem_intent(intent: Intent, problem: bool, asks_code: bool) -> Intent {
     match intent {
         Intent::Material | Intent::FollowUp if problem && !asks_code => Intent::Calc,
@@ -1570,6 +1583,7 @@ impl Store {
         }
         // A calculation: the model writes the steps, the engine computes them. If that fails (not a
         // cancel), the message takes the route it would have without the calc intent.
+        let calc_tried = bare.is_none() && !talk && understood.as_ref().is_some_and(|u| u.intent == Intent::Calc) && asks_test_decision(&question);
         let computed = if let Some(r) = bare {
             Some(r)
         } else if !talk && understood.as_ref().is_some_and(|u| u.intent == Intent::Calc) {
@@ -1601,6 +1615,7 @@ impl Store {
                 Err(_) => Reply { kind: Kind::Unknown, sentences: vec![], sources: vec![], checks: Checks::default(), list: false, go: None, code: None },
             }
         } else {
+            // An error stays an error (a server that failed is not "a problem I couldn't solve").
             self.grounded_reply(&c, &question, rewritten, with_history, previous.as_deref(), &passages, general, app, asks_code && general, lang, server, cancel)?
         };
         // Jay-AI's nickname never addresses the student, on any route (seen on the general one:
@@ -1613,6 +1628,9 @@ impl Store {
             drop_repeats(&mut reply.sentences, said);
             // The first reply may offer help once.
             drop_fillers(&mut reply.sentences);
+        }
+        if let Some(note) = calc_failed_note(calc_tried, reply.kind, lang) {
+            reply.sentences.insert(0, note);
         }
         let turn = Turn { question, reply, at: now_ms() };
         if c.title.is_empty() {
@@ -2051,6 +2069,10 @@ mod tests {
             assert!(!asks_test_decision(q), "{q}");
         }
         // Material and follow-up become calc; the other routes keep theirs; code is never a calculation.
+        let note = |t, k, l| calc_failed_note(t, k, l).map(|s| (s.text, s.status));
+        assert!(note(true, Kind::Material, Lang::Pt).is_some_and(|(t, st)| t.starts_with("Não consegui") && st == Status::Plain));
+        assert!(note(true, Kind::Unknown, Lang::En).is_some_and(|(t, _)| t.starts_with("I couldn't")));
+        assert_eq!((note(false, Kind::Material, Lang::Pt), note(true, Kind::Calc, Lang::En)), (None, None));
         assert_eq!((problem_intent(Material, true, false), problem_intent(FollowUp, true, false)), (Calc, Calc));
         for i in [Material, FollowUp, Calc, General, App, Talk, Correction] {
             assert_eq!(problem_intent(i, false, false), i);
