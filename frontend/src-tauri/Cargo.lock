@@ -2014,11 +2014,12 @@ dependencies = [
 [[package]]
 name = "jay-i"
 version = "0.1.0"
-source = "git+https://github.com/TyxMatty/Jay-I?rev=f4f9ef07c0cf49abd1f53d3caa00c69e5aa1c90a#f4f9ef07c0cf49abd1f53d3caa00c69e5aa1c90a"
+source = "git+https://github.com/TyxMatty/Jay-I?rev=60de872dee82c5be37d2ea15c5f94d0dddffde26#60de872dee82c5be37d2ea15c5f94d0dddffde26"
 dependencies = [
  "serde",
+ "serde_json",
  "sha2",
- "ureq",
+ "windows",
  "winreg",
 ]
 
