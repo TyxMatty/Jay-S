@@ -17,7 +17,7 @@ use sha2::{Digest, Sha256};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::time::{Duration, Instant};
 
 /// A file Jay-S may download: where from, and what it must be.
@@ -266,6 +266,8 @@ pub struct Server {
     child: Child,
     port: u16,
     key: String,
+    /// -1: no seed (the app, always). Set only by measurements, so answers repeat.
+    seed: AtomicI64,
     #[cfg(windows)]
     _job: job::Job,
 }
@@ -333,6 +335,7 @@ impl Server {
             child,
             port,
             key,
+            seed: AtomicI64::new(-1),
             #[cfg(windows)]
             _job: job,
         };
@@ -360,6 +363,11 @@ impl Server {
         ureq::get(&self.url("/health")).header("Authorization", format!("Bearer {}", self.key)).call().is_ok_and(|r| r.status() == 200)
     }
 
+    /// A fixed seed for the following requests (`None`: random again). Measurement only.
+    pub fn set_seed(&self, seed: Option<u32>) {
+        self.seed.store(seed.map_or(-1, i64::from), Ordering::Relaxed);
+    }
+
     pub fn port(&self) -> u16 {
         self.port
     }
@@ -372,16 +380,8 @@ impl Server {
 
     /// `chat` at a chosen temperature: low where the answer must stick to the sources.
     pub fn chat_at(&self, temperature: f32, messages: &[Value], schema: Option<&Value>, max_tokens: u32, on_token: &mut dyn FnMut(usize), cancel: &AtomicBool) -> Result<String, AiError> {
-        let mut body = json!({
-            "messages": messages,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-            "top_p": 0.9,
-            "stream": true,
-        });
-        if let Some(schema) = schema {
-            body["response_format"] = json!({ "type": "json_schema", "json_schema": { "name": "reply", "schema": schema } });
-        }
+        let seed = self.seed.load(Ordering::Relaxed);
+        let body = request_body(temperature, messages, schema, max_tokens, (seed >= 0).then_some(seed));
         let response = ureq::post(&self.url("/v1/chat/completions"))
             .header("Authorization", format!("Bearer {}", self.key))
             .config()
@@ -420,6 +420,23 @@ impl Server {
             _ => Ok(text),
         }
     }
+}
+
+fn request_body(temperature: f32, messages: &[Value], schema: Option<&Value>, max_tokens: u32, seed: Option<i64>) -> Value {
+    let mut body = json!({
+        "messages": messages,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "top_p": 0.9,
+        "stream": true,
+    });
+    if let Some(schema) = schema {
+        body["response_format"] = json!({ "type": "json_schema", "json_schema": { "name": "reply", "schema": schema } });
+    }
+    if let Some(seed) = seed {
+        body["seed"] = json!(seed);
+    }
+    body
 }
 
 impl Drop for Server {
@@ -617,6 +634,13 @@ mod tests {
         assert!(matches!(unzip(&zip_path, &dir.join("out")), Err(AiError::Io(_))));
         assert!(!dir.join("outside.txt").exists());
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn the_seed_is_in_the_request_only_when_set() {
+        let messages = [json!({ "role": "user", "content": "oi" })];
+        assert!(request_body(0.6, &messages, None, 10, None).get("seed").is_none());
+        assert_eq!(request_body(0.6, &messages, None, 10, Some(7))["seed"], 7);
     }
 
     #[test]

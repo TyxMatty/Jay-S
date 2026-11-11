@@ -42,6 +42,9 @@ fn main() {
     let materials: Vec<String> = args[2..].iter().map(|f| store.import(std::path::Path::new(f)).expect("import").id).collect();
     let server = Server::start(&AiPaths::new(std::path::Path::new(&args[1])), ModelChoice::Standard).expect("server");
     let cancel = AtomicBool::new(false);
+    if let Some(seed) = std::env::var("PROBE_SEED").ok().and_then(|v| v.parse().ok()) {
+        server.set_seed(Some(seed));
+    }
     let chats = [(Scope { materials, attempt: None }, &SCOPED[..]), (Scope::default(), &GENERAL[..]), (Scope::default(), &PERSONAL[..]), (Scope::default(), &MIXED[..]), (Scope::default(), &ENGLISH[..])];
     // Only one conversation, for repeated runs: PROBE_GENERAL=1 (the second), PROBE_PERSONAL=1 (the
     // third), PROBE_MIXED=1 (the fourth), PROBE_ENGLISH=1 (the fifth).
