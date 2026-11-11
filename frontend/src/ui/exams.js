@@ -9,6 +9,8 @@ import { aiReady } from '../core/ai.js';
 import { t, language } from '../core/i18n.js';
 import { createRunner, createResult } from './runner.js';
 import { studyFailureText } from './study-text.js';
+import { createTabs } from './tabs.js';
+import { createReadyMade } from './ready-made.js';
 
 const date = (ms) => new Intl.DateTimeFormat(language(), { dateStyle: 'short', timeStyle: 'short' }).format(ms);
 const fmt = (n) => new Intl.NumberFormat(language(), { maximumFractionDigits: 1 }).format(n);
@@ -267,7 +269,7 @@ export function createExamsPanel() {
     make.hidden = true;
     // A build in progress: open the builder so its progress shows.
     invoke('job_status').then((j) => j?.kind === 'exam' && (make.hidden = false)).catch(() => {});
-    const newButton = h('button', { type: 'button', class: 'btn', disabled: !isTauri, onClick: () => { make.hidden = !make.hidden; if (!make.hidden) make.refresh(); } }, h('span', { class: 'btn-icon', html: icons.exam }), t('New exam'));
+    const newButton = h('button', { type: 'button', class: 'btn', disabled: !isTauri, onClick: () => { tabs.select('mine'); make.hidden = !make.hidden; if (!make.hidden) make.refresh(); } }, h('span', { class: 'btn-icon', html: icons.exam }), t('New exam'));
 
     async function start(id, mode) {
       try {
@@ -334,9 +336,22 @@ export function createExamsPanel() {
     resultsBox.append(history.list);
     load();
     history.load();
-    const section = h('section', { class: 'app-panel is-single' }, h('div', { class: 'panel-head' }, h('h1', {}, t('Exams')), newButton), message, make, goingBox, empty, list, resultsBox);
+    const mine = h('div', {}, make, goingBox, empty, list, resultsBox);
+    const ready = createReadyMade({ onOpen: (id) => start(id, 'exam'), onChange: () => load() });
+    const tabs = createTabs({
+      idPrefix: 'exams',
+      label: t('Kinds of exams'),
+      className: 'material-tabs',
+      items: [
+        { key: 'mine', label: h('span', { class: 'tab-label' }, h('span', { class: 'tab-icon', html: icons.exam }), t('My exams')), panel: mine },
+        { key: 'ready', label: h('span', { class: 'tab-label' }, h('span', { class: 'tab-icon', html: icons.download }), t('Ready-made exams')), panel: ready },
+      ],
+    });
+    tabs.select('mine');
+    const section = h('section', { class: 'app-panel is-single' }, h('div', { class: 'panel-head' }, h('h1', {}, t('Exams')), newButton), message, tabs.list, mine, ready);
     section.dispose = () => {
       make.dispose?.();
+      ready.dispose();
       history.dispose();
     };
     return section;

@@ -118,10 +118,10 @@ fn manual_index(text: &str) -> Option<usize> {
 
 /// The screen each paragraph of the guide is about, by paragraph index (same in both languages);
 /// "" for the overview, the Jay-AI section, the chat and the limits: no button there.
-const SECTIONS: [&str; 29] = [
+const SECTIONS: [&str; 30] = [
     "", "", // overview, what depends on Jay-AI
     "materials", "materials", "materials", "materials", "materials", // attach, drag, kinds, card, answer key
-    "exams", "exams", "exams", "exams", "exams", "exams", // build, styles, reuse, take, learning mode, leave
+    "exams", "exams", "exams", "exams", "exams", "exams", "exams", // build, styles, reuse, ready-made, take, learning mode, leave
     "mock", "exams", // mock test, result and analysis
     "flashcards", "flashcards", "flashcards", // create, from an exam, review
     "materials", "materials", // Explain, its questions

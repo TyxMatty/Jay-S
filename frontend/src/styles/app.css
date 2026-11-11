@@ -3382,3 +3382,35 @@ button.chat-chip:hover {
   width: 18px;
   height: 18px;
 }
+
+.chip[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--surface-2);
+  font-weight: 600;
+}
+
+.ready-made-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-4) 0;
+}
+
+.ready-made > .hint[data-tone] {
+  margin: var(--space-3) 0;
+}
+
+.ready-made-year {
+  width: auto;
+}
+
+.material-actions .hint {
+  align-self: center;
+  margin: 0;
+}
+
+/* A long title wraps inside its card instead of widening the list on a narrow window. */
+.material-list {
+  grid-template-columns: minmax(0, 1fr);
+}

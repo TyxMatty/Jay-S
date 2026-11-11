@@ -19,7 +19,7 @@ The study app of the Jay line: attach your content and your exams, and **Jay-AI*
 
 ## Download
 
-Download `Jay-S_<version>_x64-setup.exe` from the **[latest release](https://github.com/TyxMatty/Jay-S/releases/latest)** (Windows, 64-bit). Jay-AI is not in the installer: its runtime and model (1.3 or 2.7 GB) are downloaded once, when you turn Jay-AI on in the app. Every version is listed under [releases](https://github.com/TyxMatty/Jay-S/releases).
+Download `Jay-S_<version>_x64-setup.exe` from the **[latest release](https://github.com/TyxMatty/Jay-S/releases/latest)** (Windows, 64-bit). Jay-AI is not in the installer: its runtime and model (1.3 or 2.7 GB) are downloaded once, when you turn Jay-AI on in the app. The only other download is a ready-made exam (the UEPG Vestibular 2025 ones, with the official answer key), fetched from the university's website when you choose it; nothing of yours is sent. Every version is listed under [releases](https://github.com/TyxMatty/Jay-S/releases).
 
 The plan, the stages and what was measured are in [docs/ARQUITETURA.en.md](docs/ARQUITETURA.en.md). The security review (trust boundaries, CWE and OWASP LLM mapping, Semgrep, open findings) is in [docs/SEGURANCA.en.md](docs/SEGURANCA.en.md).
 

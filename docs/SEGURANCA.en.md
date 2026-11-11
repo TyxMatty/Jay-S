@@ -18,7 +18,7 @@ One person, one Windows account, no server and no accounts. The interesting boun
 | Model output (Jay-AI) | **Hostile**: it reads hostile files | Fill a JSON schema that Rust validates again | Decide a grade, an answer key, a file, the kind of a material, or anything shown as HTML |
 | `llama-server` (child process) | Trusted binary, pinned by SHA-256 | Listen on `127.0.0.1:<random port>` with a random key | Be reached by a web page in a browser (no key, no permissive CORS) |
 | Other local processes / web pages | Untrusted | Nothing | Read the server key (environment variable, not command line); call `llama-server` without it (401) |
-| Download sources (GitHub, Hugging Face) | Untrusted transport | Deliver bytes over HTTPS | Have them run before URL, size and SHA-256 match the values in the code (Jay-AI) or, for the app's update, this repository's address and the SHA-256 GitHub computed |
+| Download sources (GitHub, Hugging Face; `www2.uepg.br`, the ready-made exam catalogue's PDFs) | Untrusted transport | Deliver bytes over HTTPS | Have them run before URL, size and SHA-256 match the values in the code (Jay-AI) or, for the app's update, this repository's address and the SHA-256 GitHub computed |
 
 **The model has no tools.** It can't write files, call commands, open URLs or change state. Every effect (saving, grading, picking an answer key, the kind of a material) is decided by Rust code from validated data. This is the main reason LLM06 (Excessive Agency) has no attack surface here.
 
@@ -54,7 +54,7 @@ Each sentence must carry a **literal quote** from a passage Rust picked. Rust ch
 | Answer key withheld until the end; timer checked in Rust | CWE-200, CWE-602 | LLM02 Sensitive Information Disclosure | `records.rs` | `exam_mode_hides_answers_until_the_end` |
 | Server on `127.0.0.1`, random port, random key, key via env | CWE-306, CWE-214 | — | `ai.rs:284–302` | T4 test |
 | `llama-server` started with `Command` + argument list, fixed path | CWE-78 | — | `ai.rs:292` | — |
-| Downloads: HTTPS only, URL + size + SHA-256 pinned in code, `.part` until hashed | CWE-494, CWE-345 | LLM03 Supply Chain | `ai.rs` | `only_https_downloads`, `a_complete_part_with_the_wrong_hash_is_deleted_and_never_named` |
+| Downloads: HTTPS only, URL + size + SHA-256 pinned in code, `.part` until hashed | CWE-494, CWE-345 | LLM03 Supply Chain | `ai.rs`, `catalog.rs` | `only_https_downloads`, `a_complete_part_with_the_wrong_hash_is_deleted_and_never_named`, `hostile_ids_touch_nothing`, `a_tampered_download_leaves_nothing` |
 | Runtime zip: names that leave the folder refused | CWE-22 (zip slip) | LLM03 | `ai.rs` | `zip_slip_is_refused` |
 | Reader limits: 200 MB, pages, ZIP decompression, XML depth, `catch_unwind` | CWE-409, CWE-776, CWE-400 | — | `extract/` | `huge_files_are_refused`, `zip_bomb_is_refused`, `too_deep_is_refused`, `truncated_pdf_reads_what_it_can_or_fails_cleanly` |
 | One model request at a time, fixed `n_predict`, timeout, Stop; server closes 2 min after the last request | CWE-400, CWE-770 | LLM10 Unbounded Consumption | `ai.rs`, `study.rs` | `scripts/test-cancel.js` (in the app) |

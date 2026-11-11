@@ -18,7 +18,7 @@ Uma pessoa, uma conta do Windows, sem servidor e sem contas. As fronteiras que i
 | Saída do modelo (Jay-AI) | **Hostil**: ele lê arquivos hostis | Preencher um esquema JSON que o Rust valida de novo | Decidir uma nota, um gabarito, um arquivo, o tipo de um material ou qualquer coisa mostrada como HTML |
 | `llama-server` (processo filho) | Binário confiável, fixado por SHA-256 | Escutar em `127.0.0.1:<porta aleatória>` com chave aleatória | Ser alcançado por uma página aberta no navegador (sem chave, sem CORS permissivo) |
 | Outros processos locais / páginas web | Não confiáveis | Nada | Ler a chave do servidor (variável de ambiente, não linha de comando); chamar o `llama-server` sem ela (401) |
-| Fontes de download (GitHub, Hugging Face) | Transporte não confiável | Entregar bytes por HTTPS | Fazer esses bytes rodarem antes que URL, tamanho e SHA-256 batam com os valores do código (o Jay-AI) ou, na atualização do app, com o endereço deste repositório e o SHA-256 que o GitHub calculou |
+| Fontes de download (GitHub, Hugging Face; `www2.uepg.br`, os PDFs do catálogo de provas prontas) | Transporte não confiável | Entregar bytes por HTTPS | Fazer esses bytes rodarem antes que URL, tamanho e SHA-256 batam com os valores do código (o Jay-AI) ou, na atualização do app, com o endereço deste repositório e o SHA-256 que o GitHub calculou |
 
 **O modelo não tem ferramentas.** Não grava arquivos, não chama comandos, não abre URLs nem muda estado. Todo efeito (salvar, corrigir, escolher o gabarito, o tipo de um material) é decidido por código Rust a partir de dados validados. É o principal motivo de o LLM06 (Excessive Agency) não ter superfície de ataque aqui.
 
@@ -54,7 +54,7 @@ Cada frase tem de trazer uma **citação literal** de um trecho que o Rust escol
 | Gabarito retido até o fim; tempo conferido no Rust | CWE-200, CWE-602 | LLM02 Sensitive Information Disclosure | `records.rs` | `exam_mode_hides_answers_until_the_end` |
 | Servidor em `127.0.0.1`, porta e chave aleatórias, chave por variável de ambiente | CWE-306, CWE-214 | — | `ai.rs:284–302` | teste do T4 |
 | `llama-server` iniciado com `Command` + lista de argumentos, caminho fixo | CWE-78 | — | `ai.rs:292` | — |
-| Downloads: só HTTPS, URL + tamanho + SHA-256 fixados no código, `.part` até conferir | CWE-494, CWE-345 | LLM03 Supply Chain | `ai.rs` | `only_https_downloads`, `a_complete_part_with_the_wrong_hash_is_deleted_and_never_named` |
+| Downloads: só HTTPS, URL + tamanho + SHA-256 fixados no código, `.part` até conferir | CWE-494, CWE-345 | LLM03 Supply Chain | `ai.rs`, `catalog.rs` | `only_https_downloads`, `a_complete_part_with_the_wrong_hash_is_deleted_and_never_named`, `hostile_ids_touch_nothing`, `a_tampered_download_leaves_nothing` |
 | Zip do runtime: nomes que saem da pasta são recusados | CWE-22 (zip slip) | LLM03 | `ai.rs` | `zip_slip_is_refused` |
 | Limites dos leitores: 200 MB, páginas, descompressão de ZIP, profundidade de XML, `catch_unwind` | CWE-409, CWE-776, CWE-400 | — | `extract/` | `huge_files_are_refused`, `zip_bomb_is_refused`, `too_deep_is_refused`, `truncated_pdf_reads_what_it_can_or_fails_cleanly` |
 | Um pedido ao modelo por vez, `n_predict` fixo, timeout, Parar; servidor fecha 2 min depois do último pedido | CWE-400, CWE-770 | LLM10 Unbounded Consumption | `ai.rs`, `study.rs` | `scripts/test-cancel.js` (no app) |
