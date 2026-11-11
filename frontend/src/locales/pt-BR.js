@@ -246,7 +246,7 @@ export default {
   "Rating undone.": "Avaliação desfeita.",
   "This card was:": "Este cartão estava:",
   "All reviewed for now!": "Tudo revisado por agora!",
-  "{time} on the cards · {avg} per card": "{time} nos cartões · {avg} por cartão",
+  "{time} on the cards · {avg} per rating": "{time} nos cartões · {avg} por avaliação",
   "You forgot:": "Você errou:",
   "and {n} more": "e mais {n}",
   "{n} cards are still due now.": "Ainda faltam {n} cartões para revisar agora.",

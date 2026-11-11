@@ -20,6 +20,26 @@ const DAY_MS: u64 = 24 * 3600 * 1000;
 /// The ratings, in the order of the buttons: forgot, hard, good, easy.
 pub const QUALITIES: [u8; 4] = [1, 3, 4, 5];
 
+/// First pass of a card (new, or relearned after a lapse), in days: hard, good, easy.
+const FIRST_STEP: [f32; 3] = [0.5, 1.0, 4.0];
+/// No interval past 100 years (Anki's cap): beyond it the numbers mean nothing.
+const MAX_INTERVAL: f32 = 36_500.0;
+
+/// The interval in days after a passing rating (3 hard, 4 good, 5 easy), `reps` counting this pass.
+/// Good is SM-2's (1, 6, then the last interval times the ease); hard grows by 1.2 and at least a
+/// day; easy is good times 1.3. Good stays a day above hard and easy a day above good, so the three
+/// buttons never collapse into one, and an interval never shrinks.
+fn pass_interval(reps: u32, last: f32, ease: f32, quality: u8) -> f32 {
+    let k = (quality.clamp(3, 5) - 3) as usize;
+    if reps <= 1 {
+        return FIRST_STEP[k];
+    }
+    let hard = (last * 1.2).round().max((last + 1.0).round());
+    let good = if reps == 2 { 6.0 } else { (last * ease).round() }.max(hard + 1.0);
+    let easy = (good * 1.3).round().max(good + 1.0);
+    [hard, good, easy][k].min(MAX_INTERVAL)
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Card {
     pub front: String,
@@ -39,8 +59,8 @@ impl Card {
         Self { front, back, topic, ease: 2.5, interval: 0.0, reps: 0, lapses: 0, due: now }
     }
 
-    /// SM-2 with the student's rating: 1 forgot, 3 hard, 4 good, 5 easy. A forgotten card comes back
-    /// in 10 minutes.
+    /// SM-2 with Anki's split of the passing ratings: 1 forgot, 3 hard, 4 good, 5 easy. A forgotten
+    /// card comes back in 10 minutes; the ease moves exactly as in SM-2.
     pub fn review(&mut self, quality: u8, now: u64) {
         let q = quality.min(5) as f32;
         if quality < 3 {
@@ -50,12 +70,8 @@ impl Card {
             self.due = now + 10 * 60 * 1000;
         } else {
             self.reps += 1;
-            self.interval = match self.reps {
-                1 => 1.0,
-                2 => 6.0,
-                _ => (self.interval * self.ease).round(),
-            };
-            // Saturating: after dozens of "good" in a row the interval overflows a u64 of ms.
+            self.interval = pass_interval(self.reps, self.interval, self.ease, quality);
+            // Saturating: a long interval must never wrap a u64 of ms.
             self.due = now.saturating_add((self.interval * DAY_MS as f32) as u64);
         }
         self.ease = (self.ease + (0.1 - (5.0 - q) * (0.08 + (5.0 - q) * 0.02))).max(1.3);
@@ -63,14 +79,15 @@ impl Card {
 
     /// A repeat of a card already forgotten in this session. Classic SM-2 sets the E-Factor from the
     /// first answer of the day, repeats failed items until they pass, and restarts a lapsed item at
-    /// I(1) = 1 day: so a second "forgot" changes nothing but the 10 minutes, and a pass starts over.
+    /// its first step: so a second "forgot" changes nothing but the 10 minutes, and a pass starts
+    /// over at the first step of that rating (half a day, 1 day or 4 days), ease untouched.
     pub fn relearn(&mut self, quality: u8, now: u64) {
         if quality < 3 {
             self.due = now + 10 * 60 * 1000;
         } else {
             self.reps = 1;
-            self.interval = 1.0;
-            self.due = now + DAY_MS;
+            self.interval = pass_interval(1, 0.0, self.ease, quality);
+            self.due = now.saturating_add((self.interval * DAY_MS as f32) as u64);
         }
     }
 
@@ -399,18 +416,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn sm2_matches_the_reference() {
+    fn schedule_matches_the_reference() {
+        // Good is SM-2's (1, 6, interval x ease); easy x1.3 on top; hard x1.2 and at least a day.
         let mut c = Card::new("f".into(), "b".into(), "t".into(), 0);
         c.review(4, 0);
         assert_eq!((c.reps, c.interval, c.ease), (1, 1.0, 2.5));
         c.review(4, 0);
         assert_eq!((c.reps, c.interval), (2, 6.0));
         c.review(5, 0);
-        assert_eq!((c.reps, c.interval), (3, 15.0));
+        assert_eq!((c.reps, c.interval), (3, 20.0)); // good would be 6 x 2.5 = 15; easy 15 x 1.3
         assert!((c.ease - 2.6).abs() < 1e-5);
         c.review(3, 0);
         assert!((c.ease - 2.46).abs() < 1e-5, "{}", c.ease);
-        assert_eq!(c.interval, 39.0);
+        assert_eq!(c.interval, 24.0); // 20 x 1.2
+        c.review(4, 0);
+        assert_eq!(c.interval, 59.0); // 24 x 2.46, SM-2's good
+        // A new card's first step: hard half a day, good 1 day, easy 4 days.
+        for (q, days) in [(3, 0.5), (4, 1.0), (5, 4.0)] {
+            let mut n = Card::new("f".into(), "b".into(), "t".into(), 0);
+            n.review(q, 0);
+            assert_eq!(n.interval, days);
+        }
         // Forgot: back to the start, due in 10 minutes, ease down 0.54.
         c.review(1, 1000);
         assert_eq!((c.reps, c.lapses, c.interval, c.due), (0, 1, 0.0, 1000 + 600_000));
@@ -419,6 +445,41 @@ mod tests {
             c.review(0, 0);
         }
         assert_eq!(c.ease, 1.3);
+    }
+
+    #[test]
+    fn hard_good_easy_keep_their_order_and_never_shrink() {
+        let now = 1_000_000;
+        let lasts = [0.0, 0.5, 1.0, 2.0, 3.0, 4.0, 6.0, 10.0, 15.0, 40.0, 100.0, 365.0, 1000.0, 10_000.0, 30_000.0, 36_500.0];
+        let mut checked = 0;
+        for reps in 0..6 {
+            for &interval in &lasts {
+                for e in 0..=20 {
+                    let ease = 1.3 + e as f32 * 0.1;
+                    let card = Card { ease, interval, reps, ..Card::new("f".into(), "b".into(), "t".into(), now) };
+                    for again in [false, true] {
+                        let [forgot, hard, good, easy] = card.preview(now, again);
+                        assert!(forgot < hard, "{card:?} {again}");
+                        let capped = good >= (MAX_INTERVAL * DAY_MS as f32) as u64;
+                        assert!(hard <= good && good <= easy, "{card:?} {again}");
+                        assert!(capped || (hard < good && good < easy), "{card:?} {again}: {hard} {good} {easy}");
+                        if !again && reps >= 1 {
+                            // Past the first step, a pass never brings the card back sooner than before.
+                            // (in days, with room for the f32 ms of a 100-year interval)
+                            assert!(hard as f64 / DAY_MS as f64 >= interval as f64 - 0.01, "{card:?}");
+                        }
+                        checked += 1;
+                    }
+                }
+            }
+        }
+        assert_eq!(checked, 6 * 16 * 21 * 2);
+        // Easy forever: the interval stops at the cap and the due date never wraps.
+        let mut c = Card::new("f".into(), "b".into(), "t".into(), now);
+        for _ in 0..200 {
+            c.review(5, u64::MAX - 1);
+        }
+        assert_eq!((c.interval, c.due), (MAX_INTERVAL, u64::MAX));
     }
 
     #[test]
@@ -445,11 +506,11 @@ mod tests {
             }
         }
         let new = Card::new("f".into(), "b".into(), "t".into(), now);
-        assert_eq!(new.preview(now, false), [600_000, DAY_MS, DAY_MS, DAY_MS]);
+        assert_eq!(new.preview(now, false), [600_000, DAY_MS / 2, DAY_MS, 4 * DAY_MS]);
         let mut two = new;
         two.review(4, now);
         two.review(4, now);
-        assert_eq!(two.preview(now, false), [600_000, 15 * DAY_MS, 15 * DAY_MS, 15 * DAY_MS]);
+        assert_eq!(two.preview(now, false), [600_000, 7 * DAY_MS, 15 * DAY_MS, 20 * DAY_MS]);
     }
 
     #[test]
@@ -472,6 +533,7 @@ mod tests {
             x.relearn(q, now);
             assert_eq!(p[k], x.due - now);
         }
+        assert_eq!(c.preview(now, true), [600_000, DAY_MS / 2, DAY_MS, 4 * DAY_MS]);
         c.relearn(4, now);
         assert_eq!((c.reps, c.interval, c.due, c.ease, c.lapses), (1, 1.0, now + DAY_MS, ease, 1));
         c.review(4, now);
@@ -644,7 +706,7 @@ mod tests {
         assert_eq!(s.due_now, 0);
         let next = s.next_due.unwrap();
         assert!(next <= DAY_MS && next > DAY_MS - 60_000, "{next}");
-        assert_eq!(s.next_count, 2); // cards 0 and 1; card 2 was rated before too, so "hard" puts it 6 days out
+        assert_eq!(s.next_count, 1); // card 0 (relearned, 1 day); card 1 easy on its first pass is 4 days, card 2 hard on its second is 2
         std::fs::remove_dir_all(root).unwrap();
     }
 }

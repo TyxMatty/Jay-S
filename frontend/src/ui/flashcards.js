@@ -176,7 +176,7 @@ function review(deck, cards, onDone, { again = false, practice = false } = {}) {
       })),
       h('ul', { class: 'session-legend' }, ...RATINGS.map((r, k) => s.counts[k] ? h('li', { 'data-tone': r[3] }, r[1](), `${s.counts[k]} ${word(k)}`) : null).filter(Boolean)),
     );
-    if (reviews) summaryBody.append(h('p', { class: 'hint' }, t('{time} on the cards · {avg} per card', { time: clockText(s.ms), avg: new Intl.NumberFormat(language(), { style: 'unit', unit: 'second', unitDisplay: 'short' }).format(Math.round(s.ms / reviews / 1000)) })));
+    if (reviews) summaryBody.append(h('p', { class: 'hint' }, t('{time} on the cards · {avg} per rating', { time: clockText(s.ms), avg: new Intl.NumberFormat(language(), { style: 'unit', unit: 'second', unitDisplay: 'short' }).format(Math.round(s.ms / reviews / 1000)) })));
     if (s.forgotten.length) {
       summaryBody.append(
         h('div', { class: 'session-forgot' },
