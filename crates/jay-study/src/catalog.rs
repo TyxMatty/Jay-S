@@ -4,9 +4,15 @@
 //! question has no sum (everyone gets the point); an annulled proposition (`void_options`) is left
 //! out of the sum and the share of the others is recalculated (Res. UNIV 2023.15, art. 26).
 
-use crate::ai::Download;
-use crate::exam::Question;
+use crate::ai::{AiError, Download, download};
+use crate::exam::{self, Question, Source};
+use crate::records::{BuildError, Exam};
+use crate::store::{Store, StoreError, now_ms, read_json, write_json};
+use crate::{extract, id};
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::sync::Mutex;
+use std::sync::atomic::AtomicBool;
 
 /// The key's edital (Edital 51/2025-CPS, after appeals), kept for reference.
 pub const KEY_URL: &str = "https://www2.uepg.br/cps/wp-content/uploads/sites/270/2025/12/EDITAL-N-51_2025-_CPS_GABARITO-VESTIBULAR-2025_Apos-Recursos.pdf";
@@ -271,10 +277,133 @@ pub const ENTRIES: [Entry; 8] = [
     },
 ];
 
+/// The biggest catalogue file Jay-S downloads (the catalogue test keeps every entry under it too).
+const MAX_DOWNLOAD: u64 = 20 << 20;
+
+/// One at a time: a second call for an entry waits, then finds it ready. (One lock for all entries,
+/// not one per entry: the app runs a single long job anyway, and this is stricter.)
+static GETTING: Mutex<()> = Mutex::new(());
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum CatalogState {
+    NotDownloaded,
+    Ready { exam: String },
+}
+
+/// What the page shows of an entry: never the URL or the key.
+#[derive(Debug, Clone, Serialize)]
+pub struct CatalogItem {
+    pub id: &'static str,
+    pub family: &'static str,
+    pub year: u32,
+    pub title: &'static str,
+    pub style: &'static str,
+    pub questions: u32,
+    /// Bytes to download.
+    pub size: u64,
+    pub official_key: bool,
+    #[serde(flatten)]
+    pub state: CatalogState,
+}
+
+/// `<data>/catalog/<entry id>.json`: where a downloaded entry went.
+#[derive(Serialize, Deserialize)]
+struct Record {
+    material: String,
+    exam: String,
+}
+
+impl Store {
+    fn catalog_dir(&self) -> std::path::PathBuf {
+        self.root().join("catalog")
+    }
+
+    /// The exam built from `entry`, if it still exists (the student may have deleted it).
+    fn catalog_exam(&self, entry: &Entry) -> Option<String> {
+        let record: Record = read_json(&self.catalog_dir().join(format!("{}.json", entry.id))).ok()?;
+        self.exam(&record.exam).ok().map(|e| e.id)
+    }
+
+    pub fn catalog(&self) -> Vec<CatalogItem> {
+        ENTRIES
+            .iter()
+            .map(|e| CatalogItem {
+                id: e.id,
+                family: e.family,
+                year: e.year,
+                title: e.title,
+                style: e.style,
+                questions: e.questions,
+                size: e.download.size,
+                official_key: true,
+                state: self.catalog_exam(e).map_or(CatalogState::NotDownloaded, |exam| CatalogState::Ready { exam }),
+            })
+            .collect()
+    }
+
+    /// Downloads a catalogue exam (checked against its pinned size and SHA-256), reads it, puts the
+    /// official key on it and saves it as an exam; no Jay-AI. Only an id from `ENTRIES` is taken.
+    /// Returns the exam's id; an entry already made returns its exam without downloading.
+    pub fn get_ready_made(&self, entry_id: &str, progress: &mut dyn FnMut(u64, u64), cancel: &AtomicBool) -> Result<String, BuildError> {
+        let entry = ENTRIES.iter().find(|e| e.id == entry_id).ok_or(StoreError::NotFound)?;
+        // Belt and braces over the catalogue test: one host, a size cap.
+        let d = &entry.download;
+        if !d.url.starts_with("https://www2.uepg.br/") || d.size > MAX_DOWNLOAD {
+            return Err(AiError::Network("not an allowed download".into()).into());
+        }
+        let _one = GETTING.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(exam) = self.catalog_exam(entry) {
+            return Ok(exam);
+        }
+        std::fs::create_dir_all(self.catalog_dir()).map_err(StoreError::from)?;
+        let pdf = self.catalog_dir().join(format!("{}.pdf", entry.id));
+        // shortcut: ureq ignores the Windows system proxy, so behind one the download fails with a
+        // network error; upgrade when a student reports it (same for the model download).
+        download(d, &pdf, progress, cancel)?;
+        let bytes = std::fs::read(&pdf).map_err(StoreError::from);
+        // The store keeps its own copy (`original.pdf`); the downloaded file is not needed.
+        let _ = std::fs::remove_file(&pdf);
+        let bytes = bytes?;
+        let format = extract::detect(&bytes[..bytes.len().min(4096)]).ok_or(StoreError::Extract(extract::ExtractError::Unsupported))?;
+        // The same file may already be a material (the student's own, or the other Conhecimentos
+        // Gerais entry's): that one is not ours to remove.
+        let had = self.materials().iter().any(|m| m.sha256.as_deref() == Some(d.sha256));
+        let name: String = format!("{}.pdf", entry.title).chars().take(200).collect();
+        let material = self.import_bytes(&name, format, bytes)?;
+        let built = self.build_catalog_exam(entry, &material.id);
+        if built.is_err() && !had {
+            let _ = self.delete(&material.id);
+        }
+        built
+    }
+
+    fn build_catalog_exam(&self, entry: &Entry, material: &str) -> Result<String, BuildError> {
+        let all = exam::split_questions(&self.text(material, usize::MAX)?);
+        let mut questions = entry.keep_language(all);
+        if questions.iter().map(|q| q.number).ne(1..=entry.questions) {
+            return Err(BuildError::Empty);
+        }
+        for q in &mut questions {
+            q.source = Some(Source { material: material.to_owned(), number: Some(q.number) });
+        }
+        if entry.apply(&mut questions) != entry.answers.len() {
+            return Err(BuildError::Empty);
+        }
+        let exam = Exam { id: id::new_id(), title: entry.title.to_owned(), style: entry.style.to_owned(), created: now_ms(), questions, materials: vec![material.to_owned()] };
+        self.save_exam(&exam)?;
+        let record = write_json(&self.catalog_dir().join(format!("{}.json", entry.id)), &Record { material: material.to_owned(), exam: exam.id.clone() });
+        if let Err(e) = record {
+            let _ = self.delete_exam(&exam.id);
+            return Err(StoreError::from(e).into());
+        }
+        Ok(exam.id)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{exam, extract, id};
     use sha2::{Digest, Sha256};
 
     fn hex64(s: &str) -> bool {
@@ -345,6 +474,101 @@ mod tests {
             entry("uepg-2025-cg-espanhol").keep_language(qs).iter().map(|q| q.stem.clone()).collect::<Vec<_>>()
         };
         assert_eq!(tag(all()), ["", "es", ""]);
+    }
+
+    fn temp_store() -> (Store, std::path::PathBuf) {
+        let root = std::env::temp_dir().join(format!("jay-study-catalog-{}", id::new_id()));
+        (Store::open(&root).unwrap(), root)
+    }
+
+    /// Every file and folder under `dir`, sorted.
+    fn tree(dir: &std::path::Path) -> Vec<String> {
+        let mut out = vec![];
+        let mut todo = vec![dir.to_path_buf()];
+        while let Some(d) = todo.pop() {
+            for e in std::fs::read_dir(&d).unwrap().flatten() {
+                out.push(e.path().strip_prefix(dir).unwrap().to_string_lossy().into_owned());
+                if e.path().is_dir() {
+                    todo.push(e.path());
+                }
+            }
+        }
+        out.sort();
+        out
+    }
+
+    #[test]
+    fn hostile_ids_touch_nothing() {
+        let (store, root) = temp_store();
+        let before = tree(&root);
+        let cancel = AtomicBool::new(false);
+        let long = "a".repeat(10_000);
+        for bad in ["../x", "", "https://evil", "https://www2.uepg.br/cps/x.pdf", "..\\..", "uepg-2025-grupo-1/../x", "uepg-2025-grupo-1x", "uepg-2025-grupo-1 ", "UEPG-2025-GRUPO-1", long.as_str()] {
+            let r = store.get_ready_made(bad, &mut |_, _| panic!("downloading {bad:?}"), &cancel);
+            assert!(matches!(r, Err(BuildError::Store(StoreError::NotFound))), "{bad:?}");
+        }
+        assert_eq!(tree(&root), before);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_tampered_download_leaves_nothing() {
+        let (store, root) = temp_store();
+        let e = entry("uepg-2025-grupo-3");
+        // A `.part` of the right size and the wrong bytes: checked without the network.
+        let part = root.join("catalog").join(format!("{}.part", e.id));
+        std::fs::create_dir_all(part.parent().unwrap()).unwrap();
+        std::fs::write(&part, vec![b'x'; e.download.size as usize]).unwrap();
+        let r = store.get_ready_made(e.id, &mut |_, _| {}, &AtomicBool::new(false));
+        assert!(matches!(r, Err(BuildError::Ai(AiError::Mismatch))), "{r:?}");
+        assert!(store.materials().is_empty() && store.exams().is_empty());
+        assert_eq!(tree(&root), ["catalog", "materials"]);
+        assert!(store.catalog().iter().all(|i| i.state == CatalogState::NotDownloaded));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn the_catalogue_lists_every_entry_and_forgets_a_deleted_exam() {
+        let (store, root) = temp_store();
+        let items = store.catalog();
+        assert_eq!(items.len(), ENTRIES.len());
+        assert!(items.iter().all(|i| i.official_key && i.state == CatalogState::NotDownloaded));
+        // A record pointing at an exam that is gone is not ready.
+        std::fs::create_dir_all(root.join("catalog")).unwrap();
+        write_json(&root.join("catalog/uepg-2025-grupo-1.json"), &Record { material: id::new_id(), exam: id::new_id() }).unwrap();
+        assert_eq!(store.catalog()[0].state, CatalogState::NotDownloaded);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Needs the local dataset: `JAYS_DATASET=<folder with exam_sum/> cargo test catalog -- --ignored`.
+    /// The real PDFs stand in for the download: a complete `.part` is verified without the network.
+    #[test]
+    #[ignore]
+    fn the_catalogue_builds_every_real_exam() {
+        let dir = std::env::var("JAYS_DATASET").expect("JAYS_DATASET");
+        let (store, root) = temp_store();
+        let cancel = AtomicBool::new(false);
+        for e in &ENTRIES {
+            let part = root.join("catalog").join(format!("{}.part", e.id));
+            std::fs::create_dir_all(part.parent().unwrap()).unwrap();
+            std::fs::copy(format!("{dir}/exam_sum/{}", e.download.file), &part).unwrap();
+            let exam_id = store.get_ready_made(e.id, &mut |_, _| {}, &cancel).unwrap();
+            let exam = store.exam(&exam_id).unwrap();
+            assert_eq!((exam.questions.len(), exam.style.as_str()), (e.questions as usize, "uepg"), "{}", e.id);
+            assert!(exam.questions.iter().all(|q| q.annulled == e.annulled.contains(&q.number) && (q.annulled || q.answer.is_some()) && q.source.is_some()), "{}", e.id);
+            let void = exam.questions.iter().filter(|q| q.void != 0).count();
+            assert_eq!(void, e.void_options.iter().map(|v| v.0).collect::<std::collections::BTreeSet<_>>().len(), "{}", e.id);
+            // The second call: the same exam, nothing downloaded or imported again.
+            let materials = store.materials().len();
+            assert_eq!(store.get_ready_made(e.id, &mut |_, _| panic!("downloaded again"), &cancel).unwrap(), exam_id);
+            assert_eq!(store.materials().len(), materials);
+            assert!(!root.join("catalog").join(format!("{}.pdf", e.id)).exists() && !part.exists());
+            assert_eq!(store.catalog().iter().find(|i| i.id == e.id).unwrap().state, CatalogState::Ready { exam: exam_id });
+            println!("{}: {} questions, {} annulled, {} with a void proposition, answers on {}", e.id, exam.questions.len(), e.annulled.len(), void, exam.questions.iter().filter(|q| q.answer.is_some()).count());
+        }
+        // Eight exams from seven materials (the two Conhecimentos Gerais entries share one file).
+        assert_eq!((store.exams().len(), store.materials().len()), (8, 7));
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// Needs the local dataset: `JAYS_DATASET=<folder with exam_sum/> cargo test catalog -- --ignored`.

@@ -141,6 +141,8 @@ impl Profile {
 #[serde(tag = "step", rename_all = "lowercase")]
 pub enum BuildStep {
     Reading,
+    /// A ready-made exam coming down (bytes).
+    Downloading { done: u64, total: u64 },
     Solving { done: usize, total: usize },
     Tagging,
     Writing { done: usize, total: usize },
