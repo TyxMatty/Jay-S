@@ -704,6 +704,25 @@ Para saber se um modelo maior resolve o que o de 4B não resolve, o Qwen3.5 9B (
 
 Pergunta por pergunta: o 9B ganhou nas novas (tamanho da amostra com erro relativo 0 → 3 de 3, população finita 2 → 3, proporção 1 → 2, dois intervalos que nunca saíam passaram a sair às vezes, mas o erro absoluto com outros números caiu de 2 para 0) e a pergunta do erro relativo copiada foi de 1 para 2 de 3; perdeu nas copiadas (a proporção 2 → 0, o erro absoluto 2 → 0) e na lógica (a chave 3 → 0, a transitividade 2 → 0). O total ficou igual. Duas verificações a mais, uma semente cada, só para saber: com pensamento nativo nas contas, 18 de 32 nos três grupos de contas, 32 s por pergunta; com "todo dado usado" e uma nova tentativa, 22 de 32 (novas 6 de 11, contra 4 de 11 do 9B sozinho na mesma semente), 24 s por pergunta. Na sonda do chat, uma rodada: nenhuma frase na língua errada em português nem em inglês; a conversa do apelido certa (a correção foi entendida); as respostas do guia confirmadas; mas as contas das aulas foram para a resposta do material, sem o número, e cinco perguntas levaram de 39 a 43 s. Leitura: o 9B cabe inteiro na placa de 8 GB e não muda a RAM do computador, ajuda as contas que não estão nos exemplos, mas não melhora o total e dobra o tempo, com uma em cada 14 respostas acima de 40 s. Pelos 10 pontos: nada mudou no app (1 a 9: nenhum modelo, download, catálogo ou argumento novo; o arquivo de fora só foi lido pelo mesmo `llama-server`); 10: o banco e a sonda, e o teste de que a função de medida recusa arquivo ou runtime ausente antes de abrir qualquer processo.
 
+### Questão e proposição anuladas (as provas)
+
+O gabarito oficial da UEPG anula questões inteiras (Física 33 no Grupo 2) e proposições (Física 38 e 40 perdem a 01). Uma questão anulada continua na prova, com o aviso "Anulada pela universidade: não conta na nota.", e fica fora da nota, dos totais por tema, do perfil e da lista de erros que alimenta a análise e o chat. Uma proposição anulada (`void`, máscara de bits) sai da soma oficial e das marcas do aluno antes de corrigir: marcar ou não marcar não muda nada, e marcar só ela vale como em branco (0 ponto, nunca negativo). Vale para `SumPartial` e `SumExact`, na prova e no modo aprender. A página mostra "Anulada" ao lado da proposição. Pelos 10 pontos:
+
+1. **Superfície de ataque.** Dois campos novos na `Question` (`annulled`, `void`); a página recebe os dois na `OpenQuestion` e o `annulled` no `Graded`. Nenhum comando, arquivo, rede ou processo novo.
+2. **Controle de acesso / IDOR.** Nada muda: quem decide o que é anulado é o Rust (o catálogo), nunca a página.
+3. **Permissões de dados.** Os campos moram no JSON da prova e da tentativa, na pasta de dados do perfil. Não saem da máquina.
+4. **Entrada não confiável.** A página não manda `annulled` nem `void`. As marcas continuam validadas como antes; a máscara só tira bits. O texto novo da página é fixo (`t()`), e o resto continua por `h()`/`textContent`. O chat diz "questão anulada" no lugar de "acertou/errou" e não cobra o que o aluno marcou nela.
+5. **Credenciais expostas.** Nenhuma.
+6. **Autenticação.** Não se aplica.
+7. **Abuso de recursos e corridas.** Nada novo: uma máscara por correção. A montagem de uma prova não pede ao Jay-AI a resposta de uma questão anulada nem a descarta por não ter gabarito.
+8. **Cadeia de dependências.** Nada novo (o `Cargo.lock` não mudou).
+9. **Rede e exposição.** Nada novo.
+10. **Testes adversariais.** `annulled_questions_and_propositions_are_left_out_of_the_grade` (Física 38: 31 vale como 30 e só a 01 vale como em branco; Física 40: 13 vale como 12; `SumExact` igual; prova de 3 questões com uma anulada: total 2, tema e perfil sem ela; JSON no formato de antes carrega e não grava os campos novos), `apply_marks_annulled_questions_and_propositions` (o catálogo marca o Grupo 2).
+
+**Diferença da UEPG:** a UEPG atribui os pontos da questão anulada a todos os candidatos; aqui ela sai do total. Entre candidatos a ordem é a mesma, mas a porcentagem mostrada difere um pouco: com 20 acertos em 44 questões válidas, a UEPG daria 21/45 (46,7%) e o Jay-S mostra 20/44 (45,5%), o desempenho no que valeu. A proposição anulada segue a regra da UEPG (a parte das restantes é recalculada).
+
+**Limites:** as provas já importadas antes desta mudança não têm os campos (ficam como estavam); o catálogo só marca as provas dele. Uma prova montada por conta própria só tem anulações se o estudante a importou pelo catálogo.
+
 ## 8. Etapas
 
 Cada etapa termina com algo testável; ao fim de cada uma, commit, resumo e a pergunta se segue para a próxima.

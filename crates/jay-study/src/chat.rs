@@ -1330,6 +1330,7 @@ impl Store {
                 // How the student did on it, graded by Rust: the model never has to work it out.
                 let points = result.and_then(|r| r.questions.get(i)).map(|g| g.points);
                 let how = match points {
+                    Some(_) if q.annulled => "Questão anulada pela universidade: não conta na nota.".to_owned(),
                     Some(p) if p >= 1.0 => "O aluno ACERTOU esta questão.".to_owned(),
                     Some(p) if p > 0.0 => format!("O aluno acertou PARTE desta questão ({} de 1 ponto).", (p * 100.0).round() / 100.0),
                     Some(_) => "O aluno ERROU esta questão.".to_owned(),
@@ -1351,7 +1352,7 @@ impl Store {
                     Some(p) if p > 0.0 => Outcome::Partial,
                     _ => Outcome::Wrong,
                 };
-                let student = Some((attempt.answers.get(i).cloned().flatten().unwrap_or_default(), outcome));
+                let student = (!q.annulled).then(|| (attempt.answers.get(i).cloned().flatten().unwrap_or_default(), outcome));
                 let p = Passage { label: format!("Questão {}", i + 1), text: text.chars().take(PASSAGE_CHARS * 2).collect(), key, student };
                 if mentioned.contains(&(i + 1).to_string()) {
                     named.push(p);
@@ -1361,7 +1362,7 @@ impl Store {
             }
             if let Some(r) = result {
                 let topics: String = r.topics.iter().map(|t| format!("\n{}: {} de {}", t.topic, t.points, t.total)).collect();
-                let wrong: Vec<String> = r.questions.iter().enumerate().filter(|(_, g)| g.points < 1.0).map(|(i, _)| (i + 1).to_string()).collect();
+                let wrong: Vec<String> = r.questions.iter().enumerate().filter(|(_, g)| g.points < 1.0 && !g.annulled).map(|(i, _)| (i + 1).to_string()).collect();
                 always.push(Passage { label: RESULT.into(), text: format!("Resultado: {} de {} pontos.\nQuestões erradas ou incompletas: {}.\nPor tópico:{topics}", r.points, r.total, if wrong.is_empty() { "nenhuma".into() } else { wrong.join(", ") }), key: None, student: None });
             }
         }

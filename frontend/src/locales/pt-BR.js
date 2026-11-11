@@ -169,6 +169,8 @@ export default {
   "No content yet: attach it in Materials.": "Nenhum conteúdo ainda: anexe em Materiais.",
   "No exams yet": "Nenhuma prova ainda",
   "Not this time.": "Não foi dessa vez.",
+  "Annulled by the university: it does not count in the score.": "Anulada pela universidade: não conta na nota.",
+  "Annulled": "Anulada",
   "Partly right ({p} of 1).": "Parcialmente certa ({p} de 1).",
   "Pick one": "Escolha uma",
   "Pick some content for the new questions, or set them to 0.": "Escolha algum conteúdo para as questões novas, ou deixe 0.",

@@ -275,7 +275,7 @@ pub fn attempts_list(library: State<Library>) -> Vec<AttemptSummary> {
         .into_iter()
         .map(|a| AttemptSummary {
             points: a.result.as_ref().map(|r| r.points),
-            total: a.answers.len(),
+            total: a.result.as_ref().map_or(a.answers.len(), |r| r.total as usize),
             answered: a.answers.iter().filter(|x| x.is_some()).count(),
             analyzed: a.analysis.is_some(),
             id: a.id,

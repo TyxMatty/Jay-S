@@ -705,6 +705,25 @@ To find out whether a larger model solves what the 4B doesn't, Qwen3.5 9B (Q4_K_
 
 Question by question: the 9B gained in the novel group (relative-error sample size 0 → 3 of 3, finite population 2 → 3, proportion 1 → 2, two intervals that never came out now sometimes do, but the absolute error with other numbers fell from 2 to 0) and the copied relative-error question went from 1 to 2 of 3; it lost in copied (the proportion 2 → 0, the absolute error 2 → 0) and in logic (the key 3 → 0, transitivity 2 → 0). The total stayed the same. Two extra checks, one seed each, only to know: with native thinking for calculations, 18 of 32 on the three calculation groups, 32 s per question; with "every given used" and one retry, 22 of 32 (novel 6 of 11, against 4 of 11 for the 9B alone on the same seed), 24 s per question. In the chat probe, one run: no sentence in the wrong language in Portuguese or English; the nickname conversation right (the correction understood); the guide answers confirmed; but the lecture calculations went to the material answer, with no number, and five questions took 39 to 43 s. Reading: the 9B fits whole on the 8 GB card and doesn't change the computer's RAM, helps the calculations that aren't in the examples, but doesn't improve the total and doubles the time, with one answer in 14 over 40 s. By the 10 points: nothing changed in the app (1 to 9: no new model, download, catalogue or argument; the outside file was only read by the same `llama-server`); 10: the benchmark and the probe, and the test that the measurement function refuses a missing file or runtime before opening any process.
 
+### Annulled questions and propositions (the exams)
+
+UEPG's official key annuls whole questions (Física 33 in Group 2) and propositions (Física 38 and 40 lose 01). An annulled question stays in the exam, with the notice "Annulled by the university: it does not count in the score.", and is left out of the score, the per-topic totals, the profile and the list of mistakes that feeds the analysis and the chat. An annulled proposition (`void`, a bitmask) leaves both the official sum and the student's marks before grading: marking it or not changes nothing, and marking only it counts as blank (0 points, never negative). It applies to `SumPartial` and `SumExact`, in exam and learning mode. The page shows "Annulled" next to the proposition. By the 10 points:
+
+1. **Attack surface.** Two new fields on `Question` (`annulled`, `void`); the page gets both in `OpenQuestion` and `annulled` in `Graded`. No new command, file, network or process.
+2. **Access control / IDOR.** Unchanged: what is annulled is decided by Rust (the catalogue), never by the page.
+3. **Data permissions.** The fields live in the exam's and attempt's JSON, in the profile's data folder. They never leave the machine.
+4. **Untrusted input.** The page sends neither `annulled` nor `void`. Marks are validated as before; the mask only removes bits. The page's new text is fixed (`t()`), and everything else still goes through `h()`/`textContent`. The chat says "annulled question" instead of "got it / missed it" and does not check what the student marked on it.
+5. **Exposed credentials.** None.
+6. **Authentication.** Not applicable.
+7. **Resource abuse and races.** Nothing new: one mask per grading. Building an exam does not ask Jay-AI for the answer to an annulled question, nor drop it for lacking a key.
+8. **Dependency chain.** Nothing new (`Cargo.lock` did not change).
+9. **Network and exposure.** Nothing new.
+10. **Adversarial tests.** `annulled_questions_and_propositions_are_left_out_of_the_grade` (Física 38: 31 counts as 30 and 01 alone counts as blank; Física 40: 13 counts as 12; `SumExact` the same; a 3-question exam with one annulled: total 2, topic and profile without it; JSON in the old format loads and does not write the new fields), `apply_marks_annulled_questions_and_propositions` (the catalogue marks Group 2).
+
+**Difference from UEPG:** UEPG gives the points of an annulled question to every candidate; here it leaves the total. Between candidates the order is the same, but the percentage shown differs a little: with 20 right out of 44 valid questions UEPG would give 21/45 (46.7%) and Jay-S shows 20/44 (45.5%), the performance on what counted. An annulled proposition follows UEPG's rule (the share of the remaining ones is recalculated).
+
+**Limits:** exams imported before this change do not have the fields (they stay as they were); the catalogue only marks its own exams. An exam built by hand only has annulments if the student imported it through the catalogue.
+
 ## 8. Stages
 
 Each stage ends with something testable; at the end of each one: commit, summary, and the question whether to go on to the next.

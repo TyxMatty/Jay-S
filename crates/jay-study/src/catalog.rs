@@ -39,6 +39,16 @@ impl Entry {
         self.answers.iter().map(|(n, s)| (*n, vec![s.to_string()])).collect()
     }
 
+    /// Puts the key on split questions: the sums, the annulled questions and the annulled propositions.
+    pub fn apply(&self, questions: &mut [Question]) -> usize {
+        let applied = crate::exam::apply_answer_key(questions, &self.answer_key());
+        for q in questions.iter_mut() {
+            q.annulled = self.annulled.contains(&q.number);
+            q.void = self.void_options.iter().filter(|v| v.0 == q.number).filter_map(|v| v.1.parse::<u32>().ok()).fold(0, |a, b| a | b);
+        }
+        applied
+    }
+
     /// The exam's questions without the other language's block.
     pub fn keep_language(&self, questions: Vec<Question>) -> Vec<Question> {
         let Some(keep) = self.language else { return questions };
@@ -314,8 +324,16 @@ mod tests {
     }
 
     #[test]
+    fn apply_marks_annulled_questions_and_propositions() {
+        let q = |number| Question { number, kind: exam::QuestionKind::Sum, passage: None, stem: String::new(), options: (0..5).map(|i| exam::QOption { label: format!("{:02}", 1 << i), text: String::new() }).collect(), answer: None, answer_by_ai: false, topic: None, explanation: None, source: None, annulled: false, void: 0 };
+        let mut qs = [33, 38, 24].map(q).to_vec();
+        assert_eq!(entry("uepg-2025-grupo-2").apply(&mut qs), 2);
+        assert_eq!(qs.iter().map(|q| (q.annulled, q.void, q.answer.as_deref())).collect::<Vec<_>>(), [(true, 0, None), (false, 1, Some("30")), (false, 0, Some("04"))]);
+    }
+
+    #[test]
     fn keep_language_drops_the_other_block() {
-        let q = |number| Question { number, kind: exam::QuestionKind::Sum, passage: None, stem: String::new(), options: vec![], answer: None, answer_by_ai: false, topic: None, explanation: None, source: None };
+        let q = |number| Question { number, kind: exam::QuestionKind::Sum, passage: None, stem: String::new(), options: vec![], answer: None, answer_by_ai: false, topic: None, explanation: None, source: None, annulled: false, void: 0 };
         let all = || [55, 56, 57, 56, 57].map(q).to_vec();
         let kept = |e: &str| entry(e).keep_language(all()).iter().map(|q| q.number).collect::<Vec<_>>();
         assert_eq!(kept("uepg-2025-cg-ingles"), [55, 56, 57]);

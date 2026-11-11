@@ -50,6 +50,20 @@ pub struct Question {
     /// Where it came from: the material id and, for a reused question, its number there.
     #[serde(default)]
     pub source: Option<Source>,
+    /// Annulled by the board: shown, but not graded and out of the total.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub annulled: bool,
+    /// Sum questions: the annulled propositions as a bitmask (0 = none). They are ignored in grading.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub void: u32,
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
+fn is_zero(n: &u32) -> bool {
+    *n == 0
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -180,6 +194,8 @@ impl Draft {
             topic: None,
             explanation: None,
             source: None,
+            annulled: false,
+            void: 0,
         })
     }
 
@@ -729,6 +745,8 @@ mod tests {
             topic: None,
             explanation: None,
             source: None,
+            annulled: false,
+            void: 0,
         };
         // Questions 1 (English), 1 (Spanish), 6.
         let mut qs = vec![q(1), q(1), q(6), q(7)];
