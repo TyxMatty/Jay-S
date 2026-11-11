@@ -611,6 +611,22 @@ Measured with Jay-AI (`chat_probe`, a new conversation all in English, no source
 
 **Limits:** Portuguese and English only, the two languages the app has; any other keeps the earlier "in the language of the question". The model can still slip into Portuguese in a sentence: Rust only checks a few closing phrases, not the language of each sentence. A message with few function words can land on a tie and inherit the previous question's language.
 
+### Jay-AI's reasoning measured: what did not go in (the chat)
+
+With the benchmark `examples/reason_bench.rs` (25 questions with a known answer, scored by code: 12 on Statistics lectures 15 to 18, 9 school-level questions with no sources, 4 of logic; each in a new conversation), three levers were built and measured twice each against the baseline, and **none went in**, because the numbers don't support them:
+
+| Run | Lectures | School | Logic | Total | s per question |
+|---|---|---|---|---|---|
+| Baseline (c4be64a) | 10/12, 10/12 | 8/9, 7/9 | 2/4, 2/4 | 20, 19 | 30.1*, 16.6 |
+| R1: the model's native thinking, per request, chat only (`chat_template_kwargs.enable_thinking` with `--reasoning-budget 600`) | 10/12, 10/12 | 7/9, 9/9 | 1/4, 3/4 | 18, 22 | 19.9, 20.4 |
+| R2: explicit givens, request and formula in the calculation, checked in Rust (every given used, with one retry; counts rounded up by Rust; plausibility) | 9/12, 9/12 | 8/9, 7/9 | 2/4, 2/4 | 19, 18 | 17.6, 11.7 |
+| R2 with only "every given used" / only the rounding | 9/12 / 10/12 | 9/9 / 8/9 | 2/4 / 1/4 | 20 / 19 | 17.0 / 24.0 |
+| R3: three samples at 0.7 and the majority's final number, calculations only | 9/12, 7/12 | 8/9, 9/9 | 2/4, 2/4 | 19, 18 | 16.8, 17.7 |
+
+\* GPU shared with another process in the first run.
+
+What was learned: the variation between runs of the same configuration (18 to 22 out of 25) is larger than any difference between configurations; the same question is right in one run and wrong in the next. The errors left are the 4B model's: routing a calculation to the material answer (which gives the formula and not the number), picking the relative-error formula without the mean, forgetting the last step, not dividing the sum for the mean, and the syllogism ("Ana é cuidadosa?"), which it declines out of caution (right in 1 of 10 runs, the one with native thinking). Native thinking works in the bundled llama.cpp (b12229) even with `--reasoning off` on the server, the JSON-schema answer comes after the thinking, and with no budget the model thinks for more than 1,500 tokens; this is not documented in that version's README, it was measured. By the 10 points: none of this stayed in the code; the benchmark is an example that reads the lectures through the engine and keeps only our questions and expected numbers (1, 3, 8, 9: nothing new). **A separate finding, on memory (NFR-1):** during one benchmark run, the `llama-server` working set went from about 0.9 GB to 5 GB over 25 questions; the bundled version caches prompts in RAM by default (`--cache-ram`, default 8192 MiB, "0 - disable"), and Jay-S does not change that default. It was not fixed in this round; it needs its own measurement of `--cache-ram 0` (memory and time) before changing it.
+
 ## 8. Stages
 
 Each stage ends with something testable; at the end of each one: commit, summary, and the question whether to go on to the next.

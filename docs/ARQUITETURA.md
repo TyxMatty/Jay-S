@@ -610,6 +610,22 @@ Medido com o Jay-AI (`chat_probe`, uma conversa nova toda em inglês, sem fontes
 
 **Limites:** só português e inglês, as duas línguas do app; qualquer outra mantém o "na língua da pergunta" de antes. O modelo ainda pode escorregar para o português numa frase: o Rust só confere algumas frases de fechamento, não a língua de cada frase. Uma mensagem de poucas palavras de função pode cair no empate e herdar a língua da pergunta anterior.
 
+### O raciocínio do Jay-AI medido: o que não entrou (o chat)
+
+Com o banco `examples/reason_bench.rs` (25 perguntas de resposta conhecida, corrigidas por código: 12 sobre as aulas de Estatística 15 a 18, 9 de nível escolar sem fontes, 4 de lógica; cada uma numa conversa nova), três alavancas foram feitas e medidas duas vezes cada contra a linha de base, e **nenhuma entrou**, porque os números não as sustentam:
+
+| Rodada | Aulas | Escola | Lógica | Total | s por pergunta |
+|---|---|---|---|---|---|
+| Linha de base (c4be64a) | 10/12, 10/12 | 8/9, 7/9 | 2/4, 2/4 | 20, 19 | 30,1*, 16,6 |
+| R1: pensamento nativo do modelo, por pedido, só no chat (`chat_template_kwargs.enable_thinking` com `--reasoning-budget 600`) | 10/12, 10/12 | 7/9, 9/9 | 1/4, 3/4 | 18, 22 | 19,9, 20,4 |
+| R2: dados, pedido e fórmula explícitos na conta, com conferência no Rust (todo dado usado, com uma nova tentativa; arredondamento de contagens pelo Rust; plausibilidade) | 9/12, 9/12 | 8/9, 7/9 | 2/4, 2/4 | 19, 18 | 17,6, 11,7 |
+| R2 só com "todo dado usado" / só com o arredondamento | 9/12 / 10/12 | 9/9 / 8/9 | 2/4 / 1/4 | 20 / 19 | 17,0 / 24,0 |
+| R3: três amostras a 0,7 e o número final da maioria, só nas contas | 9/12, 7/12 | 8/9, 9/9 | 2/4, 2/4 | 19, 18 | 16,8, 17,7 |
+
+\* GPU dividida com outro processo na primeira rodada.
+
+O que se aprendeu: a variação entre rodadas da mesma configuração (de 18 a 22 em 25) é maior que qualquer diferença entre as configurações; a mesma pergunta acerta numa rodada e erra na outra. Os erros que sobram são do modelo de 4B: rotear uma conta para a resposta do material (que dá a fórmula e não o número), escolher a fórmula do erro relativo sem a média, esquecer o último passo, não dividir a soma na média, e o silogismo ("Ana é cuidadosa?"), que ele recusa por cautela (certo em 1 de 10 rodadas, a com pensamento nativo). O pensamento nativo funciona na versão empacotada do llama.cpp (b12229) mesmo com `--reasoning off` no servidor, a resposta com esquema JSON sai depois do pensamento, e sem limite o modelo pensa mais de 1.500 tokens; não foi documentado no README dessa versão, foi medido. Pelos 10 pontos: nada disto ficou no código; o banco é um exemplo, que lê as aulas pelo motor e só guarda as nossas perguntas e os números esperados (1, 3, 8, 9: nada novo). **Achado à parte, de memória (RNF-1):** durante uma rodada do banco, o *working set* do `llama-server` foi de cerca de 0,9 GB para 5 GB em 25 perguntas; a versão empacotada guarda prompts em RAM por padrão (`--cache-ram`, padrão 8192 MiB, "0 - disable"), e o Jay-S não muda esse padrão. Não foi corrigido nesta rodada; pede uma medida própria do `--cache-ram 0` (memória e tempo) antes de mudar.
+
 ## 8. Etapas
 
 Cada etapa termina com algo testável; ao fim de cada uma, commit, resumo e a pergunta se segue para a próxima.
