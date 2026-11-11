@@ -4,6 +4,7 @@ import { h } from './dom.js';
 import { icons } from './icons.js';
 import { cardTitle } from './card-title.js';
 import { inTime } from './card-time.js';
+import { requeueAt } from './card-queue.js';
 import { invoke, listenJobs, isTauri } from '../core/bridge.js';
 import { aiReady } from '../core/ai.js';
 import { t, language } from '../core/i18n.js';
@@ -17,7 +18,10 @@ const LENGTH = () => ({ '-2': t('very short'), '-1': t('short'), 0: t('medium'),
  * then four colored ratings (1–4 on the keyboard). The pile gets thinner as the cards go.
  */
 function review(deck, cards, onDone) {
-  let i = 0;
+  // The session queue: a forgotten card is put back in it (`again`), so the total grows.
+  const queue = cards.map((card) => ({ card, again: false }));
+  let pos = 0;
+  let last = null; // the last rating, if it can still be undone: { pos, insertedAt }
   let flipped = false;
   let rated = 0;
   let busy = false;
@@ -40,6 +44,7 @@ function review(deck, cards, onDone) {
   const bar = h('progress', { class: 'ai-progress', max: cards.length, value: 0 });
   const message = h('p', { class: 'hint', role: 'status' });
   const show = h('button', { type: 'button', class: 'btn' }, t('Show the answer'));
+  const undoButton = h('button', { type: 'button', class: 'btn btn-secondary', hidden: true, onClick: () => undo() }, h('span', { class: 'btn-icon', html: icons.undo, 'aria-hidden': 'true' }), t('Undo'));
   const rate = h('div', { class: 'card-ratings', role: 'group', 'aria-label': t('How well did you remember?'), hidden: true });
   const vote = h('div', { class: 'card-vote', hidden: true });
   // Color and a symbol and a word: never color alone.
@@ -91,7 +96,7 @@ function review(deck, cards, onDone) {
   }
 
   function render() {
-    const c = cards[i];
+    const c = queue[pos]?.card;
     if (!c) return done();
     flip(false);
     topic.textContent = c.topic;
@@ -101,10 +106,11 @@ function review(deck, cards, onDone) {
     hints.forEach((hint, k) => (hint.textContent = inTime(c.next[k], language())));
     message.textContent = '';
     delete message.dataset.tone;
-    counter.textContent = t('Card {n} of {total}', { n: i + 1, total: cards.length });
-    bar.value = i;
+    counter.textContent = t('{n} left', { n: queue.length - pos });
+    bar.max = queue.length;
+    bar.value = pos;
     // The pile behind the card thins out as the deck goes.
-    pile.dataset.left = String(Math.min(2, cards.length - i - 1));
+    pile.dataset.left = String(Math.min(2, queue.length - pos - 1));
     for (const b of vote.querySelectorAll('button')) b.disabled = false;
     card.classList.remove('is-dealt');
     void card.offsetWidth;
@@ -146,15 +152,46 @@ function review(deck, cards, onDone) {
     try {
       const k = RATINGS.findIndex((r) => r[0] === quality);
       const tone = RATINGS[k][3];
-      const reply = await invoke('card_review', { deck: deck.id, index: cards[i].index, quality });
-      cards[i].next = reply.next; // in case the card is shown again
+      const entry = queue[pos];
+      const reply = await invoke('card_review', { deck: deck.id, index: entry.card.index, quality, again: entry.again });
+      entry.card.next = reply.next; // in case the card is shown again
+      let insertedAt = -1;
+      if (quality === 1) {
+        insertedAt = requeueAt(pos, queue.length);
+        queue.splice(insertedAt, 0, { card: entry.card, again: true });
+      }
+      last = { pos, insertedAt };
+      undoButton.hidden = false;
       ghost(tone);
-      i++;
+      pos++;
       rated++;
       render();
-      message.textContent = t('Comes back in {when}.', { when: inTime(reply.due_in, language()) });
+      message.textContent = quality === 1 ? t('Comes back in this session, in a few cards.') : t('Comes back in {when}.', { when: inTime(reply.due_in, language()) });
       message.dataset.tone = tone;
     } catch (e) {
+      message.textContent = studyFailureText(e);
+    } finally {
+      busy = false;
+    }
+  }
+
+  // One step back: the Rust side puts the deck back as it was before the last rating.
+  async function undo() {
+    if (busy || !last) return;
+    busy = true;
+    try {
+      const reply = await invoke('card_undo');
+      if (last.insertedAt >= 0) queue.splice(last.insertedAt, 1);
+      pos = last.pos;
+      queue[pos].card.next = reply.next;
+      rated--;
+      last = null;
+      undoButton.hidden = true;
+      render();
+      message.textContent = t('Rating undone.');
+    } catch (e) {
+      last = null;
+      undoButton.hidden = true;
       message.textContent = studyFailureText(e);
     } finally {
       busy = false;
@@ -165,8 +202,11 @@ function review(deck, cards, onDone) {
   show.addEventListener('click', () => flip(true));
   function keys(e) {
     if (!el.isConnected) return document.removeEventListener('keydown', keys);
-    if (e.target.closest('input, select, textarea')) return;
-    if ((e.key === ' ' || e.key === 'Enter') && (e.target === card || e.target === document.body)) {
+    if (e.target.closest('input, select, textarea, [contenteditable]')) return;
+    if (e.key === 'Backspace' || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z')) {
+      e.preventDefault();
+      undo();
+    } else if ((e.key === ' ' || e.key === 'Enter') && (e.target === card || e.target === document.body)) {
       e.preventDefault();
       flip();
     } else if (flipped && ['1', '2', '3', '4'].includes(e.key)) {
@@ -181,7 +221,7 @@ function review(deck, cards, onDone) {
     h('div', { class: 'panel-head' }, h('h1', {}, deck.title), h('button', { type: 'button', class: 'btn btn-secondary', onClick: () => { document.removeEventListener('keydown', keys); onDone(); } }, t('Back'))),
     h('div', { class: 'review-progress' }, counter, bar),
     pile,
-    h('div', { class: 'review-actions' }, show, rate, vote, message),
+    h('div', { class: 'review-actions' }, show, rate, vote, message, undoButton),
   );
   render();
   return el;

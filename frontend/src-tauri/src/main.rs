@@ -98,6 +98,7 @@ fn main() {
             study::deck_build,
             study::deck_due,
             study::card_review,
+            study::card_undo,
             study::card_vote,
             study::deck_delete,
             study::job_cancel,

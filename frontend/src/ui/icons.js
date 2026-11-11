@@ -25,6 +25,8 @@ export const icons = {
   check: svg('<path d="M20 6 9 17l-5-5"/>'),
   /** Flashcard rating "easy": a star. */
   star: svg('<path d="M12 3l2.6 5.6 6.1.7-4.5 4.2 1.2 6L12 16.5 6.6 19.5l1.2-6L3.3 9.3l6.1-.7z"/>'),
+  /** Undo: an arrow turning back. */
+  undo: svg('<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>'),
   /** Flashcard rating "hard": a wave. */
   wave: svg('<path d="M4 14c2.5-4 5.5-4 8 0s5.5 4 8 0"/>'),
   /** Delete: a bin. */

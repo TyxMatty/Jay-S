@@ -60,14 +60,31 @@ impl Card {
         self.ease = (self.ease + (0.1 - (5.0 - q) * (0.08 + (5.0 - q) * 0.02))).max(1.3);
     }
 
-    /// Ms from `now` until the card is due, for each of `QUALITIES`. Runs `review` on a copy, so it
-    /// can't disagree with what is saved.
-    pub fn preview(&self, now: u64) -> [u64; 4] {
+    /// A repeat of a card already forgotten in this session. Classic SM-2 sets the E-Factor from the
+    /// first answer of the day, repeats failed items until they pass, and restarts a lapsed item at
+    /// I(1) = 1 day: so a second "forgot" changes nothing but the 10 minutes, and a pass starts over.
+    pub fn relearn(&mut self, quality: u8, now: u64) {
+        if quality < 3 {
+            self.due = now + 10 * 60 * 1000;
+        } else {
+            self.reps = 1;
+            self.interval = 1.0;
+            self.due = now + DAY_MS;
+        }
+    }
+
+    /// Ms from `now` until the card is due, for each of `QUALITIES`. Runs `review` (or `relearn`, for
+    /// `again`) on a copy, so it can't disagree with what is saved.
+    pub fn preview(&self, now: u64, again: bool) -> [u64; 4] {
         QUALITIES.map(|q| {
             let mut c = self.clone();
-            c.review(q, now);
+            if again { c.relearn(q, now) } else { c.review(q, now) }
             c.due.saturating_sub(now)
         })
+    }
+
+    pub fn due_card(&self, index: usize, now: u64, again: bool) -> DueCard {
+        DueCard { index, front: self.front.clone(), back: self.back.clone(), topic: self.topic.clone(), next: self.preview(now, again) }
     }
 }
 
@@ -218,17 +235,28 @@ impl Store {
         let rank = |t: &str| weak.iter().position(|w| generate::similar(w, t) || w == t).unwrap_or(usize::MAX);
         let mut due: Vec<(usize, &Card)> = d.cards.iter().enumerate().filter(|(_, c)| c.due <= now).collect();
         due.sort_by(|a, b| rank(&a.1.topic).cmp(&rank(&b.1.topic)).then(a.1.due.cmp(&b.1.due)));
-        Ok(due.into_iter().take(limit).map(|(index, c)| DueCard { index, front: c.front.clone(), back: c.back.clone(), topic: c.topic.clone(), next: c.preview(now) }).collect())
+        Ok(due.into_iter().take(limit).map(|(index, c)| c.due_card(index, now, false)).collect())
     }
 
-    pub fn review_card(&self, deck: &str, index: usize, quality: u8) -> Result<Reviewed, StoreError> {
+    /// Rates a card; `again` is a repeat of one forgotten earlier in the session (`Card::relearn`).
+    pub fn review_card(&self, deck: &str, index: usize, quality: u8, again: bool) -> Result<Reviewed, StoreError> {
         let mut d = self.deck(deck)?;
         let card = d.cards.get_mut(index).ok_or(StoreError::NotFound)?;
         let now = now_ms();
-        card.review(quality, now);
-        let reviewed = Reviewed { due_in: card.due.saturating_sub(now), next: card.preview(now) };
+        if again { card.relearn(quality, now) } else { card.review(quality, now) }
+        // What the buttons show if the card comes back in this session.
+        let reviewed = Reviewed { due_in: card.due.saturating_sub(now), next: card.preview(now, quality < 3) };
         self.save_deck(&d)?;
         Ok(reviewed)
+    }
+
+    /// Writes a deck back as it was (an undo), only if it still exists: an undo never recreates a
+    /// deleted deck.
+    pub fn restore_deck(&self, before: &Deck) -> Result<(), StoreError> {
+        if !self.item("decks", &before.id)?.exists() {
+            return Err(StoreError::NotFound);
+        }
+        self.save_deck(before)
     }
 
     pub fn card_vote(&self, too_long: bool) -> Result<Profile, StoreError> {
@@ -327,7 +355,7 @@ mod tests {
         states.push(forgot);
         states.push(Card { ease: 1.3, interval: 40.0, reps: 5, ..Card::new("f".into(), "b".into(), "t".into(), now) });
         for s in &states {
-            let p = s.preview(now);
+            let p = s.preview(now, false);
             for (k, q) in QUALITIES.into_iter().enumerate() {
                 let mut x = s.clone();
                 x.review(q, now);
@@ -335,11 +363,62 @@ mod tests {
             }
         }
         let new = Card::new("f".into(), "b".into(), "t".into(), now);
-        assert_eq!(new.preview(now), [600_000, DAY_MS, DAY_MS, DAY_MS]);
+        assert_eq!(new.preview(now, false), [600_000, DAY_MS, DAY_MS, DAY_MS]);
         let mut two = new;
         two.review(4, now);
         two.review(4, now);
-        assert_eq!(two.preview(now), [600_000, 15 * DAY_MS, 15 * DAY_MS, 15 * DAY_MS]);
+        assert_eq!(two.preview(now, false), [600_000, 15 * DAY_MS, 15 * DAY_MS, 15 * DAY_MS]);
+    }
+
+    #[test]
+    fn relearn_keeps_sm2() {
+        let now = 1_000_000;
+        let mut c = Card::new("f".into(), "b".into(), "t".into(), now);
+        c.review(4, now);
+        c.review(4, now);
+        c.review(1, now);
+        assert_eq!((c.lapses, c.reps), (1, 0));
+        assert!((c.ease - 1.96).abs() < 1e-5, "{}", c.ease);
+        let ease = c.ease;
+        for _ in 0..2 {
+            c.relearn(1, now);
+            assert_eq!((c.lapses, c.reps, c.ease, c.due), (1, 0, ease, now + 600_000));
+        }
+        let p = c.preview(now, true);
+        for (k, q) in QUALITIES.into_iter().enumerate() {
+            let mut x = c.clone();
+            x.relearn(q, now);
+            assert_eq!(p[k], x.due - now);
+        }
+        c.relearn(4, now);
+        assert_eq!((c.reps, c.interval, c.due, c.ease, c.lapses), (1, 1.0, now + DAY_MS, ease, 1));
+        c.review(4, now);
+        assert_eq!((c.reps, c.interval), (2, 6.0));
+    }
+
+    #[test]
+    fn rate_then_undo_is_byte_identical() {
+        let root = std::env::temp_dir().join(format!("jay-study-undo-{}", id::new_id()));
+        let store = Store::open(&root).unwrap();
+        let now = now_ms();
+        let mut c = Card::new("a".into(), "b".into(), "t".into(), now - 1);
+        c.review(4, now);
+        c.review(3, now);
+        c.review(1, now);
+        c.due = now - 1;
+        let deck = Deck { id: id::new_id(), title: "Bio".into(), created: now, materials: vec![], cards: vec![c, Card::new("c".into(), "d".into(), "t".into(), now - 2)] };
+        store.save_deck(&deck).unwrap();
+        let path = root.join("decks").join(format!("{}.json", deck.id));
+        let bytes = std::fs::read(&path).unwrap();
+        let before = store.deck(&deck.id).unwrap();
+        store.review_card(&deck.id, 0, 4, false).unwrap();
+        assert_ne!(std::fs::read(&path).unwrap(), bytes);
+        store.restore_deck(&before).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        store.delete_deck(&deck.id).unwrap();
+        assert!(matches!(store.restore_deck(&before), Err(StoreError::NotFound)));
+        assert!(!path.exists());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -387,12 +466,12 @@ mod tests {
         let due = store.due_cards(&deck.id, 10).unwrap();
         assert_eq!(due.iter().map(|c| c.topic.as_str()).collect::<Vec<_>>(), ["Fotossíntese", "Mitose"]);
         assert!(due.iter().all(|c| c.next.len() == 4));
-        let reviewed = store.review_card(&deck.id, 0, 4).unwrap();
+        let reviewed = store.review_card(&deck.id, 0, 4, false).unwrap();
         assert_eq!(reviewed.due_in, DAY_MS);
         assert_eq!(reviewed.next.len(), 4);
         assert_eq!(store.due_cards(&deck.id, 10).unwrap().len(), 1);
         assert_eq!(store.decks()[0].due, 1);
-        assert!(matches!(store.review_card(&deck.id, 9, 4), Err(StoreError::NotFound)));
+        assert!(matches!(store.review_card(&deck.id, 9, 4, false), Err(StoreError::NotFound)));
         assert!(matches!(store.deck("../profile"), Err(StoreError::NotFound)));
         std::fs::remove_dir_all(root).unwrap();
     }

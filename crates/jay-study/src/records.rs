@@ -192,7 +192,7 @@ impl Store {
         self.root().join(name)
     }
 
-    fn item(&self, dir: &str, item: &str) -> Result<PathBuf, StoreError> {
+    pub(crate) fn item(&self, dir: &str, item: &str) -> Result<PathBuf, StoreError> {
         if !id::is_valid(item) {
             return Err(StoreError::NotFound);
         }

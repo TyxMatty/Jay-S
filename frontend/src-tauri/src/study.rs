@@ -346,12 +346,25 @@ pub fn deck_due(library: State<Library>, id: String) -> Result<Vec<DueCard>, Fai
 }
 
 #[tauri::command]
-pub fn card_review(library: State<Library>, deck: String, index: usize, quality: u8) -> Result<Reviewed, Failure> {
+pub fn card_review(library: State<Library>, deck: String, index: usize, quality: u8, again: bool) -> Result<Reviewed, Failure> {
     let _writing = library.writing();
     if !matches!(quality, 1 | 3 | 4 | 5) {
         return Err(Failure::new("invalid_answer", None));
     }
-    Ok(library.store.review_card(&deck, index, quality)?)
+    let before = library.store.deck(&deck)?;
+    let reviewed = library.store.review_card(&deck, index, quality, again)?;
+    *library.last_review.lock().unwrap_or_else(|e| e.into_inner()) = Some((before, index, again));
+    Ok(reviewed)
+}
+
+/// Puts the deck back as it was before the last rating (one step; the page sends nothing).
+#[tauri::command]
+pub fn card_undo(library: State<Library>) -> Result<DueCard, Failure> {
+    let _writing = library.writing();
+    let (before, index, again) = library.last_review.lock().unwrap_or_else(|e| e.into_inner()).take().ok_or(Failure::new("not_found", None))?;
+    library.store.restore_deck(&before)?;
+    let card = before.cards.get(index).ok_or(Failure::new("not_found", None))?;
+    Ok(card.due_card(index, jay_study::store::now_ms(), again))
 }
 
 #[tauri::command]
@@ -363,6 +376,7 @@ pub fn card_vote(library: State<Library>, too_long: bool) -> Result<Profile, Fai
 #[tauri::command]
 pub fn deck_delete(library: State<Library>, id: String) -> Result<(), Failure> {
     let _writing = library.writing();
+    *library.last_review.lock().unwrap_or_else(|e| e.into_inner()) = None;
     Ok(library.store.delete_deck(&id)?)
 }
 
