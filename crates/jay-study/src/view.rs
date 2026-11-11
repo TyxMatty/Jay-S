@@ -111,4 +111,17 @@ mod tests {
         let big = image::load_from_memory(&pdf_page_png(pdf, 0, 999_999).unwrap()).unwrap();
         assert_eq!(big.width(), MAX_PAGE_WIDTH);
     }
+
+    #[test]
+    fn hostile_page_numbers_and_widths_stay_bounded() {
+        let pdf = crate::extract::pdf_sample(&[&["Questao 1"]]);
+        for index in [1usize, 1_000_000_000, u32::MAX as usize, usize::MAX] {
+            assert!(pdf_page_png(pdf.clone(), index, 300).is_none(), "{index}");
+        }
+        // The widest and the narrowest asked for are clamped to [64, MAX_PAGE_WIDTH].
+        let wide = image::load_from_memory(&pdf_page_png(pdf.clone(), 0, u32::MAX).unwrap()).unwrap();
+        assert_eq!(wide.width(), MAX_PAGE_WIDTH);
+        let thin = image::load_from_memory(&pdf_page_png(pdf, 0, 0).unwrap()).unwrap();
+        assert_eq!(thin.width(), 64);
+    }
 }

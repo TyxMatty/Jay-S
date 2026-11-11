@@ -54,11 +54,40 @@ pub struct OpenQuestion {
     pub topic: Option<String>,
     pub annulled: bool,
     pub void: u32,
+    /// The question's pages in the original PDF, when it has them and the file is still a PDF.
+    pub original: Option<OriginalPages>,
+}
+
+/// Where to look at a question in the file it came from: only an id and page numbers, never a path.
+#[derive(Debug, Clone, Serialize)]
+pub struct OriginalPages {
+    pub material: String,
+    /// 0-based, inclusive.
+    pub first: u32,
+    pub last: u32,
 }
 
 impl From<&Question> for OpenQuestion {
     fn from(q: &Question) -> Self {
-        Self { number: q.number, kind: q.kind, passage: q.passage.clone(), stem: q.stem.clone(), options: q.options.clone(), topic: q.topic.clone(), annulled: q.annulled, void: q.void }
+        Self { number: q.number, kind: q.kind, passage: q.passage.clone(), stem: q.stem.clone(), options: q.options.clone(), topic: q.topic.clone(), annulled: q.annulled, void: q.void, original: None }
+    }
+}
+
+impl Store {
+    /// What the page sees of an exam's questions, with their pages in the original PDF where there are some.
+    pub fn open_questions(&self, questions: &[Question]) -> Vec<OpenQuestion> {
+        let mut is_pdf: BTreeMap<&str, bool> = BTreeMap::new();
+        questions
+            .iter()
+            .map(|q| {
+                let mut open = OpenQuestion::from(q);
+                if let (Some((first, last)), Some(source)) = (q.pages, q.source.as_ref()) {
+                    let pdf = *is_pdf.entry(source.material.as_str()).or_insert_with(|| self.material(&source.material).is_ok_and(|m| m.format == crate::Format::Pdf));
+                    open.original = pdf.then(|| OriginalPages { material: source.material.clone(), first, last });
+                }
+                open
+            })
+            .collect()
     }
 }
 
@@ -440,7 +469,7 @@ impl Store {
             analysis: None,
         };
         self.save_attempt(&attempt)?;
-        Ok((attempt, e.questions.iter().map(OpenQuestion::from).collect()))
+        Ok((attempt, self.open_questions(&e.questions)))
     }
 
     /// Records an answer (saved at once). In learning mode it comes back graded, and can't change
@@ -737,7 +766,7 @@ mod tests {
             QuestionKind::Choice => "ABCDE".chars().map(|c| QOption { label: c.to_string(), text: format!("opção {c}") }).collect(),
             QuestionKind::Sum => [1, 2, 4, 8, 16].iter().map(|n| QOption { label: format!("{n:02}"), text: format!("proposição {n}") }).collect(),
         };
-        Question { number: 1, kind, passage: None, stem: "?".into(), options, answer: Some(answer.into()), answer_by_ai: false, topic: Some(topic.into()), explanation: Some("porque sim".into()), source: Some(Source { material: "m".into(), number: Some(1) }), annulled: false, void: 0 }
+        Question { number: 1, kind, passage: None, stem: "?".into(), options, answer: Some(answer.into()), answer_by_ai: false, topic: Some(topic.into()), explanation: Some("porque sim".into()), source: Some(Source { material: "m".into(), number: Some(1) }), annulled: false, void: 0, pages: None }
     }
 
     fn exam_in(store: &Store, style: &str, questions: Vec<Question>) -> Exam {
@@ -919,6 +948,22 @@ e) {}
         let plan = BuildPlan { new: 3, content: vec![p.id], ..plan };
         assert!(matches!(store.build_exam(&plan, None, &mut |_| {}, &AtomicBool::new(false)), Err(BuildError::Ai(AiError::NotInstalled))));
         assert_eq!(store.exams().len(), 2, "the refused build saved nothing");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn the_page_gets_original_pages_only_for_a_pdf_that_is_still_there() {
+        let (store, root) = temp_store();
+        std::fs::write(root.join("p.pdf"), crate::extract::pdf_sample(&[&["Questao 1 Qual e a capital do Parana?"], &["Segunda pagina com bastante texto aqui"]])).unwrap();
+        std::fs::write(root.join("t.txt"), "Questão 1\nOlá, isto é um texto com palavras suficientes.\n").unwrap();
+        let (pdf, txt) = (store.import(&root.join("p.pdf")).unwrap(), store.import(&root.join("t.txt")).unwrap());
+        let with = |material: &str, pages| Question { source: Some(Source { material: material.into(), number: Some(1) }), pages, ..question(QuestionKind::Choice, "A", "x") };
+        let qs = vec![with(&pdf.id, Some((0, 1))), with(&txt.id, Some((0, 0))), with(&pdf.id, None), with("../x", Some((0, 0))), with("m", Some((0, 0)))];
+        let open = store.open_questions(&qs);
+        let shown: Vec<_> = open.iter().map(|q| q.original.as_ref().map(|o| (o.material.clone(), o.first, o.last))).collect();
+        assert_eq!(shown, [Some((pdf.id.clone(), 0, 1)), None, None, None, None]);
+        // The page gets an id and numbers, no path.
+        assert!(!serde_json::to_string(&open[0]).unwrap().contains("original."));
         std::fs::remove_dir_all(root).unwrap();
     }
 

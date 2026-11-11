@@ -56,6 +56,11 @@ pub struct Question {
     /// Sum questions: the annulled propositions as a bitmask (0 = none). They are ignored in grading.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub void: u32,
+    /// The pages of the original file the question lives on, 0-based and inclusive (the first one is
+    /// where the text before it begins, so a base text printed on the page before is included).
+    /// `None` for questions Jay-AI wrote. Only means something for a PDF (see `view::pdf_page_png`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pages: Option<(u32, u32)>,
 }
 
 fn is_false(b: &bool) -> bool {
@@ -119,10 +124,16 @@ fn page_furniture(text: &str) -> std::collections::HashSet<String> {
 
 /// The lines of an exam, cleaned: tabs as spaces, page furniture out, and ENEM's doubled letters
 /// ("A" alone on a line, then "A texto") as one line.
-fn clean_lines(text: &str) -> Vec<String> {
+///
+/// Also each kept line's page index: the number of form feeds before it, which is the PDF page (the
+/// extractor writes one before every page after the first, blank pages included).
+fn clean_lines(text: &str) -> (Vec<String>, Vec<u32>) {
     let furniture = page_furniture(text);
-    let raw: Vec<String> = text.split(['\n', '\x0c']).map(|l| l.replace('\t', " ").split_whitespace().collect::<Vec<_>>().join(" ")).collect();
+    let clean = |l: &str| l.replace('\t', " ").split_whitespace().collect::<Vec<_>>().join(" ");
+    let (raw, raw_page): (Vec<String>, Vec<u32>) =
+        text.split('\x0c').enumerate().flat_map(|(p, page)| page.split('\n').map(move |l| (clean(l), p as u32))).unzip();
     let mut out: Vec<String> = Vec::with_capacity(raw.len());
+    let mut pages: Vec<u32> = Vec::with_capacity(raw.len());
     for (i, line) in raw.iter().enumerate() {
         if is_noise(line) || (line.chars().count() < 90 && furniture.contains(&furniture_key(line))) {
             continue;
@@ -132,8 +143,9 @@ fn clean_lines(text: &str) -> Vec<String> {
             continue;
         }
         out.push(line.clone());
+        pages.push(raw_page[i]);
     }
-    out
+    (out, pages)
 }
 
 /// A numbered stem: "16– Sabendo…", "3. Qual…", "12) Assinale…" (not a sum proposition, which the
@@ -173,6 +185,8 @@ struct Draft {
     kind: Option<QuestionKind>,
     stem: Vec<String>,
     options: Vec<QOption>,
+    /// The index of the last line taken into the question.
+    end: usize,
 }
 
 impl Draft {
@@ -196,6 +210,7 @@ impl Draft {
             source: None,
             annulled: false,
             void: 0,
+            pages: None,
         })
     }
 
@@ -278,7 +293,7 @@ fn option_text(line: &str) -> String {
 /// The questions of an exam's text, in order. Lines that aren't part of a recognized question (cover
 /// pages, instructions) are left out.
 pub fn split_questions(text: &str) -> Vec<Question> {
-    let lines = clean_lines(text);
+    let (lines, page_of) = clean_lines(text);
     let labels = option_labels(&lines);
     let mut out: Vec<Question> = vec![];
     let mut draft: Option<Draft> = None;
@@ -288,14 +303,23 @@ pub fn split_questions(text: &str) -> Vec<Question> {
     let mut passages: Vec<((u32, u32), String, usize)> = vec![];
     // After the last option, a few continuation lines at most; then text goes to the next question.
     let mut after_options = 0usize;
-    let close = |draft: &mut Option<Draft>, out: &mut Vec<Question>| {
-        if let Some(q) = draft.take().and_then(Draft::finish) {
-            out.push(q);
+    // A question's pages run from where the previous one ended (its base text, if any, sits in that
+    // gap; for the first question the gap opens at the file's start, or after a dropped instruction example) to its own last line.
+    // shortcut: the first question's range reaches back to page 0 (the runner shows the last pages), when to upgrade: if the covers/instructions ever show up in it.
+    let mut gap = 0usize;
+    let close = |draft: &mut Option<Draft>, out: &mut Vec<Question>, gap: &mut usize| {
+        if let Some(d) = draft.take() {
+            let end = d.end;
+            if let Some(mut q) = d.finish() {
+                q.pages = Some((page_of[(*gap).min(end)], page_of[end]));
+                *gap = end + 1;
+                out.push(q);
+            }
         }
     };
     for (i, line) in lines.iter().enumerate() {
         if let Some(range) = passage_range(line) {
-            close(&mut draft, &mut out);
+            close(&mut draft, &mut out, &mut gap);
             if let Some((r, body)) = passage.take() {
                 passages.push((r, body.join(" "), out.len()));
             }
@@ -310,6 +334,7 @@ pub fn split_questions(text: &str) -> Vec<Question> {
         {
             d.kind = Some(*kind);
             d.options.push(QOption { label: label.clone(), text: option_text(line) });
+            d.end = i;
             after_options = 0;
             continue;
         }
@@ -322,7 +347,7 @@ pub fn split_questions(text: &str) -> Vec<Question> {
             });
         let stem_start = if header.is_some() || labels[i].is_some() || option_pending { None } else { numbered_stem(line) };
         if header.is_some() || stem_start.is_some() {
-            close(&mut draft, &mut out);
+            close(&mut draft, &mut out, &mut gap);
             if let Some((r, body)) = passage.take() {
                 passages.push((r, body.join(" "), out.len()));
             }
@@ -331,7 +356,7 @@ pub fn split_questions(text: &str) -> Vec<Question> {
                 (_, Some((n, rest))) => (n, Some(rest.to_owned())),
                 _ => unreachable!(),
             };
-            draft = Some(Draft { number, stem: rest.into_iter().collect(), ..Default::default() });
+            draft = Some(Draft { number, stem: rest.into_iter().collect(), end: i, ..Default::default() });
             after_options = 0;
             continue;
         }
@@ -345,11 +370,15 @@ pub fn split_questions(text: &str) -> Vec<Question> {
                     let last = d.options.last_mut().unwrap();
                     last.text.push(' ');
                     last.text.push_str(line);
+                    d.end = i;
                 } else {
-                    close(&mut draft, &mut out);
+                    close(&mut draft, &mut out, &mut gap);
                 }
             }
-            Some(d) => d.stem.push(line.clone()),
+            Some(d) => {
+                d.stem.push(line.clone());
+                d.end = i;
+            }
             None => {
                 if let Some((_, body)) = passage.as_mut() {
                     body.push(line.clone());
@@ -357,7 +386,7 @@ pub fn split_questions(text: &str) -> Vec<Question> {
             }
         }
     }
-    close(&mut draft, &mut out);
+    close(&mut draft, &mut out, &mut gap);
     if let Some((r, body)) = passage.take() {
         passages.push((r, body.join(" "), out.len()));
     }
@@ -834,6 +863,22 @@ mod tests {
     }
 
     #[test]
+    fn a_question_knows_its_pages_including_the_base_text_on_the_page_before() {
+        // Form feeds are page breaks; page 2 is blank. Question 2's base text sits on page 1, its
+        // stem and options on page 3; question 3 is wholly on page 3.
+        let opts = "a) um\nb) dois\nc) tres\nd) quatro\n";
+        let text = format!("01– Primeira pergunta?\n{opts}\x0cTEXTO PARA AS QUESTÕES 02 E 03\nUm texto base que fica numa página só.\n\x0c\x0c02– Segunda pergunta?\n{opts}03– Terceira pergunta?\n{opts}");
+        let qs = split_questions(&text);
+        let pages: Vec<_> = qs.iter().map(|q| (q.number, q.pages)).collect();
+        assert_eq!(pages, [(1, Some((0, 0))), (2, Some((1, 3))), (3, Some((3, 3)))]);
+        // Without page breaks everything is on page 0, and an old saved exam has no pages at all.
+        assert!(split_questions(&text.replace('\x0c', "\n")).iter().all(|q| q.pages == Some((0, 0))));
+        let old: Question = serde_json::from_str(r#"{"number":1,"kind":"choice","stem":"?","options":[]}"#).unwrap();
+        assert_eq!(old.pages, None);
+        assert!(!serde_json::to_string(&old).unwrap().contains("pages"));
+    }
+
+    #[test]
     fn a_teachers_exam() {
         let text = "Prova de Biologia - 2º ano\nNome: ______\n1. Qual organela faz a fotossíntese?\na) Mitocôndria\nb) Cloroplasto\nc) Ribossomo\nd) Lisossomo\n2) Em 2.500 anos, quantas gerações? Marque a correta.\n(a) 10\n(b) 100\n(c) 1000\n(d) 25\n(e) 250\n";
         let qs = split_questions(text);
@@ -914,6 +959,7 @@ mod tests {
                 source: None,
                 annulled: false,
                 void: 0,
+                pages: None,
             })
             .collect()
     }
@@ -1000,6 +1046,7 @@ mod tests {
             source: None,
             annulled: false,
             void: 0,
+            pages: None,
         };
         // Questions 1 (English), 1 (Spanish), 6.
         let mut qs = vec![q(1), q(1), q(6), q(7)];

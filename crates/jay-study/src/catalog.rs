@@ -454,7 +454,7 @@ mod tests {
 
     #[test]
     fn apply_marks_annulled_questions_and_propositions() {
-        let q = |number| Question { number, kind: exam::QuestionKind::Sum, passage: None, stem: String::new(), options: (0..5).map(|i| exam::QOption { label: format!("{:02}", 1 << i), text: String::new() }).collect(), answer: None, answer_by_ai: false, topic: None, explanation: None, source: None, annulled: false, void: 0 };
+        let q = |number| Question { number, kind: exam::QuestionKind::Sum, passage: None, stem: String::new(), options: (0..5).map(|i| exam::QOption { label: format!("{:02}", 1 << i), text: String::new() }).collect(), answer: None, answer_by_ai: false, topic: None, explanation: None, source: None, annulled: false, void: 0, pages: None };
         let mut qs = [33, 38, 24].map(q).to_vec();
         assert_eq!(entry("uepg-2025-grupo-2").apply(&mut qs), 2);
         assert_eq!(qs.iter().map(|q| (q.annulled, q.void, q.answer.as_deref())).collect::<Vec<_>>(), [(true, 0, None), (false, 1, Some("30")), (false, 0, Some("04"))]);
@@ -462,7 +462,7 @@ mod tests {
 
     #[test]
     fn keep_language_drops_the_other_block() {
-        let q = |number| Question { number, kind: exam::QuestionKind::Sum, passage: None, stem: String::new(), options: vec![], answer: None, answer_by_ai: false, topic: None, explanation: None, source: None, annulled: false, void: 0 };
+        let q = |number| Question { number, kind: exam::QuestionKind::Sum, passage: None, stem: String::new(), options: vec![], answer: None, answer_by_ai: false, topic: None, explanation: None, source: None, annulled: false, void: 0, pages: None };
         let all = || [55, 56, 57, 56, 57].map(q).to_vec();
         let kept = |e: &str| entry(e).keep_language(all()).iter().map(|q| q.number).collect::<Vec<_>>();
         assert_eq!(kept("uepg-2025-cg-ingles"), [55, 56, 57]);
@@ -564,7 +564,20 @@ mod tests {
             assert_eq!(store.materials().len(), materials);
             assert!(!root.join("catalog").join(format!("{}.pdf", e.id)).exists() && !part.exists());
             assert_eq!(store.catalog().iter().find(|i| i.id == e.id).unwrap().state, CatalogState::Ready { exam: exam_id });
-            println!("{}: {} questions, {} annulled, {} with a void proposition, answers on {}", e.id, exam.questions.len(), e.annulled.len(), void, exam.questions.iter().filter(|q| q.answer.is_some()).count());
+            let paged = exam.questions.iter().filter(|q| q.pages.is_some()).count();
+            let multi: Vec<_> = exam.questions.iter().filter(|q| q.pages.is_some_and(|(a, b)| b > a)).map(|q| (q.number, q.pages.unwrap())).collect();
+            println!("{}: {} questions, {paged} with a page range ({} over several pages: {multi:?}), {} annulled, {} with a void proposition, answers on {}", e.id, exam.questions.len(), multi.len(), e.annulled.len(), void, exam.questions.iter().filter(|q| q.answer.is_some()).count());
+            // For looking by eye: `JAYS_PAGES_OUT=<folder>` draws the pages of questions 1, 6, 20, 56 and the last.
+            if let Ok(out) = std::env::var("JAYS_PAGES_OUT") {
+                let bytes = std::fs::read(store.original(&exam.questions[0].source.as_ref().unwrap().material).unwrap().0).unwrap();
+                for q in exam.questions.iter().filter(|q| [1, 6, 20, 56, e.questions].contains(&q.number)) {
+                    let (a, b) = q.pages.unwrap();
+                    for p in a..=b {
+                        let png = crate::view::pdf_page_png(bytes.clone(), p as usize, 900).unwrap();
+                        std::fs::write(format!("{out}/{}-q{}-p{p}.png", e.id, q.number), png).unwrap();
+                    }
+                }
+            }
         }
         // Eight exams from seven materials (the two Conhecimentos Gerais entries share one file).
         assert_eq!((store.exams().len(), store.materials().len()), (8, 7));

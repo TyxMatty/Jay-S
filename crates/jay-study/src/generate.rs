@@ -203,6 +203,7 @@ pub fn parse_question(style: &Style, reply: &Value, number: u32, material: &str)
         source: Some(Source { material: material.to_owned(), number: None }),
         annulled: false,
         void: 0,
+        pages: None,
     })
 }
 

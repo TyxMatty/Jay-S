@@ -212,7 +212,7 @@ pub fn attempt_resume(library: State<Library>, id: String) -> Result<Started, Fa
         return Err(Failure::new("finished", None));
     }
     let exam = library.store.exam(&attempt.exam)?;
-    let questions: Vec<OpenQuestion> = exam.questions.iter().map(OpenQuestion::from).collect();
+    let questions: Vec<OpenQuestion> = library.store.open_questions(&exam.questions);
     // Only learning mode shows what was already graded; in exam mode nothing is revealed.
     let graded = exam
         .questions
@@ -317,7 +317,7 @@ pub fn attempt_result(library: State<Library>, id: String) -> Result<(Attempt, V
     if attempt.finished.is_none() {
         return Err(Failure::new("not_finished", None));
     }
-    let questions = library.store.exam(&attempt.exam).map(|e| e.questions.iter().map(OpenQuestion::from).collect()).unwrap_or_default();
+    let questions = library.store.exam(&attempt.exam).map(|e| library.store.open_questions(&e.questions)).unwrap_or_default();
     Ok((attempt, questions))
 }
 
