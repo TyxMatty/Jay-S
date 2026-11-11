@@ -645,6 +645,21 @@ By the 10 points: 1. the server's command line applies to the whole app (exams, 
 
 **Limits:** the slot's cache and the context checkpoints (`--ctx-checkpoints`) remain; a prompt that shares no prefix with the previous one is reprocessed in full, as it already was with the slot.
 
+### Reasoning measured with fixed seeds: four fixes that did not go in (the chat)
+
+With the rebuilt benchmark (42 questions in four groups, each setup run with seeds 1, 2 and 3; the same seed gives the same answer byte for byte, so a difference between two setups is theirs, not chance), the baseline was: copied (the lectures' worked examples) 7.67 of 12; novel (the same kinds with other numbers) 2.67 of 11; school 8.00 of 9; logic 6.67 of 10; total 25.00 of 42, 10.7 s per question. The gap between "copied" and "novel" shows that many of the lecture answers come from copying the example's number from the passage, not from computing. Four fixes were built and measured against that baseline, question by question, and the rule was to go in only if it gained with nothing falling:
+
+| Fix | Copied | Novel | School | Logic | Result |
+|---|---|---|---|---|---|
+| (a) a question that asks for a number, with two numbers, goes to the calculation even if the classifier says "material" | 5.33 | 3.33 | 8.00 | 6.67 | fell: the confidence intervals the material answer got right by copying the example were now computed, and wrong |
+| (b) given premises count as given, on the general route | — | — | 8.00 | 7.00 | the syllogism went from 0 to 3 of 3, but two other logic questions fell (some/all; transitivity) |
+| (c) single letters ("t", "Z", "σ") become search terms, and "vez" a stop word | 8.33 | 2.00 | — | 7.67 | "why t and not Z" went from 0 to 3 of 3 (the "σ unknown" passage ranked 6th, outside the 5; now 2nd), but one copied and one novel question fell |
+| (d1) Rust rounds counts up | 8.33 | 2.67 | 8.00 | — | gained 2 answers out of 36 and nothing fell, below the minimum asked (2 questions in the mean) |
+| (d2) every given used, with one retry | 8.00 | 3.67 | 6.33 | — | school fell |
+| (d3) native thinking for calculations only | 7.00 | 2.67 | 6.67 | — | fell, and went to 20.4 s per question |
+
+Dashes are groups the fix doesn't touch and that were not run. None went in. The relative-error question (the formula without the mean) stayed wrong in all of them. By the 10 points: none of this stayed in the code (1 to 9); the tests are the benchmark itself (10). Each one's diff was kept outside the repository.
+
 ## 8. Stages
 
 Each stage ends with something testable; at the end of each one: commit, summary, and the question whether to go on to the next.

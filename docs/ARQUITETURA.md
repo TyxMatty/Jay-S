@@ -644,6 +644,21 @@ Pelos 10 pontos: 1. a linha de comando do servidor vale para o app inteiro (prov
 
 **Limites:** o cache do slot e os pontos de controle de contexto (`--ctx-checkpoints`) continuam; um prompt que não divide prefixo com o anterior é reprocessado por inteiro, como já era com o slot.
 
+### O raciocínio medido com sementes fixas: quatro correções que não entraram (o chat)
+
+Com o banco refeito (42 perguntas em quatro grupos, cada configuração rodada com as sementes 1, 2 e 3; a mesma semente dá a mesma resposta byte a byte, então a diferença entre duas configurações é dela, não do acaso), a linha de base ficou em: copiadas (os exemplos resolvidos das aulas) 7,67 de 12; novas (os mesmos tipos com outros números) 2,67 de 11; escola 8,00 de 9; lógica 6,67 de 10; total 25,00 de 42, 10,7 s por pergunta. A distância entre "copiadas" e "novas" mostra que boa parte dos acertos nas aulas vem de copiar o número do exemplo do trecho, não de calcular. Quatro correções foram feitas e medidas contra essa base, pergunta por pergunta, e a regra era entrar só se ganhasse sem nada cair:
+
+| Correção | Copiadas | Novas | Escola | Lógica | Resultado |
+|---|---|---|---|---|---|
+| (a) pergunta que pede um número, com dois números, vai para a conta mesmo se o classificador disser "material" | 5,33 | 3,33 | 8,00 | 6,67 | caiu: os intervalos de confiança que a resposta do material acertava copiando o exemplo passaram a ser calculados, e errados |
+| (b) premissas dadas valem como dadas, na rota geral | — | — | 8,00 | 7,00 | o silogismo foi de 0 a 3 de 3, mas outras duas de lógica caíram (alguns/todos; transitividade) |
+| (c) letras soltas ("t", "Z", "σ") viram termos de busca, e "vez" é palavra vazia | 8,33 | 2,00 | — | 7,67 | "por que t e não Z" foi de 0 a 3 de 3 (o trecho do "σ desconhecido" ficava em 6º, fora dos 5; agora fica em 2º), mas uma copiada e uma nova caíram |
+| (d1) o Rust arredonda contagens para cima | 8,33 | 2,67 | 8,00 | — | ganhou 2 respostas em 36 e nada caiu, abaixo do mínimo pedido (2 perguntas na média) |
+| (d2) todo dado usado, com uma nova tentativa | 8,00 | 3,67 | 6,33 | — | escola caiu |
+| (d3) pensamento nativo só nas contas | 7,00 | 2,67 | 6,67 | — | caiu, e foi a 20,4 s por pergunta |
+
+Os traços são grupos que a correção não toca e que não foram rodados. Nenhuma entrou. A pergunta do erro relativo (a fórmula sem a média) seguiu errada em todas. Pelos 10 pontos: nada disto ficou no código (1 a 9); os testes são o próprio banco (10). Os diffs de cada uma ficaram guardados fora do repositório.
+
 ## 8. Etapas
 
 Cada etapa termina com algo testável; ao fim de cada uma, commit, resumo e a pergunta se segue para a próxima.
