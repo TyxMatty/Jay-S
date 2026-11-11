@@ -2114,6 +2114,17 @@ fieldset > h3 {
   font-weight: 800;
 }
 
+/* A deck's first line says whether there is something to do now. */
+.deck-status {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.deck-status[data-due='false'] {
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
 @keyframes deal-in {
   from { opacity: 0; transform: translateY(14px) scale(0.97); }
 }
@@ -2256,7 +2267,15 @@ fieldset > h3 {
 }
 
 .review-progress {
+  flex-wrap: wrap;
+  row-gap: var(--space-2);
   margin-bottom: var(--space-3);
+}
+
+/* With the practice badge, a narrow window puts the bar on its own line instead of squeezing it. */
+.review-progress .ai-progress {
+  flex: 1 1 160px;
+  width: auto;
 }
 
 .review-actions {

@@ -123,6 +123,12 @@ pub struct DeckSummary {
     pub created: u64,
     pub cards: usize,
     pub due: usize,
+    /// Never reviewed.
+    pub new: usize,
+    /// Last rating was a pass.
+    pub learned: usize,
+    /// Ms until the earliest card due in the future.
+    pub next_due: Option<u64>,
 }
 
 /// A card waiting for review, with its place in the deck.
@@ -243,7 +249,16 @@ impl Store {
         let mut list: Vec<DeckSummary> = self
             .all_json::<Deck>("decks")
             .into_iter()
-            .map(|d| DeckSummary { due: d.cards.iter().filter(|c| c.due <= now).count(), cards: d.cards.len(), id: d.id, title: d.title, created: d.created })
+            .map(|d| DeckSummary {
+                due: d.cards.iter().filter(|c| c.due <= now).count(),
+                new: d.cards.iter().filter(|c| c.reps == 0 && c.lapses == 0).count(),
+                learned: d.cards.iter().filter(|c| c.reps >= 1).count(),
+                next_due: d.cards.iter().map(|c| c.due).filter(|&due| due > now).min().map(|due| due - now),
+                cards: d.cards.len(),
+                id: d.id,
+                title: d.title,
+                created: d.created,
+            })
             .collect();
         list.sort_by(|a, b| b.created.cmp(&a.created));
         list
@@ -261,10 +276,14 @@ impl Store {
         self.remove_json("decks", deck)
     }
 
-    /// The cards due now: weak topics first, then the most overdue.
-    pub fn due_cards(&self, deck: &str, limit: usize) -> Result<Vec<DueCard>, StoreError> {
+    /// The cards due now: weak topics first, then the most overdue. `all`: every card in deck order
+    /// (a practice pass).
+    pub fn due_cards(&self, deck: &str, limit: usize, all: bool) -> Result<Vec<DueCard>, StoreError> {
         let d = self.deck(deck)?;
         let now = now_ms();
+        if all {
+            return Ok(d.cards.iter().enumerate().take(limit).map(|(index, c)| c.due_card(index, now, false)).collect());
+        }
         let weak = self.profile().weak_topics(10);
         let rank = |t: &str| weak.iter().position(|w| generate::similar(w, t) || w == t).unwrap_or(usize::MAX);
         let mut due: Vec<(usize, &Card)> = d.cards.iter().enumerate().filter(|(_, c)| c.due <= now).collect();
@@ -566,16 +585,38 @@ mod tests {
         let mut p = Profile::default();
         p.topics.insert("Fotossíntese".into(), (0.0, 3));
         store.save_profile(&p).unwrap();
-        let due = store.due_cards(&deck.id, 10).unwrap();
+        let due = store.due_cards(&deck.id, 10, false).unwrap();
         assert_eq!(due.iter().map(|c| c.topic.as_str()).collect::<Vec<_>>(), ["Fotossíntese", "Mitose"]);
         assert!(due.iter().all(|c| c.next.len() == 4));
         let reviewed = store.review_card(&deck.id, 0, 4, false, 0).unwrap();
         assert_eq!(reviewed.due_in, DAY_MS);
         assert_eq!(reviewed.next.len(), 4);
-        assert_eq!(store.due_cards(&deck.id, 10).unwrap().len(), 1);
+        assert_eq!(store.due_cards(&deck.id, 10, false).unwrap().len(), 1);
         assert_eq!(store.decks()[0].due, 1);
         assert!(matches!(store.review_card(&deck.id, 9, 4, false, 0), Err(StoreError::NotFound)));
         assert!(matches!(store.deck("../profile"), Err(StoreError::NotFound)));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn deck_list_counts_and_practice_pass() {
+        let root = std::env::temp_dir().join(format!("jay-study-list-{}", id::new_id()));
+        let store = Store::open(&root).unwrap();
+        let now = now_ms();
+        let cards = (0..3).map(|k| Card::new(format!("f{k}"), "b b".into(), "t".into(), now - 1)).collect();
+        let deck = Deck { id: id::new_id(), title: "Bio".into(), created: now, materials: vec![], cards, log: vec![] };
+        store.save_deck(&deck).unwrap();
+        store.review_card(&deck.id, 1, 4, false, 0).unwrap(); // good: a day out
+        store.review_card(&deck.id, 2, 1, false, 0).unwrap(); // forgotten: 10 min
+        let d = &store.decks()[0];
+        assert_eq!((d.cards, d.new, d.learned, d.due), (3, 1, 1, 1));
+        let next = d.next_due.unwrap();
+        assert!(next <= 600_000 && next > 600_000 - 5_000, "{next}");
+        let path = root.join("decks").join(format!("{}.json", deck.id));
+        let before = std::fs::read(&path).unwrap();
+        let all = store.due_cards(&deck.id, 50, true).unwrap();
+        assert_eq!(all.iter().map(|c| c.index).collect::<Vec<_>>(), [0, 1, 2]);
+        assert_eq!(std::fs::read(&path).unwrap(), before);
         std::fs::remove_dir_all(root).unwrap();
     }
 

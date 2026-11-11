@@ -341,8 +341,8 @@ pub fn deck_build(app: AppHandle, title: String, materials: Vec<String>, count: 
 }
 
 #[tauri::command]
-pub fn deck_due(library: State<Library>, id: String) -> Result<Vec<DueCard>, Failure> {
-    Ok(library.store.due_cards(&id, 50)?)
+pub fn deck_due(library: State<Library>, id: String, all: bool) -> Result<Vec<DueCard>, Failure> {
+    Ok(library.store.due_cards(&id, 50, all)?)
 }
 
 /// What the ratings since `since` (ms since 1970) left in the deck, for the end-of-session summary.

@@ -12,13 +12,22 @@ import { t, language } from '../core/i18n.js';
 import { studyFailureText } from './study-text.js';
 
 const date = (ms) => new Intl.DateTimeFormat(language(), { dateStyle: 'short' }).format(ms);
+// The deck row: what is due (or when the next card comes) on one line, what the deck holds on the next.
+const status = (d) =>
+  d.due ? t('{n} to review', { n: d.due }) : d.next_due === null ? t('nothing to review now') : t('Nothing to review now · the next one comes {when}', { when: whenText(d.next_due, language()) });
+const meta = (d) => [
+  t('{n} cards', { n: d.cards }),
+  d.new ? (d.new === 1 ? t('1 new') : t('{n} new', { n: d.new })) : null,
+  d.learned ? (d.learned === 1 ? t('1 learned') : t('{n} learned', { n: d.learned })) : null,
+  date(d.created),
+].filter(Boolean).join(' · ');
 const LENGTH = () => ({ '-2': t('very short'), '-1': t('short'), 0: t('medium'), 1: t('a bit longer'), 2: t('long') });
 
 /**
  * Reviewing a deck: a real card on a pile, that flips to show the answer (click, Space or Enter),
  * then four colored ratings (1–4 on the keyboard). The pile gets thinner as the cards go.
  */
-function review(deck, cards, onDone, { again = false } = {}) {
+function review(deck, cards, onDone, { again = false, practice = false } = {}) {
   // The session queue: a forgotten card is put back in it (`again`), so the total grows.
   const queue = cards.map((card) => ({ card, again }));
   const since = Date.now(); // a new review() is a new session: the summary counts from here
@@ -59,6 +68,7 @@ function review(deck, cards, onDone, { again = false } = {}) {
   const canUndo = (yes) => (undoButton.hidden = summaryUndo.hidden = !yes);
   const rate = h('div', { class: 'card-ratings', role: 'group', 'aria-label': t('How well did you remember?'), hidden: true });
   const vote = h('div', { class: 'card-vote', hidden: true });
+  const nextCard = h('button', { type: 'button', class: 'btn', hidden: true, onClick: () => advance() }, t('Next card'));
   // Color and a symbol and a word: never color alone.
   const RATINGS = [
     [1, () => h('span', { class: 'rating-symbol', html: icons.close, 'aria-hidden': 'true' }), t('Forgot'), 'again'],
@@ -102,10 +112,10 @@ function review(deck, cards, onDone, { again = false } = {}) {
     card.setAttribute('aria-pressed', String(flipped));
     card.querySelector('.flip-back').setAttribute('aria-hidden', String(!flipped));
     card.querySelector('.flip-front').setAttribute('aria-hidden', String(flipped));
-    rate.hidden = !flipped;
-    vote.hidden = !flipped;
+    rate.hidden = vote.hidden = practice || !flipped;
+    nextCard.hidden = !practice || !flipped;
     show.hidden = flipped;
-    if (flipped) rate.querySelector('[data-tone="good"]')?.focus();
+    if (flipped) (practice ? nextCard : rate.querySelector('[data-tone="good"]'))?.focus();
   }
 
   function render() {
@@ -139,8 +149,14 @@ function review(deck, cards, onDone, { again = false } = {}) {
     clock.pause();
     reviewBody.hidden = true;
     summaryBody.hidden = false;
+    const back = h('button', { type: 'button', class: 'btn', onClick: () => { stop(); onDone(); } }, t('Back to the decks'));
+    if (practice) {
+      // Nothing was saved, so there are no numbers to show.
+      summaryBody.replaceChildren(h('span', { class: 'card-icon', html: icons.check, 'aria-hidden': 'true' }), h('h2', {}, t('Pass done.')), h('p', {}, t("The cards' schedule did not change.")), h('div', { class: 'button-row' }, back));
+      return;
+    }
     summaryBody.replaceChildren(h('span', { class: 'card-icon', html: icons.check, 'aria-hidden': 'true' }), h('h2', {}, t('All reviewed for now!')));
-    const buttons = (...extra) => h('div', { class: 'button-row' }, h('button', { type: 'button', class: 'btn', onClick: () => { stop(); onDone(); } }, t('Back to the decks')), ...extra, summaryUndo);
+    const buttons = (...extra) => h('div', { class: 'button-row' }, back, ...extra, summaryUndo);
     let s;
     try {
       s = await invoke('deck_session', { id: deck.id, since });
@@ -188,6 +204,13 @@ function review(deck, cards, onDone, { again = false } = {}) {
     pile.append(g);
     g.addEventListener('animationend', () => g.remove());
     setTimeout(() => g.remove(), 400);
+  }
+
+  // Practice: the schedule stays untouched, so no card_review, card_undo or deck_session call.
+  function advance() {
+    if (!flipped) return;
+    pos++;
+    render();
   }
 
   async function next(quality) {
@@ -248,15 +271,18 @@ function review(deck, cards, onDone, { again = false } = {}) {
   function keys(e) {
     if (!el.isConnected) return document.removeEventListener('keydown', keys);
     if (e.target.closest('input, select, textarea, [contenteditable]')) return;
-    if (e.key === 'Backspace' || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z')) {
+    if (!practice && (e.key === 'Backspace' || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z'))) {
       e.preventDefault();
       undo();
     } else if (finished) {
       // the summary has no card to flip or rate
+    } else if (practice && flipped && (e.key === 'Enter' || e.key === 'ArrowRight')) {
+      e.preventDefault();
+      advance();
     } else if ((e.key === ' ' || e.key === 'Enter') && (e.target === card || e.target === document.body)) {
       e.preventDefault();
       flip();
-    } else if (flipped && ['1', '2', '3', '4'].includes(e.key)) {
+    } else if (!practice && flipped && ['1', '2', '3', '4'].includes(e.key)) {
       next(RATINGS[Number(e.key) - 1][0]);
     }
   }
@@ -276,7 +302,7 @@ function review(deck, cards, onDone, { again = false } = {}) {
     document.removeEventListener('keydown', keys);
   }
 
-  const reviewBody = h('div', {}, h('div', { class: 'review-progress' }, counter, bar, clockEl), pile, h('div', { class: 'review-actions' }, show, rate, vote, message, undoButton));
+  const reviewBody = h('div', {}, h('div', { class: 'review-progress' }, counter, practice ? h('span', { class: 'badge' }, t('Practice: the schedule does not change')) : null, bar, clockEl), pile, h('div', { class: 'review-actions' }, show, rate, vote, nextCard, message, undoButton));
   const summaryBody = h('div', { class: 'deck-done session-summary', hidden: true });
   const el = h(
     'section',
@@ -349,16 +375,16 @@ export function createFlashcardsPanel() {
         ...decks.map((d) =>
           h('li', { class: 'material-card deck-card' }, h('div', { class: 'material-row' },
             h('span', { class: 'deck-thumb', 'aria-hidden': 'true' }, h('span', {}, String(d.cards))),
-            h('div', { class: 'material-main' }, h('h3', { class: 'material-name' }, d.title), h('p', { class: 'material-meta' }, [t('{n} cards', { n: d.cards }), d.due ? t('{n} to review', { n: d.due }) : t('nothing to review now'), date(d.created)].join(' · '))),
-            h('button', { type: 'button', class: 'btn', disabled: !d.due, onClick: async () => {
+            h('div', { class: 'material-main' }, h('h3', { class: 'material-name' }, d.title), h('p', { class: 'material-meta deck-status', 'data-due': String(Boolean(d.due)) }, status(d)), h('p', { class: 'material-meta' }, meta(d))),
+            h('button', { type: 'button', class: d.due ? 'btn' : 'btn btn-secondary', title: d.due ? null : t('A pass through every card that does not change when they come back.'), onClick: async () => {
               try {
-                const cards = await invoke('deck_due', { id: d.id });
+                const cards = await invoke('deck_due', { id: d.id, all: !d.due });
                 stopListening.then((un) => un());
-                host.replaceChildren(review(d, cards, showHome));
+                host.replaceChildren(review(d, cards, showHome, { practice: !d.due }));
               } catch (e) {
                 message.textContent = studyFailureText(e);
               }
-            } }, t('Review')),
+            } }, d.due ? t('Review') : t('Study anyway')),
             h('button', { type: 'button', class: 'icon-btn', 'aria-label': t('Delete {name}', { name: d.title }), title: t('Delete'), html: icons.trash, onClick: async () => {
               if (!confirm(t('Delete the deck "{name}"?', { name: d.title }))) return;
               await invoke('deck_delete', { id: d.id }).catch((e) => (message.textContent = studyFailureText(e)));
