@@ -262,14 +262,13 @@ impl Store {
 
     /// The questions of an exam material, with its key's answers when one is given.
     pub fn material_questions(&self, material: &str, key: Option<&str>) -> Result<Vec<Question>, StoreError> {
-        let mut questions = exam::split_questions(&self.text(material, usize::MAX)?);
+        let text = self.text(material, usize::MAX)?;
+        let mut questions = exam::split_questions(&text);
         for q in &mut questions {
             q.source = Some(exam::Source { material: material.to_owned(), number: Some(q.number) });
         }
         if let Some(key) = key {
-            if let Some(parsed) = exam::parse_answer_key(&self.text(key, usize::MAX)?) {
-                exam::apply_answer_key(&mut questions, &parsed);
-            }
+            exam::apply_key(&mut questions, &self.text(key, usize::MAX)?, &text);
         }
         Ok(questions)
     }
@@ -281,7 +280,8 @@ impl Store {
     /// whose file name shares more with the exam's wins; a tie picks none (Jay-AI answers instead).
     pub fn best_key(&self, material: &str) -> Option<String> {
         let exam_name = self.material(material).ok()?.name;
-        let questions = exam::split_questions(&self.text(material, usize::MAX).ok()?);
+        let text = self.text(material, usize::MAX).ok()?;
+        let questions = exam::split_questions(&text);
         if questions.is_empty() {
             return None;
         }
@@ -290,9 +290,9 @@ impl Store {
             .into_iter()
             .filter(|m| m.kind == MaterialKind::Key && !years_differ(&exam_name, &m.name))
             .filter_map(|m| {
-                let key = exam::parse_answer_key(&self.text(&m.id, usize::MAX).ok()?)?;
+                let key = self.text(&m.id, usize::MAX).ok()?;
                 let mut probe = questions.clone();
-                let answered = exam::apply_answer_key(&mut probe, &key);
+                let answered = exam::apply_key(&mut probe, &key, &text);
                 (answered * 5 >= questions.len() * 4).then(|| (shared_name_tokens(&exam_name, &m.name), m.id))
             })
             .collect();

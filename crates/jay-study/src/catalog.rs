@@ -595,4 +595,79 @@ mod tests {
             println!("{}: {} questions 1-{}, {applied} answers applied, annulled {:?}, void {:?}", e.id, questions.len(), e.questions, e.annulled, e.void_options);
         }
     }
+
+    /// Needs the local dataset: `JAYS_DATASET=<dataset> cargo test the_real_edital -- --ignored --nocapture`.
+    /// The student attaches the real edital next to each exam: the 7 real UEPG 2025 exams get exactly
+    /// the catalogue's answers (annulled questions and propositions too), and no other exam in the
+    /// dataset (other years, ENEM, UEM…) gets a single answer from it.
+    #[test]
+    #[ignore]
+    fn the_real_edital_answers_its_own_exams_and_no_other() {
+        use crate::classify::MaterialKind;
+        let dir = std::env::var("JAYS_DATASET").expect("JAYS_DATASET");
+        let (store, root) = temp_store();
+        let key = store.import(std::path::Path::new(&format!("{dir}/key/uepg-2025-vestibular-key.pdf"))).unwrap();
+        assert_eq!(key.kind, MaterialKind::Key);
+        let landed = |file: &str| {
+            let exam = store.import(std::path::Path::new(file)).unwrap();
+            let qs = store.material_questions(&exam.id, Some(&key.id)).unwrap();
+            let best = store.best_key(&exam.id);
+            store.delete(&exam.id).unwrap();
+            (qs, best)
+        };
+        let (mut answered, mut annulled, mut void, mut wrong) = (0, 0, 0, 0);
+        let mut mine = vec![];
+        for e in &ENTRIES {
+            // Conhecimentos Gerais is one file for two entries: its 56-60 come twice (Inglês, Espanhol).
+            if e.language == Some(1) {
+                continue;
+            }
+            let file = format!("{dir}/exam_sum/{}", e.download.file);
+            mine.push(file.clone());
+            let (qs, best) = landed(&file);
+            println!("{}: {} questions, {} answered", e.id, qs.len(), qs.iter().filter(|q| q.answer.is_some()).count());
+            assert_eq!(best.as_deref(), Some(key.id.as_str()), "{}: best_key", e.id);
+            // What the catalogue says for the same questions.
+            let text = |f: &str| {
+                let bytes = std::fs::read(f).unwrap();
+                exam::split_questions(&extract::extract(extract::detect(&bytes[..bytes.len().min(4096)]).unwrap(), bytes).unwrap().text)
+            };
+            let mut want = text(&file);
+            if e.language.is_some() {
+                let (mut english, mut spanish) = (e.keep_language(want.clone()), entry("uepg-2025-cg-espanhol").keep_language(want));
+                e.apply(&mut english);
+                entry("uepg-2025-cg-espanhol").apply(&mut spanish);
+                // 1-55 and the first 56-60 from Inglês, the second 56-60 from Espanhol.
+                want = english.into_iter().chain(spanish.into_iter().filter(|q| q.number >= 56)).collect();
+            } else {
+                e.apply(&mut want);
+            }
+            assert_eq!(qs.len(), want.len(), "{}", e.id);
+            for (got, want) in qs.iter().zip(&want) {
+                assert_eq!(got.number, want.number, "{}", e.id);
+                wrong += usize::from(got.answer.is_some() && got.answer != want.answer);
+                assert!(got.answer == want.answer && got.annulled == want.annulled && got.void == want.void, "{} question {}: {:?} vs {:?}", e.id, got.number, (&got.answer, got.annulled, got.void), (&want.answer, want.annulled, want.void));
+                answered += usize::from(got.answer.is_some());
+                annulled += usize::from(got.annulled);
+                void += usize::from(got.void != 0);
+            }
+        }
+        println!("the 7 exams: {answered} answers, {annulled} annulled questions, {void} questions with a void proposition, {wrong} wrong");
+        assert_eq!(wrong, 0);
+        // Every other exam in the dataset: nothing lands, and the edital is nobody's automatic key.
+        let others: Vec<_> = ["exam_sum", "exam", "both", "content"]
+            .iter()
+            .flat_map(|d| std::fs::read_dir(format!("{dir}/{d}")).unwrap().map(|f| f.unwrap().path()))
+            .filter(|p| p.extension().is_some_and(|x| x == "pdf") && !mine.contains(&p.to_string_lossy().replace('\\', "/")))
+            .collect();
+        let started = std::time::Instant::now();
+        let mut checked = 0;
+        for p in &others {
+            let (qs, best) = landed(&p.to_string_lossy());
+            assert!(qs.iter().all(|q| q.answer.is_none() && !q.annulled && q.void == 0) && best.is_none(), "{}", p.display());
+            checked += 1;
+        }
+        println!("{checked} other files: no answer, no annulment, no automatic key ({:.0} s)", started.elapsed().as_secs_f32());
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

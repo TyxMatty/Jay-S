@@ -145,7 +145,7 @@ function builder({ onBuilt, onError }) {
       const info = await invoke('exam_material_info', { id });
       infos.set(id, info);
       const key = info.key ? materials.find((m) => m.id === info.key)?.name : null;
-      line.textContent = [t('{n} questions found', { n: info.questions }), key ? t('answer key: {name}', { name: key }) : t('no answer key: Jay-AI answers them (marked as such)')].join(' · ');
+      line.textContent = [t('{n} questions found', { n: info.questions }), key ? (info.answered ? t('answer key: {name}', { name: key }) : t('answer key: {name}, but none of its answers fit (a key with several exams may not say which one is yours): Jay-AI answers them (marked as such)', { name: key })) : t('no answer key: Jay-AI answers them (marked as such)')].join(' · ');
     } catch (e) {
       line.textContent = studyFailureText(e);
     }

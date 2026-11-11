@@ -217,6 +217,7 @@ export default {
   "analyzed by Jay-AI": "analisado pelo Jay-AI",
   "answer by Jay-AI": "resposta do Jay-AI",
   "answer key: {name}": "gabarito: {name}",
+  "answer key: {name}, but none of its answers fit (a key with several exams may not say which one is yours): Jay-AI answers them (marked as such)": "gabarito: {name}, mas nenhuma resposta dele serviu (um gabarito com várias provas pode não dizer qual é a sua): o Jay-AI responde (e isso fica marcado)",
   "blank": "em branco",
   "long": "longos",
   "medium": "médios",
