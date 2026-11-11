@@ -4,6 +4,7 @@
 pub mod ai;
 pub mod calc;
 pub mod cards;
+pub mod catalog;
 pub mod chat;
 pub mod classify;
 pub mod doc;
