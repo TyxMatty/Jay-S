@@ -32,6 +32,9 @@ const PERSONAL: [&str; 5] = ["Opa! Como vc ta?", "Pode se chamar de Matty?", "Eu
 /// answer, the nickname, and a request for code that is not a calculation.
 const MIXED: [&str; 4] = ["Como faço flashcards de uma prova que fiz?", "Posso te chamar de Matty?", "Como é seu apelido?", "Consegue escrever uma calculadora simples em py?"];
 
+/// The same kinds of question in English, with no sources: every sentence must come back in English.
+const ENGLISH: [&str; 7] = ["hi, how are you?", "can I call you Matty?", "what's your name again?", "how do I make flashcards from an exam I took?", "can you make a calculator in C?", "what is the capital of France?", "how much is (1.96 * 10 / 4)^2?"];
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let root = std::env::temp_dir().join(format!("jay-s-chat-probe-{}", jay_study::id::new_id()));
@@ -39,10 +42,10 @@ fn main() {
     let materials: Vec<String> = args[2..].iter().map(|f| store.import(std::path::Path::new(f)).expect("import").id).collect();
     let server = Server::start(&AiPaths::new(std::path::Path::new(&args[1])), ModelChoice::Standard).expect("server");
     let cancel = AtomicBool::new(false);
-    let chats = [(Scope { materials, attempt: None }, &SCOPED[..]), (Scope::default(), &GENERAL[..]), (Scope::default(), &PERSONAL[..]), (Scope::default(), &MIXED[..])];
+    let chats = [(Scope { materials, attempt: None }, &SCOPED[..]), (Scope::default(), &GENERAL[..]), (Scope::default(), &PERSONAL[..]), (Scope::default(), &MIXED[..]), (Scope::default(), &ENGLISH[..])];
     // Only one conversation, for repeated runs: PROBE_GENERAL=1 (the second), PROBE_PERSONAL=1 (the
-    // third), PROBE_MIXED=1 (the fourth).
-    let only = [("PROBE_GENERAL", 1), ("PROBE_PERSONAL", 2), ("PROBE_MIXED", 3)].iter().find(|(v, _)| std::env::var_os(v).is_some()).map(|&(_, i)| i);
+    // third), PROBE_MIXED=1 (the fourth), PROBE_ENGLISH=1 (the fifth).
+    let only = [("PROBE_GENERAL", 1), ("PROBE_PERSONAL", 2), ("PROBE_MIXED", 3), ("PROBE_ENGLISH", 4)].iter().find(|(v, _)| std::env::var_os(v).is_some()).map(|&(_, i)| i);
     for (i, (scope, questions)) in chats.into_iter().enumerate() {
         if only.is_some_and(|o| o != i) {
             continue;
