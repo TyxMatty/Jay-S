@@ -27,9 +27,14 @@ pub fn eval(expr: &str) -> R {
 
 /// The result as the student reads it: at most 4 decimals, no trailing zeros, decimal comma.
 pub fn show(x: f64) -> String {
+    show_with(x, false)
+}
+
+/// `show`, with a decimal point when `point` (for a student writing in English).
+pub fn show_with(x: f64, point: bool) -> String {
     let s = format!("{x:.4}");
     let s = s.trim_end_matches('0').trim_end_matches('.');
-    if s == "-0" { "0".into() } else { s.replace('.', ",") }
+    if s == "-0" { "0".into() } else if point { s.into() } else { s.replace('.', ",") }
 }
 
 fn fin(x: f64) -> R {
@@ -260,6 +265,14 @@ mod tests {
     fn results_are_shown_with_a_decimal_comma() {
         for (x, want) in [(864.36, "864,36"), (24.01, "24,01"), (865.0, "865"), (-0.5, "-0,5"), (0.0, "0"), (-0.00001, "0"), (1.0 / 3.0, "0,3333"), (2.00004, "2"), (1234567.5, "1234567,5"), (100.0, "100")] {
             assert_eq!(show(x), want);
+        }
+    }
+
+    #[test]
+    fn results_can_be_shown_with_a_decimal_point() {
+        assert_eq!(show_with(eval("(1.96 * 10 / 4)^2").unwrap(), true), "24.01");
+        for (x, want) in [(864.36, "864.36"), (865.0, "865"), (-0.5, "-0.5"), (-0.00001, "0"), (1.0 / 3.0, "0.3333")] {
+            assert_eq!(show_with(x, true), want);
         }
     }
 }
