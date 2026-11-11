@@ -18,7 +18,7 @@ One person, one Windows account, no server and no accounts. The interesting boun
 | Model output (Jay-AI) | **Hostile**: it reads hostile files | Fill a JSON schema that Rust validates again | Decide a grade, an answer key, a file, the kind of a material, or anything shown as HTML |
 | `llama-server` (child process) | Trusted binary, pinned by SHA-256 | Listen on `127.0.0.1:<random port>` with a random key | Be reached by a web page in a browser (no key, no permissive CORS) |
 | Other local processes / web pages | Untrusted | Nothing | Read the server key (environment variable, not command line); call `llama-server` without it (401) |
-| Download sources (GitHub, Hugging Face) | Untrusted transport | Deliver bytes over HTTPS | Have them run before URL, size and SHA-256 match the values in the code |
+| Download sources (GitHub, Hugging Face) | Untrusted transport | Deliver bytes over HTTPS | Have them run before URL, size and SHA-256 match the values in the code (Jay-AI) or, for the app's update, this repository's address and the SHA-256 GitHub computed |
 
 **The model has no tools.** It can't write files, call commands, open URLs or change state. Every effect (saving, grading, picking an answer key, the kind of a material) is decided by Rust code from validated data. This is the main reason LLM06 (Excessive Agency) has no attack surface here.
 

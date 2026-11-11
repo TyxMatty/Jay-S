@@ -369,4 +369,16 @@ export default {
   "The numbers were computed by Jay-S; the formula was chosen by Jay-AI: check it against your material.": "Os números foram calculados pelo Jay-S; a fórmula foi escolhida pelo Jay-AI: confira com o seu material.",
   "Sources ({n})": "Fontes ({n})",
   "Enter sends · Shift+Enter makes a new line": "Enter envia · Shift+Enter quebra a linha",
+  "Update to {version}": "Atualizar pra {version}",
+  "Jay-S closes, installs the update and opens again.": "O Jay-S fecha, instala a atualização e abre de novo.",
+  "Your answers are saved as you go: an exam in progress continues where you left it. A mock test's clock keeps running.":
+    "Suas respostas são salvas conforme você responde: uma prova em andamento continua de onde você parou. O relógio de um simulado continua correndo.",
+  "Install update": "Instalar atualização",
+  "Try again": "Tentar de novo",
+  "Not now": "Agora não",
+  "Downloading the update… {percent}%": "Baixando a atualização… {percent}%",
+  "Installing: Jay-S closes now.": "Instalando: o Jay-S fecha agora.",
+  "Jay-AI is working. Try again when it finishes.": "O Jay-AI está trabalhando. Tente de novo quando ele terminar.",
+  "The update is already running.": "A atualização já está em andamento.",
+  "The update failed.": "A atualização falhou.",
 };

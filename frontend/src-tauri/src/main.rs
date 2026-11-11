@@ -7,6 +7,7 @@
 mod ai;
 mod library;
 mod study;
+mod update;
 mod view;
 #[cfg(windows)]
 mod taskbar_icon;
@@ -32,6 +33,7 @@ fn main() {
             app.manage(ai::Ai::new(&root));
             app.manage(library::Library::new(jay_study::Store::open(root)?));
             app.manage(study::Jobs::default());
+            app.manage(update::Update::default());
             ai::spawn_idle_watch(app.handle().clone());
             let args: Vec<String> = std::env::args().collect();
             let cwd = std::env::current_dir().unwrap_or_default();
@@ -109,6 +111,8 @@ fn main() {
             study::chat_new,
             study::chat_delete,
             study::chat_ask,
+            update::update_check,
+            update::update_install,
             #[cfg(windows)]
             taskbar_icon::set_taskbar_icon
         ])

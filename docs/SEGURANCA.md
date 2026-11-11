@@ -18,7 +18,7 @@ Uma pessoa, uma conta do Windows, sem servidor e sem contas. As fronteiras que i
 | Saída do modelo (Jay-AI) | **Hostil**: ele lê arquivos hostis | Preencher um esquema JSON que o Rust valida de novo | Decidir uma nota, um gabarito, um arquivo, o tipo de um material ou qualquer coisa mostrada como HTML |
 | `llama-server` (processo filho) | Binário confiável, fixado por SHA-256 | Escutar em `127.0.0.1:<porta aleatória>` com chave aleatória | Ser alcançado por uma página aberta no navegador (sem chave, sem CORS permissivo) |
 | Outros processos locais / páginas web | Não confiáveis | Nada | Ler a chave do servidor (variável de ambiente, não linha de comando); chamar o `llama-server` sem ela (401) |
-| Fontes de download (GitHub, Hugging Face) | Transporte não confiável | Entregar bytes por HTTPS | Fazer esses bytes rodarem antes que URL, tamanho e SHA-256 batam com os valores do código |
+| Fontes de download (GitHub, Hugging Face) | Transporte não confiável | Entregar bytes por HTTPS | Fazer esses bytes rodarem antes que URL, tamanho e SHA-256 batam com os valores do código (o Jay-AI) ou, na atualização do app, com o endereço deste repositório e o SHA-256 que o GitHub calculou |
 
 **O modelo não tem ferramentas.** Não grava arquivos, não chama comandos, não abre URLs nem muda estado. Todo efeito (salvar, corrigir, escolher o gabarito, o tipo de um material) é decidido por código Rust a partir de dados validados. É o principal motivo de o LLM06 (Excessive Agency) não ter superfície de ataque aqui.
 

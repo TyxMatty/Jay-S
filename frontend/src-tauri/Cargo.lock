@@ -2012,9 +2012,21 @@ dependencies = [
 ]
 
 [[package]]
-name = "jay-s"
-version = "0.1.1"
+name = "jay-i"
+version = "0.1.0"
+source = "git+https://github.com/TyxMatty/Jay-I?rev=f4f9ef07c0cf49abd1f53d3caa00c69e5aa1c90a#f4f9ef07c0cf49abd1f53d3caa00c69e5aa1c90a"
 dependencies = [
+ "serde",
+ "sha2",
+ "ureq",
+ "winreg",
+]
+
+[[package]]
+name = "jay-s"
+version = "0.1.2"
+dependencies = [
+ "jay-i",
  "jay-study",
  "serde",
  "serde_json",
@@ -2028,7 +2040,7 @@ dependencies = [
 
 [[package]]
 name = "jay-study"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "getrandom 0.3.4",
  "hayro",

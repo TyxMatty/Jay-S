@@ -124,6 +124,11 @@ impl Ai {
         result
     }
 
+    /// The server is loading or answering: an update now would cut the job.
+    pub fn working(&self) -> bool {
+        matches!(*lock(&self.state), ServerState::Loading | ServerState::Working)
+    }
+
     /// The chosen model and the runtime are downloaded.
     pub fn ready(&self) -> bool {
         self.paths.runtime_ready() && self.paths.model_ready(*lock(&self.choice))
@@ -209,7 +214,7 @@ impl From<AiError> for Failure {
 
 #[derive(Clone, Serialize)]
 #[serde(tag = "state", rename_all = "lowercase")]
-enum DownloadEvent {
+pub(crate) enum DownloadEvent {
     Progress { what: &'static str, done: u64, total: u64 },
     Done,
     Error { error: Failure },

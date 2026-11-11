@@ -11,6 +11,7 @@ import { normalizeMotion } from '../core/motion.js';
 import { t } from '../core/i18n.js';
 import { onAiStatus, aiReady } from '../core/ai.js';
 import { isTauri } from '../core/bridge.js';
+import { createUpdatePill } from './update.js';
 
 /** Each language in its own name, so it can be found whichever one is showing. */
 const LANGUAGES = [
@@ -201,6 +202,7 @@ export function mountApp(root) {
     { class: 'topbar' },
     h('div', { class: 'brand' }, h('span', { class: 'brand-mark wolf-mark', 'aria-hidden': 'true' }), h('span', { class: 'brand-name' }, 'Jay', h('span', {}, '-'), 'S')),
     createStatusPill(() => tabs.select('jayai', { focus: true })),
+    createUpdatePill(),
     createThemeToggle(),
   );
 
