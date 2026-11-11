@@ -222,6 +222,8 @@ impl From<AiError> for BuildError {
 }
 
 const MAX_QUESTIONS: usize = 200;
+/// How much of a question's base text goes into the analysis of a result (per wrong question).
+const PASSAGE_IN_ANALYSIS: usize = 400;
 
 impl Store {
     fn dir(&self, name: &str) -> PathBuf {
@@ -569,10 +571,12 @@ impl Store {
                     }
                 };
                 wrong.push_str(&format!(
-                    "\nQuestão {} ({}): {}\nO aluno marcou: {}\nResposta certa: {}\n{}Tempo: {} s\n",
+                    "\nQuestão {} ({}): {}\n{}O aluno marcou: {}\nResposta certa: {}\n{}Tempo: {} s\n",
                     i + 1,
                     g.topic.as_deref().unwrap_or("sem tema"),
                     q.stem.chars().take(300).collect::<String>(),
+                    // The base text the stem points at ("De acordo com o texto…"), cut short.
+                    q.passage.as_deref().map(|p| format!("Texto-base: {}\n", p.chars().take(PASSAGE_IN_ANALYSIS).collect::<String>())).unwrap_or_default(),
                     said(&g.marked),
                     said(&g.answer),
                     q.explanation.as_deref().map(|e| format!("Explicação: {}\n", e.chars().take(400).collect::<String>())).unwrap_or_default(),
