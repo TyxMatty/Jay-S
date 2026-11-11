@@ -212,6 +212,7 @@ impl From<AiError> for Failure {
             AiError::NotInstalled => ("not_installed", None),
             AiError::Start(d) => ("start", Some(d)),
             AiError::BadReply(d) => ("bad_reply", Some(d)),
+            AiError::TooLong => ("too_long", None),
             AiError::Io(d) => ("io", Some(d)),
         };
         Failure::new(code, detail)

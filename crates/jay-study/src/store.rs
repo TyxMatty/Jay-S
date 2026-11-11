@@ -314,6 +314,10 @@ mod tests {
             assert!(matches!(store.delete(bad), Err(StoreError::NotFound)), "{bad}");
             assert!(matches!(store.text(bad, 10), Err(StoreError::NotFound)), "{bad}");
             assert!(matches!(store.set_kind(bad, MaterialKind::Exam), Err(StoreError::NotFound)), "{bad}");
+            // What the `jays://` protocol and the viewer call with an id taken from the address.
+            assert!(matches!(store.original(bad), Err(StoreError::NotFound)), "{bad}");
+            assert!(matches!(store.view(bad), Err(StoreError::NotFound)), "{bad}");
+            assert!(matches!(store.doc_image(bad, 0), Err(StoreError::NotFound)), "{bad}");
         }
         // A well-formed id that doesn't exist is not found either.
         assert!(matches!(store.delete(&id::new_id()), Err(StoreError::NotFound)));

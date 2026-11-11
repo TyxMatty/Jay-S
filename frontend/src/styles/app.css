@@ -1320,6 +1320,10 @@ fieldset > h3 {
   padding-left: 20px;
 }
 
+.analysis > .btn {
+  margin-top: var(--space-2);
+}
+
 .analysis .spinner {
   display: inline-block;
   vertical-align: middle;
@@ -2671,6 +2675,29 @@ textarea.input {
   background: rgb(0 0 0 / 0.55);
   color: #fff;
   font-size: 11px;
+}
+
+/* "See in the original exam": the question's PDF pages, white paper whatever the theme. */
+.original {
+  margin: 0 0 var(--space-4);
+}
+
+.original-pages {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-4);
+  margin-top: var(--space-3);
+}
+
+.original-pages img {
+  display: block;
+  width: 100%;
+  max-width: 900px;
+  height: auto;
+  aspect-ratio: auto 210 / 297;
+  background: #fff;
+  border-radius: 4px;
+  box-shadow: 0 2px 6px rgb(0 0 0 / 0.18);
 }
 
 /* DOCX: an A4-wide sheet of white paper, dark text, as in Jay-E. */

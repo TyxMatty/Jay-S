@@ -8,7 +8,7 @@ import { t } from '../core/i18n.js';
 import { failureText } from './materials.js';
 
 /** Where the jays:// protocol answers in the WebView2 (Windows). */
-const BASE = 'http://jays.localhost';
+export const BASE = 'http://jays.localhost';
 
 function pdfView(m, pages) {
   let zoom = 1;

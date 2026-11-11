@@ -8,6 +8,7 @@ import { invoke, listen } from '../core/bridge.js';
 import { aiReady, onAiStatus } from '../core/ai.js';
 import { t, language } from '../core/i18n.js';
 import { studyFailureText } from './study-text.js';
+import { originalPages } from './original.js';
 
 const fmt = (n) => new Intl.NumberFormat(language(), { maximumFractionDigits: 1 }).format(n);
 const clock = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
@@ -31,6 +32,7 @@ export function createRunner(started, onFinished, onLeave) {
   let finished = false;
   // Learning mode: what is marked on the open question and not checked yet.
   let pending = null;
+  const originals = [];
 
   const status = h('p', { class: 'hint', role: 'status' });
   const timer = h('span', { class: 'runner-timer', hidden: !attempt.time_limit });
@@ -166,7 +168,9 @@ export function createRunner(started, onFinished, onLeave) {
         } }, t('Check'));
       }
     }
-    body.replaceChildren(header, annulled, passage ?? '', stem, options, confirm ?? '', feedback(q, g) ?? '');
+    // The same control each time, so an open panel stays open when Check redraws the question.
+    originals[current] ??= originalPages(q.original) ?? '';
+    body.replaceChildren(header, annulled, originals[current], passage ?? '', stem, options, confirm ?? '', feedback(q, g) ?? '');
     prev.disabled = current === 0;
     next.disabled = current === questions.length - 1;
     renderNav();
@@ -269,9 +273,17 @@ export function createResult(attempt, questions, { onBack }) {
   renderAnalysis(attempt.analysis);
   // An attempt that ended while Jay-S was busy with something else (or before Jay-AI was there)
   // was never sent: ask again when this opens, when the other job ends, when Jay-AI gets ready.
-  const ask = () => !analyzed && aiReady() && invoke('attempt_analyze').catch(() => {});
+  // After an error nothing asks again by itself (each run changes the Jay-AI status and the jobs,
+  // which would bring the spinner back and fail again, forever): only the Try again button does.
+  let failed = false;
+  const ask = () => !analyzed && !failed && aiReady() && invoke('attempt_analyze').catch(() => {});
   ask();
-  const unwatch = attempt.analysis ? null : onAiStatus(() => !analyzed && (renderAnalysis(null), ask()));
+  const unwatch = attempt.analysis ? null : onAiStatus(() => !analyzed && !failed && (renderAnalysis(null), ask()));
+  const retry = () => {
+    failed = false;
+    renderAnalysis(null);
+    ask();
+  };
   const stop = attempt.analysis
     ? null
     : listen('study-job', async (e) => {
@@ -281,7 +293,8 @@ export function createResult(attempt, questions, { onBack }) {
           const [fresh] = await invoke('attempt_result', { id: attempt.id });
           renderAnalysis(fresh.analysis);
         } else if (e.state === 'error') {
-          analysis.replaceChildren(h('p', { class: 'hint', 'data-tone': 'error' }, studyFailureText(e.error)));
+          failed = true;
+          analysis.replaceChildren(h('p', { class: 'hint', 'data-tone': 'error' }, studyFailureText(e.error)), h('button', { type: 'button', class: 'btn btn-secondary', onClick: retry }, t('Try again')));
         }
       });
 
@@ -305,6 +318,7 @@ export function createResult(attempt, questions, { onBack }) {
         h('details', {},
           h('summary', {}, h('span', { class: 'review-mark' }, tone === 'right' ? '✓' : tone === 'partial' ? '½' : tone === 'annulled' ? '–' : '✗'), ' ', (q?.stem ?? '').slice(0, 140)),
           g.annulled ? h('p', { class: 'hint' }, t('Annulled by the university: it does not count in the score.')) : '',
+          originalPages(q?.original) ?? '',
           q?.passage ? h('blockquote', { class: 'runner-passage' }, q.passage) : '',
           q ? h('p', {}, q.stem) : '',
           q ? h('ul', { class: 'review-options' }, q.options.map((o) => h('li', {}, h('strong', {}, o.label), ' ', o.text, (q.void & Number(o.label)) ? [' ', h('span', { class: 'badge', 'data-status': 'check' }, t('Annulled'))] : ''))) : '',

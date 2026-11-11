@@ -24,6 +24,8 @@ export function aiFailureText(error) {
       return t("Jay-AI couldn't start ({detail}).", { detail: error.detail ?? '' });
     case 'bad_reply':
       return t('Jay-AI answered something unexpected. Try again.');
+    case 'too_long':
+      return t('This was too much for Jay-AI to read at once.');
     case 'busy':
       return t('A download is already running.');
     case 'web':
