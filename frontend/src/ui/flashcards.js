@@ -3,7 +3,7 @@
 import { h } from './dom.js';
 import { icons } from './icons.js';
 import { cardTitle } from './card-title.js';
-import { inTime } from './card-time.js';
+import { inTime, whenText } from './card-time.js';
 import { requeueAt } from './card-queue.js';
 import { stopwatch, clockText } from './stopwatch.js';
 import { invoke, listenJobs, isTauri } from '../core/bridge.js';
@@ -18,14 +18,15 @@ const LENGTH = () => ({ '-2': t('very short'), '-1': t('short'), 0: t('medium'),
  * Reviewing a deck: a real card on a pile, that flips to show the answer (click, Space or Enter),
  * then four colored ratings (1–4 on the keyboard). The pile gets thinner as the cards go.
  */
-function review(deck, cards, onDone) {
+function review(deck, cards, onDone, { again = false } = {}) {
   // The session queue: a forgotten card is put back in it (`again`), so the total grows.
-  const queue = cards.map((card) => ({ card, again: false }));
+  const queue = cards.map((card) => ({ card, again }));
+  const since = Date.now(); // a new review() is a new session: the summary counts from here
   let pos = 0;
   let last = null; // the last rating, if it can still be undone: { pos, insertedAt }
   let flipped = false;
-  let rated = 0;
   let busy = false;
+  let finished = false; // the summary is showing: the clock stays stopped
   // The session clock only runs while the window and this screen are visible.
   const clock = stopwatch();
   let shownAt = 0;
@@ -52,7 +53,10 @@ function review(deck, cards, onDone) {
   const bar = h('progress', { class: 'ai-progress', max: cards.length, value: 0 });
   const message = h('p', { class: 'hint', role: 'status' });
   const show = h('button', { type: 'button', class: 'btn' }, t('Show the answer'));
-  const undoButton = h('button', { type: 'button', class: 'btn btn-secondary', hidden: true, onClick: () => undo() }, h('span', { class: 'btn-icon', html: icons.undo, 'aria-hidden': 'true' }), t('Undo'));
+  const newUndoButton = () => h('button', { type: 'button', class: 'btn btn-secondary', hidden: true, onClick: () => undo() }, h('span', { class: 'btn-icon', html: icons.undo, 'aria-hidden': 'true' }), t('Undo'));
+  const undoButton = newUndoButton();
+  const summaryUndo = newUndoButton(); // the same step back, offered on the summary too
+  const canUndo = (yes) => (undoButton.hidden = summaryUndo.hidden = !yes);
   const rate = h('div', { class: 'card-ratings', role: 'group', 'aria-label': t('How well did you remember?'), hidden: true });
   const vote = h('div', { class: 'card-vote', hidden: true });
   // Color and a symbol and a word: never color alone.
@@ -129,17 +133,46 @@ function review(deck, cards, onDone) {
     card.focus();
   }
 
-  function done() {
-    stop();
-    el.replaceChildren(
-      h('div', { class: 'panel-head' }, h('h1', {}, deck.title)),
-      h('div', { class: 'deck-done' },
-        h('span', { class: 'card-icon', html: icons.check, 'aria-hidden': 'true' }),
-        h('h2', {}, t('All reviewed for now!')),
-        h('p', { class: 'hint' }, t('{n} cards reviewed. The ones you forgot come back first next time.', { n: rated })),
-        h('button', { type: 'button', class: 'btn', onClick: onDone }, t('Back to the decks')),
-      ),
+  // The summary: every number comes from what Rust saved (the deck's log and cards).
+  async function done() {
+    finished = true;
+    clock.pause();
+    reviewBody.hidden = true;
+    summaryBody.hidden = false;
+    summaryBody.replaceChildren(h('span', { class: 'card-icon', html: icons.check, 'aria-hidden': 'true' }), h('h2', {}, t('All reviewed for now!')));
+    const buttons = (...extra) => h('div', { class: 'button-row' }, h('button', { type: 'button', class: 'btn', onClick: () => { stop(); onDone(); } }, t('Back to the decks')), ...extra, summaryUndo);
+    let s;
+    try {
+      s = await invoke('deck_session', { id: deck.id, since });
+    } catch (e) {
+      if (finished) summaryBody.append(h('p', { class: 'hint', role: 'status' }, studyFailureText(e)), buttons());
+      return;
+    }
+    if (!finished) return; // undone while the summary was loading
+    const reviews = s.counts.reduce((a, b) => a + b, 0);
+    const word = (k) => RATINGS[k][2];
+    const tally = RATINGS.map((r, k) => `${word(k)} ${s.counts[k]}`).join(', ');
+    summaryBody.append(
+      h('div', { class: 'session-bar', role: 'img', 'aria-label': tally }, ...RATINGS.map((r, k) => {
+        const seg = h('span', { class: 'session-seg', 'data-tone': r[3], hidden: !s.counts[k] });
+        seg.style.flexGrow = String(s.counts[k]);
+        return seg;
+      })),
+      h('ul', { class: 'session-legend' }, ...RATINGS.map((r, k) => s.counts[k] ? h('li', { 'data-tone': r[3] }, r[1](), `${s.counts[k]} ${word(k)}`) : null).filter(Boolean)),
     );
+    if (reviews) summaryBody.append(h('p', { class: 'hint' }, t('{time} on the cards · {avg} per card', { time: clockText(s.ms), avg: new Intl.NumberFormat(language(), { style: 'unit', unit: 'second', unitDisplay: 'short' }).format(Math.round(s.ms / reviews / 1000)) })));
+    if (s.forgotten.length) {
+      summaryBody.append(
+        h('div', { class: 'session-forgot' },
+          h('h3', {}, t('You forgot:')),
+          h('ul', {}, ...s.forgotten.slice(0, 5).map((c) => h('li', {}, c.front))),
+          s.forgotten.length > 5 ? h('p', { class: 'hint' }, t('and {n} more', { n: s.forgotten.length - 5 })) : null,
+        ),
+      );
+    }
+    if (s.due_now > 0) summaryBody.append(h('p', {}, s.due_now === 1 ? t('1 card is still due now.') : t('{n} cards are still due now.', { n: s.due_now })));
+    else if (s.next_due !== null) summaryBody.append(h('p', {}, s.next_count === 1 ? t('Next review: {when}, 1 card.', { when: whenText(s.next_due, language()) }) : t('Next review: {when}, {n} cards.', { when: whenText(s.next_due, language()), n: s.next_count })));
+    summaryBody.append(buttons(s.forgotten.length ? h('button', { type: 'button', class: 'btn btn-secondary', onClick: () => { stop(); el.replaceWith(review(deck, s.forgotten, onDone, { again: true })); } }, t('Review the forgotten ones now')) : null));
   }
 
   // The card just rated leaves in the rating's tone (a clone, so the next card is dealt at once).
@@ -172,10 +205,9 @@ function review(deck, cards, onDone) {
         queue.splice(insertedAt, 0, { card: entry.card, again: true });
       }
       last = { pos, insertedAt };
-      undoButton.hidden = false;
+      canUndo(true);
       ghost(tone);
       pos++;
-      rated++;
       render();
       message.textContent = quality === 1 ? t('Comes back in this session, in a few cards.') : t('Comes back in {when}.', { when: inTime(reply.due_in, language()) });
       message.dataset.tone = tone;
@@ -195,14 +227,16 @@ function review(deck, cards, onDone) {
       if (last.insertedAt >= 0) queue.splice(last.insertedAt, 1);
       pos = last.pos;
       queue[pos].card.next = reply.next;
-      rated--;
       last = null;
-      undoButton.hidden = true;
+      canUndo(false);
+      finished = false;
+      reviewBody.hidden = false;
+      summaryBody.hidden = true;
       render();
       message.textContent = t('Rating undone.');
     } catch (e) {
       last = null;
-      undoButton.hidden = true;
+      canUndo(false);
       message.textContent = studyFailureText(e);
     } finally {
       busy = false;
@@ -217,6 +251,8 @@ function review(deck, cards, onDone) {
     if (e.key === 'Backspace' || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z')) {
       e.preventDefault();
       undo();
+    } else if (finished) {
+      // the summary has no card to flip or rate
     } else if ((e.key === ' ' || e.key === 'Enter') && (e.target === card || e.target === document.body)) {
       e.preventDefault();
       flip();
@@ -228,7 +264,7 @@ function review(deck, cards, onDone) {
 
   function tick() {
     if (!el.isConnected) return stop();
-    if (document.hidden || el.offsetParent === null) clock.pause();
+    if (finished || document.hidden || el.offsetParent === null) clock.pause();
     else clock.resume();
     clockValue.textContent = clockText(clock.elapsed());
   }
@@ -240,13 +276,14 @@ function review(deck, cards, onDone) {
     document.removeEventListener('keydown', keys);
   }
 
+  const reviewBody = h('div', {}, h('div', { class: 'review-progress' }, counter, bar, clockEl), pile, h('div', { class: 'review-actions' }, show, rate, vote, message, undoButton));
+  const summaryBody = h('div', { class: 'deck-done session-summary', hidden: true });
   const el = h(
     'section',
     { class: 'app-panel is-single review' },
     h('div', { class: 'panel-head' }, h('h1', {}, deck.title), h('button', { type: 'button', class: 'btn btn-secondary', onClick: () => { stop(); onDone(); } }, t('Back'))),
-    h('div', { class: 'review-progress' }, counter, bar, clockEl),
-    pile,
-    h('div', { class: 'review-actions' }, show, rate, vote, message, undoButton),
+    reviewBody,
+    summaryBody,
   );
   render();
   return el;

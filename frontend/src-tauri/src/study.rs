@@ -6,7 +6,7 @@
 use crate::ai::Ai;
 use crate::library::{Failure, Library};
 use jay_study::ai::AiError;
-use jay_study::cards::{DeckSummary, DueCard, Reviewed};
+use jay_study::cards::{DeckSummary, DueCard, Reviewed, SessionSummary};
 use jay_study::exam::{self, Style};
 use jay_study::records::{AnswerError, Attempt, BuildError, BuildPlan, BuildStep, ExamSummary, Graded, Mode, OpenQuestion, Profile};
 use serde::Serialize;
@@ -343,6 +343,12 @@ pub fn deck_build(app: AppHandle, title: String, materials: Vec<String>, count: 
 #[tauri::command]
 pub fn deck_due(library: State<Library>, id: String) -> Result<Vec<DueCard>, Failure> {
     Ok(library.store.due_cards(&id, 50)?)
+}
+
+/// What the ratings since `since` (ms since 1970) left in the deck, for the end-of-session summary.
+#[tauri::command]
+pub fn deck_session(library: State<Library>, id: String, since: u64) -> Result<SessionSummary, Failure> {
+    Ok(library.store.session_summary(&id, since)?)
 }
 
 #[tauri::command]

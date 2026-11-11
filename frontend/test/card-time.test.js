@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { inTime } from '../src/ui/card-time.js';
+import { inTime, whenText } from '../src/ui/card-time.js';
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -19,6 +19,17 @@ test('intervals read in the unit that fits, in Portuguese', () => {
   assert.equal(pt(59 * DAY), '8 semanas');
   assert.equal(pt(60 * DAY), '2 meses');
   assert.equal(pt(90 * DAY), '3 meses');
+});
+
+test('when something happens, by the calendar', () => {
+  const now = new Date(2026, 10, 11, 10, 0).getTime();
+  const pt = (ms, at = now) => whenText(ms, 'pt-BR', at);
+  assert.equal(pt(10 * MIN), 'em 10 minutos');
+  assert.equal(pt(3 * HOUR), 'em 3 horas');
+  assert.equal(pt(DAY), 'amanhã');
+  assert.equal(pt(2 * HOUR, new Date(2026, 10, 11, 23, 0).getTime()), 'amanhã');
+  assert.equal(pt(15 * DAY), 'em 2 semanas');
+  assert.equal(pt(90 * DAY), 'em 3 meses');
 });
 
 test('and in English', () => {

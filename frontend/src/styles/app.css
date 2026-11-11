@@ -1990,6 +1990,99 @@ fieldset > h3 {
   color: var(--text);
 }
 
+/* The end-of-session summary: a bar of the four ratings, a legend, what to look at next. */
+.deck-done.session-summary {
+  gap: var(--space-4);
+  padding: var(--space-5);
+}
+
+.session-bar {
+  display: flex;
+  width: min(420px, 100%);
+  height: 12px;
+  overflow: hidden;
+  border-radius: 6px;
+  background: var(--border);
+}
+
+.session-seg {
+  --tone: var(--accent);
+  min-width: 0;
+  background: var(--tone);
+  transform-origin: left;
+  animation: seg-in 260ms ease-out both;
+}
+
+.session-seg[hidden] { display: none; }
+.session-seg[data-tone='again'], .session-legend [data-tone='again'] { --tone: var(--danger); }
+.session-seg[data-tone='hard'], .session-legend [data-tone='hard'] { --tone: var(--warning); }
+.session-seg[data-tone='easy'], .session-legend [data-tone='easy'] { --tone: var(--success); }
+.session-legend [data-tone='hard'] .rating-symbol { color: #1a1608; }
+
+@keyframes seg-in {
+  from { transform: scaleX(0); }
+}
+
+.session-legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-2) var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.session-legend li {
+  --tone: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 600;
+}
+
+.session-forgot {
+  display: grid;
+  gap: var(--space-2);
+  width: min(420px, 100%);
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--danger);
+  border-radius: var(--radius);
+  background: var(--surface);
+  text-align: left;
+}
+
+.session-forgot h3 {
+  font-size: 14px;
+}
+
+.session-summary .button-row {
+  justify-content: center;
+}
+
+.session-forgot h3,
+.session-forgot p,
+.session-forgot ul {
+  margin: 0;
+}
+
+.session-forgot ul {
+  display: grid;
+  gap: var(--space-2);
+  padding-left: 0;
+  list-style: none;
+}
+
+.session-forgot li {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
 /* A deck in the list: a little pile with its number of cards. */
 .deck-thumb {
   position: relative;
@@ -2202,6 +2295,7 @@ fieldset > h3 {
 [data-motion='reduced'] .flip-card.is-dealt,
 [data-motion='reduced'] .flip-card.is-flipping,
 [data-motion='reduced'] .flip-ghost,
+[data-motion='reduced'] .session-seg,
 [data-motion='reduced'] .runner-feedback,
 [data-motion='reduced'] .runner-timer[data-tone='low'] {
   animation: none;

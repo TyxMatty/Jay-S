@@ -143,6 +143,21 @@ pub struct Reviewed {
     pub next: [u64; 4],
 }
 
+/// What a session left in the deck, read from what was saved (the log and the cards).
+#[derive(Debug, Clone, Serialize)]
+pub struct SessionSummary {
+    /// Ratings since the session began, in `QUALITIES` order (repeats included).
+    pub counts: [u32; 4],
+    /// Thinking time of those ratings.
+    pub ms: u64,
+    /// The cards forgotten at least once, in order, ready to be reviewed again (`again`).
+    pub forgotten: Vec<DueCard>,
+    pub due_now: u32,
+    /// Ms until the earliest card due in the future, and how many fall within a day of it.
+    pub next_due: Option<u64>,
+    pub next_count: u32,
+}
+
 /// What Jay-AI is told about length, from the profile (-2 … 2).
 pub fn length_rule(card_length: i32) -> &'static str {
     match card_length.clamp(-2, 2) {
@@ -270,6 +285,32 @@ impl Store {
         d.log.drain(..extra);
         self.save_deck(&d)?;
         Ok(reviewed)
+    }
+
+    /// What the ratings since `since` (ms since 1970) did to the deck. Read only.
+    pub fn session_summary(&self, deck: &str, since: u64) -> Result<SessionSummary, StoreError> {
+        let d = self.deck(deck)?;
+        let now = now_ms();
+        let mut sum = SessionSummary { counts: [0; 4], ms: 0, forgotten: vec![], due_now: 0, next_due: None, next_count: 0 };
+        let mut seen: Vec<u32> = vec![];
+        for r in d.log.iter().filter(|r| r.at >= since) {
+            if let Some(k) = QUALITIES.iter().position(|&q| q == r.quality) {
+                sum.counts[k] += 1;
+            }
+            sum.ms += r.ms as u64;
+            if r.quality == 1 && !seen.contains(&r.card) {
+                seen.push(r.card);
+                if let Some(c) = d.cards.get(r.card as usize) {
+                    sum.forgotten.push(c.due_card(r.card as usize, now, true));
+                }
+            }
+        }
+        sum.due_now = d.cards.iter().filter(|c| c.due <= now).count() as u32;
+        if let Some(first) = d.cards.iter().map(|c| c.due).filter(|&due| due > now).min() {
+            sum.next_due = Some(first - now);
+            sum.next_count = d.cards.iter().filter(|c| c.due >= first && c.due - first < DAY_MS).count() as u32;
+        }
+        Ok(sum)
     }
 
     /// Writes a deck back as it was (an undo), only if it still exists: an undo never recreates a
@@ -535,6 +576,34 @@ mod tests {
         assert_eq!(store.decks()[0].due, 1);
         assert!(matches!(store.review_card(&deck.id, 9, 4, false, 0), Err(StoreError::NotFound)));
         assert!(matches!(store.deck("../profile"), Err(StoreError::NotFound)));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn session_summary_counts_what_was_saved() {
+        let root = std::env::temp_dir().join(format!("jay-study-summary-{}", id::new_id()));
+        let store = Store::open(&root).unwrap();
+        let now = now_ms();
+        let cards = (0..3).map(|k| Card::new(format!("f{k}"), "b b".into(), "t".into(), now - 1)).collect();
+        let deck = Deck { id: id::new_id(), title: "Bio".into(), created: now, materials: vec![], cards, log: vec![] };
+        store.save_deck(&deck).unwrap();
+        store.review_card(&deck.id, 2, 4, false, 7000).unwrap(); // before the session: not counted
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        let since = now_ms();
+        store.review_card(&deck.id, 0, 1, false, 1000).unwrap();
+        store.review_card(&deck.id, 0, 4, true, 2000).unwrap();
+        store.review_card(&deck.id, 1, 5, false, 3000).unwrap();
+        store.review_card(&deck.id, 2, 3, false, 4000).unwrap();
+        let s = store.session_summary(&deck.id, since).unwrap();
+        assert_eq!(s.counts, [1, 1, 1, 1]);
+        assert_eq!(s.ms, 10_000);
+        assert_eq!(s.forgotten.len(), 1);
+        assert_eq!((s.forgotten[0].index, s.forgotten[0].next.len()), (0, 4));
+        assert_eq!(s.forgotten[0].next[0], 600_000); // the again-preview: forgot twice is still 10 min
+        assert_eq!(s.due_now, 0);
+        let next = s.next_due.unwrap();
+        assert!(next <= DAY_MS && next > DAY_MS - 60_000, "{next}");
+        assert_eq!(s.next_count, 2); // cards 0 and 1; card 2 was rated before too, so "hard" puts it 6 days out
         std::fs::remove_dir_all(root).unwrap();
     }
 }

@@ -10,3 +10,14 @@ export function inTime(ms, lang) {
   const n = Math.max(1, Math.round(ms / size));
   return new Intl.NumberFormat(lang, { style: 'unit', unit, unitDisplay: 'long' }).format(n);
 }
+
+const midnight = (ms) => new Date(ms).setHours(0, 0, 0, 0);
+
+/** When something `ms` from `now` happens, in words ("em 10 minutos", "amanhã", "em 2 semanas"). */
+export function whenText(ms, lang, now = Date.now()) {
+  const rtf = new Intl.RelativeTimeFormat(lang, { numeric: 'auto' });
+  if (ms < HOUR) return rtf.format(Math.max(1, Math.round(ms / MIN)), 'minute');
+  const days = Math.round((midnight(now + ms) - midnight(now)) / DAY);
+  if (days === 0) return rtf.format(Math.round(ms / HOUR), 'hour');
+  return days >= 60 ? rtf.format(Math.round(days / 30), 'month') : days >= 7 ? rtf.format(Math.round(days / 7), 'week') : rtf.format(days, 'day');
+}

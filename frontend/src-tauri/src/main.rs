@@ -97,6 +97,7 @@ fn main() {
             study::decks_list,
             study::deck_build,
             study::deck_due,
+            study::deck_session,
             study::card_review,
             study::card_undo,
             study::card_vote,
