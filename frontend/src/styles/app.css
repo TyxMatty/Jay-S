@@ -1776,8 +1776,38 @@ fieldset > h3 {
 }
 
 .flip-card.is-dealt {
-  animation: deal-in 0.35s var(--ease-out);
+  animation: deal-in 0.26s var(--ease-out);
 }
+
+/* The question again, small, over the answer. */
+.card-back-question {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+/* The card just rated, leaving in the rating's direction (faster than the next one coming in). */
+.flip-ghost {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 2;
+  pointer-events: none;
+  animation: card-out-good 0.18s ease-in forwards;
+}
+
+.flip-ghost .flip-inner {
+  transition: none;
+}
+
+.flip-ghost[data-out='again'] { animation-name: card-out-again; }
+.flip-ghost[data-out='hard'] { animation-name: card-out-hard; }
+.flip-ghost[data-out='easy'] { animation-name: card-out-easy; }
+
+@keyframes card-out-again { to { opacity: 0; transform: translate(-48px, 16px) rotate(-4deg); } }
+@keyframes card-out-hard { to { opacity: 0; transform: translateY(40px); } }
+@keyframes card-out-good { to { opacity: 0; transform: translateX(56px); } }
+@keyframes card-out-easy { to { opacity: 0; transform: translate(48px, -32px); } }
 
 .review-actions {
   display: grid;
@@ -1842,6 +1872,35 @@ fieldset > h3 {
   color: #fff;
   font-weight: 800;
 }
+
+.rating-symbol svg {
+  width: 16px;
+  height: 16px;
+  stroke-width: 2.5;
+}
+
+/* What the rating did: a dot in its tone, the text stays in the normal color. */
+.review-actions .hint[data-tone] {
+  --tone: var(--accent);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.review-actions .hint[data-tone]::before {
+  content: '';
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--tone);
+}
+
+.review-actions .hint[data-tone='again'] { --tone: var(--danger); }
+.review-actions .hint[data-tone='hard'] { --tone: var(--warning); }
+.review-actions .hint[data-tone='good'] { --tone: var(--accent); }
+.review-actions .hint[data-tone='easy'] { --tone: var(--success); }
+.review-actions .hint[data-tone] { color: var(--text); }
 
 .rating-label {
   font-weight: 700;
@@ -2122,6 +2181,7 @@ fieldset > h3 {
 
 [data-motion='reduced'] .flip-card.is-dealt,
 [data-motion='reduced'] .flip-card.is-flipping,
+[data-motion='reduced'] .flip-ghost,
 [data-motion='reduced'] .runner-feedback,
 [data-motion='reduced'] .runner-timer[data-tone='low'] {
   animation: none;

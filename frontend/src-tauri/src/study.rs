@@ -6,7 +6,7 @@
 use crate::ai::Ai;
 use crate::library::{Failure, Library};
 use jay_study::ai::AiError;
-use jay_study::cards::{DeckSummary, DueCard};
+use jay_study::cards::{DeckSummary, DueCard, Reviewed};
 use jay_study::exam::{self, Style};
 use jay_study::records::{AnswerError, Attempt, BuildError, BuildPlan, BuildStep, ExamSummary, Graded, Mode, OpenQuestion, Profile};
 use serde::Serialize;
@@ -346,7 +346,7 @@ pub fn deck_due(library: State<Library>, id: String) -> Result<Vec<DueCard>, Fai
 }
 
 #[tauri::command]
-pub fn card_review(library: State<Library>, deck: String, index: usize, quality: u8) -> Result<(), Failure> {
+pub fn card_review(library: State<Library>, deck: String, index: usize, quality: u8) -> Result<Reviewed, Failure> {
     let _writing = library.writing();
     if !matches!(quality, 1 | 3 | 4 | 5) {
         return Err(Failure::new("invalid_answer", None));

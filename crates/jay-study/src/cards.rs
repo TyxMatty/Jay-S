@@ -17,6 +17,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 const DAY_MS: u64 = 24 * 3600 * 1000;
 
+/// The ratings, in the order of the buttons: forgot, hard, good, easy.
+pub const QUALITIES: [u8; 4] = [1, 3, 4, 5];
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Card {
     pub front: String,
@@ -56,6 +59,16 @@ impl Card {
         }
         self.ease = (self.ease + (0.1 - (5.0 - q) * (0.08 + (5.0 - q) * 0.02))).max(1.3);
     }
+
+    /// Ms from `now` until the card is due, for each of `QUALITIES`. Runs `review` on a copy, so it
+    /// can't disagree with what is saved.
+    pub fn preview(&self, now: u64) -> [u64; 4] {
+        QUALITIES.map(|q| {
+            let mut c = self.clone();
+            c.review(q, now);
+            c.due.saturating_sub(now)
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -83,6 +96,15 @@ pub struct DueCard {
     pub front: String,
     pub back: String,
     pub topic: String,
+    /// Ms until it would be due again for each rating (`QUALITIES`).
+    pub next: [u64; 4],
+}
+
+/// What a saved rating did: the time to the card's new due date, and the preview of its new state.
+#[derive(Debug, Clone, Serialize)]
+pub struct Reviewed {
+    pub due_in: u64,
+    pub next: [u64; 4],
 }
 
 /// What Jay-AI is told about length, from the profile (-2 … 2).
@@ -196,14 +218,17 @@ impl Store {
         let rank = |t: &str| weak.iter().position(|w| generate::similar(w, t) || w == t).unwrap_or(usize::MAX);
         let mut due: Vec<(usize, &Card)> = d.cards.iter().enumerate().filter(|(_, c)| c.due <= now).collect();
         due.sort_by(|a, b| rank(&a.1.topic).cmp(&rank(&b.1.topic)).then(a.1.due.cmp(&b.1.due)));
-        Ok(due.into_iter().take(limit).map(|(index, c)| DueCard { index, front: c.front.clone(), back: c.back.clone(), topic: c.topic.clone() }).collect())
+        Ok(due.into_iter().take(limit).map(|(index, c)| DueCard { index, front: c.front.clone(), back: c.back.clone(), topic: c.topic.clone(), next: c.preview(now) }).collect())
     }
 
-    pub fn review_card(&self, deck: &str, index: usize, quality: u8) -> Result<(), StoreError> {
+    pub fn review_card(&self, deck: &str, index: usize, quality: u8) -> Result<Reviewed, StoreError> {
         let mut d = self.deck(deck)?;
         let card = d.cards.get_mut(index).ok_or(StoreError::NotFound)?;
-        card.review(quality, now_ms());
-        self.save_deck(&d)
+        let now = now_ms();
+        card.review(quality, now);
+        let reviewed = Reviewed { due_in: card.due.saturating_sub(now), next: card.preview(now) };
+        self.save_deck(&d)?;
+        Ok(reviewed)
     }
 
     pub fn card_vote(&self, too_long: bool) -> Result<Profile, StoreError> {
@@ -287,6 +312,37 @@ mod tests {
     }
 
     #[test]
+    fn preview_matches_review() {
+        let now = 1_000_000;
+        let mut states = vec![];
+        let mut c = Card::new("f".into(), "b".into(), "t".into(), now);
+        states.push(c.clone());
+        for q in [4, 4, 5] {
+            c.review(q, now);
+            states.push(c.clone());
+        }
+        let mut forgot = Card::new("f".into(), "b".into(), "t".into(), now);
+        forgot.review(4, now);
+        forgot.review(1, now);
+        states.push(forgot);
+        states.push(Card { ease: 1.3, interval: 40.0, reps: 5, ..Card::new("f".into(), "b".into(), "t".into(), now) });
+        for s in &states {
+            let p = s.preview(now);
+            for (k, q) in QUALITIES.into_iter().enumerate() {
+                let mut x = s.clone();
+                x.review(q, now);
+                assert_eq!(p[k], x.due - now, "{s:?} quality {q}");
+            }
+        }
+        let new = Card::new("f".into(), "b".into(), "t".into(), now);
+        assert_eq!(new.preview(now), [600_000, DAY_MS, DAY_MS, DAY_MS]);
+        let mut two = new;
+        two.review(4, now);
+        two.review(4, now);
+        assert_eq!(two.preview(now), [600_000, 15 * DAY_MS, 15 * DAY_MS, 15 * DAY_MS]);
+    }
+
+    #[test]
     fn cards_are_tidied() {
         let c = clean_card("Fotossíntese: O que é?".into(), "Fotossíntese: Processo que transforma luz em glicose.".into(), "Biologia: Fotossíntese".into()).unwrap();
         assert_eq!((c.0.as_str(), c.1.as_str()), ("O que é?", "Processo que transforma luz em glicose."));
@@ -330,7 +386,10 @@ mod tests {
         store.save_profile(&p).unwrap();
         let due = store.due_cards(&deck.id, 10).unwrap();
         assert_eq!(due.iter().map(|c| c.topic.as_str()).collect::<Vec<_>>(), ["Fotossíntese", "Mitose"]);
-        store.review_card(&deck.id, 0, 4).unwrap();
+        assert!(due.iter().all(|c| c.next.len() == 4));
+        let reviewed = store.review_card(&deck.id, 0, 4).unwrap();
+        assert_eq!(reviewed.due_in, DAY_MS);
+        assert_eq!(reviewed.next.len(), 4);
         assert_eq!(store.due_cards(&deck.id, 10).unwrap().len(), 1);
         assert_eq!(store.decks()[0].due, 1);
         assert!(matches!(store.review_card(&deck.id, 9, 4), Err(StoreError::NotFound)));

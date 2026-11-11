@@ -23,6 +23,10 @@ export const icons = {
   download: svg('<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>'),
   /** Answer key: a check mark. */
   check: svg('<path d="M20 6 9 17l-5-5"/>'),
+  /** Flashcard rating "easy": a star. */
+  star: svg('<path d="M12 3l2.6 5.6 6.1.7-4.5 4.2 1.2 6L12 16.5 6.6 19.5l1.2-6L3.3 9.3l6.1-.7z"/>'),
+  /** Flashcard rating "hard": a wave. */
+  wave: svg('<path d="M4 14c2.5-4 5.5-4 8 0s5.5 4 8 0"/>'),
   /** Delete: a bin. */
   plus: svg('<path d="M12 5v14M5 12h14"/>'),
   /** Chat: send the question. */

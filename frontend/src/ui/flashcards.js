@@ -3,6 +3,7 @@
 import { h } from './dom.js';
 import { icons } from './icons.js';
 import { cardTitle } from './card-title.js';
+import { inTime } from './card-time.js';
 import { invoke, listenJobs, isTauri } from '../core/bridge.js';
 import { aiReady } from '../core/ai.js';
 import { t, language } from '../core/i18n.js';
@@ -19,8 +20,10 @@ function review(deck, cards, onDone) {
   let i = 0;
   let flipped = false;
   let rated = 0;
+  let busy = false;
   const topic = h('span', { class: 'flip-topic' });
   const front = h('p', { class: 'card-front' });
+  const backQuestion = h('p', { class: 'card-back-question' });
   const back = h('p', { class: 'card-back' });
   const card = h(
     'div',
@@ -29,7 +32,7 @@ function review(deck, cards, onDone) {
       'div',
       { class: 'flip-inner' },
       h('div', { class: 'flip-face flip-front' }, topic, front, h('span', { class: 'flip-hint', 'aria-hidden': 'true' }, t('Click or press Space to flip'))),
-      h('div', { class: 'flip-face flip-back', 'aria-hidden': 'true' }, h('span', { class: 'flip-topic' }, t('Answer')), back),
+      h('div', { class: 'flip-face flip-back', 'aria-hidden': 'true' }, h('span', { class: 'flip-topic' }, t('Answer')), backQuestion, back),
     ),
   );
   const pile = h('div', { class: 'card-pile' }, card);
@@ -41,17 +44,18 @@ function review(deck, cards, onDone) {
   const vote = h('div', { class: 'card-vote', hidden: true });
   // Color and a symbol and a word: never color alone.
   const RATINGS = [
-    [1, '✗', t('Forgot'), 'again', t('comes back soon')],
-    [3, '~', t('Hard'), 'hard', t('a bit later')],
-    [4, '✓', t('Good'), 'good', t('in a few days')],
-    [5, '★', t('Easy'), 'easy', t('much later')],
+    [1, () => h('span', { class: 'rating-symbol', html: icons.close, 'aria-hidden': 'true' }), t('Forgot'), 'again'],
+    [3, () => h('span', { class: 'rating-symbol', html: icons.wave, 'aria-hidden': 'true' }), t('Hard'), 'hard'],
+    [4, () => h('span', { class: 'rating-symbol', html: icons.check, 'aria-hidden': 'true' }), t('Good'), 'good'],
+    [5, () => h('span', { class: 'rating-symbol', html: icons.star, 'aria-hidden': 'true' }), t('Easy'), 'easy'],
   ];
+  const hints = RATINGS.map(() => h('span', { class: 'rating-hint' }));
   rate.append(
-    ...RATINGS.map(([q, symbol, label, tone, hint], k) =>
+    ...RATINGS.map(([q, symbol, label, tone], k) =>
       h('button', { type: 'button', class: 'rating', 'data-tone': tone, onClick: () => next(q) },
-        h('span', { class: 'rating-symbol', 'aria-hidden': 'true' }, symbol),
+        symbol(),
         h('span', { class: 'rating-label' }, label),
-        h('span', { class: 'rating-hint' }, hint),
+        hints[k],
         h('kbd', { 'aria-hidden': 'true' }, String(k + 1)),
       ),
     ),
@@ -92,8 +96,11 @@ function review(deck, cards, onDone) {
     flip(false);
     topic.textContent = c.topic;
     front.textContent = c.front;
+    backQuestion.textContent = c.front;
     back.textContent = c.back;
+    hints.forEach((hint, k) => (hint.textContent = inTime(c.next[k], language())));
     message.textContent = '';
+    delete message.dataset.tone;
     counter.textContent = t('Card {n} of {total}', { n: i + 1, total: cards.length });
     bar.value = i;
     // The pile behind the card thins out as the deck goes.
@@ -118,14 +125,39 @@ function review(deck, cards, onDone) {
     );
   }
 
+  // The card just rated leaves in the rating's tone (a clone, so the next card is dealt at once).
+  function ghost(tone) {
+    if (document.documentElement.dataset.motion === 'reduced') return;
+    const g = card.cloneNode(true);
+    g.classList.remove('is-dealt', 'is-flipping');
+    g.classList.add('flip-ghost');
+    g.dataset.out = tone;
+    g.setAttribute('aria-hidden', 'true');
+    g.setAttribute('inert', '');
+    g.removeAttribute('tabindex');
+    pile.append(g);
+    g.addEventListener('animationend', () => g.remove());
+    setTimeout(() => g.remove(), 400);
+  }
+
   async function next(quality) {
+    if (busy) return;
+    busy = true;
     try {
-      await invoke('card_review', { deck: deck.id, index: cards[i].index, quality });
+      const k = RATINGS.findIndex((r) => r[0] === quality);
+      const tone = RATINGS[k][3];
+      const reply = await invoke('card_review', { deck: deck.id, index: cards[i].index, quality });
+      cards[i].next = reply.next; // in case the card is shown again
+      ghost(tone);
       i++;
       rated++;
       render();
+      message.textContent = t('Comes back in {when}.', { when: inTime(reply.due_in, language()) });
+      message.dataset.tone = tone;
     } catch (e) {
       message.textContent = studyFailureText(e);
+    } finally {
+      busy = false;
     }
   }
 
