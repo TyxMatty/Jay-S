@@ -1,7 +1,7 @@
 //! `cargo run --release --example reason_bench -- <data folder> <lecture 15> <16> <17> <18>`: the
 //! chat's reasoning benchmark with the real model. 42 questions with one known answer each, scored by
 //! code: a number within a tolerance (every listed number for an interval), or keywords for the
-//! non-numeric ones (judged on the reply's first sentence, the answer: a hedge does not count). Each
+//! non-numeric ones (judged on the reply's first two sentences, the answer: a hedge does not count). Each
 //! question is asked in a new conversation (no history to lean on), once per seed (`BENCH_SEEDS`,
 //! default `1,2,3`; the server's fixed seed makes a run repeat), the lecture ones in a chat scoped to
 //! the four Statistics lectures, the others with no sources. Groups: `copied` (the lectures' own worked
@@ -18,7 +18,7 @@ use std::time::Instant;
 enum Expect {
     /// Every one of these numbers must appear (within the tolerance).
     Numbers(&'static [f64], f64),
-    /// Any of `yes` must appear and none of `no` (in the folded first sentence; a `no` word right
+    /// Any of `yes` must appear and none of `no` (in the folded first two sentences; a `no` word right
     /// after "não" doesn't count, so "não rejeitamos" is not "rejeitamos").
     Words(&'static [&'static str], &'static [&'static str]),
 }
@@ -65,8 +65,8 @@ const QUESTIONS: [(&str, bool, &str, Expect); 42] = [
     ("logic", false, "Ana é mais alta que Bia, Bia é mais alta que Carla e Davi é mais baixo que Carla. Quem é o mais baixo?", Words(&["davi"], &["carla e a mais baixa", "bia e a mais baixa", "ana e a mais baixa"])),
     ("logic", false, "Se chove, a rua fica molhada. Hoje a rua está seca. Choveu hoje?", Words(&["nao choveu", " nao. ", " nao! ", " nao, nao "], &["nao podemos", "nao e possivel", "nao da para", "talvez", "nao se pode", " sim"])),
     ("logic", true, "Por que no intervalo de confiança da média se usa t em vez de Z?", Words(&["desconhecid"], &["nao e desconhecid", "nao desconhecid"])),
-    ("logic", false, "Todo peixe voa. Nemo é um peixe. Pela lógica dessas premissas, Nemo voa?", Words(&[" sim"], &["nao podemos", "nao e possivel", "nao se pode"])),
-    ("logic", false, "Se um número é múltiplo de 4, então ele é par. O 7 não é par. O 7 é múltiplo de 4?", Words(&["nao e multiplo", "nao, ", " nao. "], &["nao podemos", "nao e possivel", "talvez"])),
+    ("logic", false, "Todo peixe voa. Nemo é um peixe. Pela lógica dessas premissas, Nemo voa?", Words(&[" sim", "nemo voa"], &["nao podemos", "nao e possivel", "nao se pode", "nemo nao voa"])),
+    ("logic", false, "Se um número é múltiplo de 4, então ele é par. O 7 não é par. O 7 é múltiplo de 4?", Words(&["nao e multiplo", "nao pode ser multiplo", "nao e um multiplo", "nao, ", " nao. "], &["nao podemos", "nao e possivel", "talvez"])),
     ("logic", false, "Alguns alunos são atletas. Todos os atletas acordam cedo. Dá para concluir que todos os alunos acordam cedo?", Words(&["nao"], &["sim, todos", "sim. "])),
     ("logic", false, "O ônibus sai antes do trem. O trem sai antes do avião. O carro sai depois do avião, e a bicicleta sai antes do ônibus. Qual sai primeiro?", Words(&["bicicleta"], &[])),
     ("logic", false, "A chave está na gaveta ou na mochila. Não está na gaveta. Onde está a chave?", Words(&["mochila"], &["gaveta ou"])),
@@ -158,8 +158,10 @@ fn main() {
             let (ok, kind, text) = match store.chat_ask(&chat.id, question, &server, &cancel) {
                 Ok(turn) => {
                     let text: Vec<String> = turn.reply.sentences.iter().map(|s| s.text.clone()).collect();
-                    // Keywords are judged on the first sentence (the answer), numbers on the whole reply.
-                    let judged = if matches!(expect, Words(..)) { text.first().cloned().unwrap_or_default() } else { text.join(" ") };
+                    // Keywords are judged on the first two sentences (the answer, often after one line of
+                    // reasoning: "…então Carla é a menor entre elas. | …Davi é o mais baixo de todos"),
+                    // numbers on the whole reply.
+                    let judged = if matches!(expect, Words(..)) { text.iter().take(2).cloned().collect::<Vec<_>>().join(" ") } else { text.join(" ") };
                     (right(expect, &judged), format!("{:?}", turn.reply.kind), text.join(" | "))
                 }
                 Err(e) => (false, "Error".into(), format!("{e:?}")),
@@ -167,7 +169,7 @@ fn main() {
             let secs = t.elapsed().as_secs_f32();
             seconds += secs;
             results[i].push(ok);
-            println!("seed {seed} {:>2} {:7} {} {:5.1}s {:8} {}\n   {}", i + 1, group, if ok { "RIGHT" } else { "wrong" }, secs, kind, question, text.chars().take(400).collect::<String>());
+            println!("seed {seed} {:>2} {:7} {} {:5.1}s {:8} {}\n   {}", i + 1, group, if ok { "RIGHT" } else { "wrong" }, secs, kind, question, text);
         }
     }
     println!();
