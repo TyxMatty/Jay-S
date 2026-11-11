@@ -89,6 +89,9 @@ select {
   border-bottom: 1px solid var(--border);
   background: color-mix(in srgb, var(--surface) 88%, transparent);
   backdrop-filter: blur(var(--overlay-blur));
+  /* Holds the update panel above the sections. */
+  position: relative;
+  z-index: 10;
 }
 
 /* With a background gradient, the bar lets it through; 75% surface keeps its text readable. */
@@ -700,6 +703,46 @@ fieldset > h3 {
   background: var(--warning);
 }
 
+/* The update panel: under the top bar, anchored to its right edge; not a modal. */
+.update-panel {
+  position: absolute;
+  top: calc(100% + var(--space-2));
+  right: var(--space-4);
+  display: grid;
+  gap: var(--space-3);
+  box-sizing: border-box;
+  width: min(360px, calc(100vw - 2 * var(--space-4)));
+  padding: var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.update-panel h2,
+.update-panel p {
+  margin: 0;
+}
+
+.update-what {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.update-status:empty {
+  /* Still in the page, so the live region is heard when it fills; without its gap. */
+  height: 0;
+  margin-top: calc(-1 * var(--space-3));
+}
+
+.update-panel .button-row {
+  margin-top: var(--space-2);
+}
+
+.update-panel .button-row:not(:has(button:not([hidden]))) {
+  display: none;
+}
+
 
 /* Card titles: the icon in an accent-tinted square, like Jay-C's lobby features. */
 .card-title {
@@ -776,7 +819,7 @@ fieldset > h3 {
   .app-version {
     display: none;
   }
-  .status-pill {
+  .status-pill:not(.update-pill) {
     display: none;
   }
 }

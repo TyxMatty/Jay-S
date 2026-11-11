@@ -23,6 +23,12 @@ pub struct Jobs {
     last: std::sync::Mutex<Option<JobEvent>>,
 }
 
+impl Jobs {
+    pub fn running(&self) -> bool {
+        self.running.load(Ordering::Relaxed)
+    }
+}
+
 /// Tells the page about the job, and remembers its progress while it runs.
 fn emit_job(app: &AppHandle, event: JobEvent) {
     let jobs = app.state::<Jobs>();
