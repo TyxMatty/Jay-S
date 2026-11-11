@@ -35,6 +35,10 @@ const MIXED: [&str; 4] = ["Como faço flashcards de uma prova que fiz?", "Posso 
 /// The same kinds of question in English, with no sources: every sentence must come back in English.
 const ENGLISH: [&str; 7] = ["hi, how are you?", "can I call you Matty?", "what's your name again?", "how do I make flashcards from an exam I took?", "can you make a calculator in C?", "what is the capital of France?", "how much is (1.96 * 10 / 4)^2?"];
 
+/// A statistics problem pasted after a request to summarize a lecture, then again after "então,
+/// responda:" (newline between the lead-in and the problem, as a paste would have it).
+const PROBLEM_TEXT: &str = "Dez estudantes da área de informática da faculdade X foram entrevistados quanto ao tempo de uso de Internet. A média de uso de Internet dessa amostra foi de 6 horas por dia. Sabe-se que o desvio padrão de tempo de uso de Internet dessa população é de 2 horas por dia. Depois, 15 estudantes da área de informática da faculdade Y foram entrevistados quanto ao tempo de uso de Internet. A média de uso de Internet dessa amostra foi de 5 horas por dia. Sabe-se que o desvio padrão de tempo de uso de Internet dessa população é de 1 hora por dia. Há diferença de média de uso de Internet, ao nível de α=5%?";
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let root = std::env::temp_dir().join(format!("jay-s-chat-probe-{}", jay_study::id::new_id()));
@@ -56,10 +60,15 @@ fn main() {
     if let Some(seed) = std::env::var("PROBE_SEED").ok().and_then(|v| v.parse().ok()) {
         server.set_seed(Some(seed));
     }
-    let chats = [(Scope { materials, attempt: None }, &SCOPED[..]), (Scope::default(), &GENERAL[..]), (Scope::default(), &PERSONAL[..]), (Scope::default(), &MIXED[..]), (Scope::default(), &ENGLISH[..])];
+    let problem = [format!("Pode resumir a aula 18 para mim, e como aplicar nessa questão:
+{PROBLEM_TEXT}"), format!("então, responda:
+{PROBLEM_TEXT}")];
+    let problem: Vec<&str> = problem.iter().map(String::as_str).collect();
+    let scoped = Scope { materials: materials.clone(), attempt: None };
+    let chats = [(Scope { materials, attempt: None }, &SCOPED[..]), (Scope::default(), &GENERAL[..]), (Scope::default(), &PERSONAL[..]), (Scope::default(), &MIXED[..]), (Scope::default(), &ENGLISH[..]), (scoped, &problem[..])];
     // Only one conversation, for repeated runs: PROBE_GENERAL=1 (the second), PROBE_PERSONAL=1 (the
-    // third), PROBE_MIXED=1 (the fourth), PROBE_ENGLISH=1 (the fifth).
-    let only = [("PROBE_GENERAL", 1), ("PROBE_PERSONAL", 2), ("PROBE_MIXED", 3), ("PROBE_ENGLISH", 4)].iter().find(|(v, _)| std::env::var_os(v).is_some()).map(|&(_, i)| i);
+    // third), PROBE_MIXED=1 (the fourth), PROBE_ENGLISH=1 (the fifth), PROBE_PROBLEM=1 (the sixth).
+    let only = [("PROBE_GENERAL", 1), ("PROBE_PERSONAL", 2), ("PROBE_MIXED", 3), ("PROBE_ENGLISH", 4), ("PROBE_PROBLEM", 5)].iter().find(|(v, _)| std::env::var_os(v).is_some()).map(|&(_, i)| i);
     for (i, (scope, questions)) in chats.into_iter().enumerate() {
         if only.is_some_and(|o| o != i) {
             continue;
