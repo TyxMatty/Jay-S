@@ -1136,6 +1136,22 @@ fn calc_steps(reply: &Value, question: &str, passages: &[Passage], lang: Lang) -
         .collect()
 }
 
+/// A count asked for and left fractional (22,1276 people, 864,36 cards): Rust adds the rounding up
+/// as a step, since the model once wrote the `teto` around the wrong part. Measured: 22,1276 stood
+/// for 23. shortcut: the question's words decide what is a count; a miss leaves the result as is.
+fn round_count(sentences: &mut Vec<Sentence>, reply: &Value, asked: &str, lang: Lang) {
+    let q = format!(" {} ", norm(asked));
+    if !["tamanho da amostra", "quantos", "quantas", "numero de", "how many", "sample size"].iter().any(|w| q.contains(&format!(" {w} "))) {
+        return;
+    }
+    let last = reply["passos"].as_array().into_iter().flatten().take(6).filter_map(|s| calc::eval(s["conta"].as_str()?.trim()).ok()).last();
+    // A result already whole (a `teto`, or float noise like 24.0000000001) needs nothing.
+    let Some(r) = last.filter(|r| r.is_finite() && (r - 1e-9).ceil() - r > 1e-9) else { return };
+    let shown = calc::show_with((r - 1e-9).ceil(), lang == Lang::En);
+    let text = if lang == Lang::En { format!("Rounding up (it is a count): {shown}") } else { format!("Arredondando para cima (é uma contagem): {shown}") };
+    sentences.push(Sentence { text, sources: vec![], status: Status::Plain });
+}
+
 /// Whether the calc route has something to compute: a number in the message or in its rewrite.
 /// "Consegue escrever uma calculadora em py?" has none, and a computed badge over it would lie.
 fn has_numbers(question: &str, rewritten: &str) -> bool {
@@ -1168,10 +1184,11 @@ fn calc_reply(question: &str, rewritten: &str, passages: &[Passage], facts: &Fac
     // Tokens: plano 600 + 6 × (texto 300 + conta 200) chars + JSON is about 4,500 chars, ~1,500 tokens.
     let reply = server.chat_at(0.2, &messages, Some(&calc_schema()), 1800, &mut |_| {}, cancel)?;
     let reply = json_in(&reply)?;
-    let sentences = calc_steps(&reply, question, passages, lang);
+    let mut sentences = calc_steps(&reply, question, passages, lang);
     if !evaluated_any(&reply) || sentences.iter().all(|s| s.status != Status::Plain) {
         return Ok(None);
     }
+    round_count(&mut sentences, &reply, &format!("{question} {rewritten}"), lang);
     // The closest passages, to compare the formula with: their beginning, like "not in your sources".
     let sources = passages.iter().take(2).enumerate().map(|(i, p)| Source { n: i + 1, label: p.label.clone(), quotes: vec![p.text.chars().take(280).collect::<String>() + "…"], key: p.key.clone() }).collect();
     Ok(Some(Reply { kind: Kind::Calc, sentences, sources, checks: Checks::default(), list: true, go: None, code: None }))
@@ -2683,6 +2700,32 @@ mod tests {
         let s = calc_schema();
         assert_eq!(s["properties"].as_object().unwrap().keys().collect::<Vec<_>>(), ["plano", "passos"]);
         assert_eq!((s["properties"]["passos"]["maxItems"].as_u64(), s["properties"]["passos"]["items"]["properties"]["conta"]["maxLength"].as_u64()), (Some(6), Some(200)));
+    }
+
+    #[test]
+    fn a_fractional_count_is_rounded_up_by_rust() {
+        let run = |q: &str, conta: &str, lang| {
+            let reply = json!({ "plano": "x", "passos": [{ "texto": "Passo:", "conta": conta }] });
+            let mut s = calc_steps(&reply, q, &[], lang);
+            round_count(&mut s, &reply, q, lang);
+            s
+        };
+        let q = "Controlando o erro absoluto w = 5, desvio 12, 95%, qual o tamanho da amostra?";
+        let s = run(q, "(1,96 * 12 / 5)^2", Lang::Pt);
+        assert_eq!((s.len(), s[1].text.as_str(), s[1].status), (2, "Arredondando para cima (é uma contagem): 23", Status::Plain));
+        assert_eq!(run("what is the sample size with w = 5, s = 12, 95%?", "(1.96 * 12 / 5)^2", Lang::En)[1].text, "Rounding up (it is a count): 23");
+        assert_eq!(run("Tamanho da amostra: 95%, erro 2%, estimativa 10%", "1,96^2 * 0,10 * 0,90 / 0,02^2", Lang::Pt)[1].text, "Arredondando para cima (é uma contagem): 865");
+        assert_eq!(run("Quantos alunos? 0,25 * 96,04", "0,25 * 96,04", Lang::Pt)[1].text, "Arredondando para cima (é uma contagem): 25");
+        // Whole already (a teto, or an integer result), or not a count: nothing added.
+        assert_eq!(run(q, "teto((1,96 * 12 / 5)^2)", Lang::Pt).len(), 1);
+        assert_eq!(run("Quantos? 3 * 4", "3 * 4", Lang::Pt).len(), 1);
+        assert_eq!(run("Qual a média de 4, 8 e 9?", "(4 + 8 + 9) / 2,5", Lang::Pt).len(), 1);
+        // Not a count (interval, proportion, probability, mean, money): a fractional result stays. "quanto" is not "quantos".
+        for q in ["Qual o intervalo de confiança de 95% para média 10, desvio 2, n = 30?", "Qual a proporção de 3 em 7?", "Qual a probabilidade de 3 em 7?", "Qual a média de 4, 8, 15?", "Qual o montante de R$ 2.000 a 1,5% ao mês?", "Quanto o cliente paga?"] {
+            assert_eq!(run(q, "2000 / 7", Lang::Pt).len(), 1, "{q}");
+        }
+        // No evaluated step: nothing happens.
+        assert_eq!(run(q, "rm -rf /", Lang::Pt).len(), 1);
     }
 
     #[test]
