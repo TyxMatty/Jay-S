@@ -682,6 +682,19 @@ struct Understood {
     facts: Facts,
     /// The message asks Jay-AI to write a program (`pede_codigo` is exactly `true`).
     asks_code: bool,
+    /// The message states a problem with given numbers to solve (`resolver_problema` is exactly `true`).
+    solves: bool,
+}
+
+/// A message that states a problem to solve, with numbers in it, is a calculation, also when it asks
+/// for more ("resuma a aula e aplique nesta questão"): the classifier said `material` for all of
+/// those. Only material and follow-up become `Calc`; app, talk and general keep their route, and a
+/// request for code is never a calculation. Without a digit the flag changes nothing.
+fn problem_intent(intent: Intent, solves: bool, numbers: bool, asks_code: bool) -> Intent {
+    match intent {
+        Intent::Material | Intent::FollowUp if solves && numbers && !asks_code => Intent::Calc,
+        other => other,
+    }
 }
 
 /// A request for code is never about the app or a calculation, and with no sources chosen it is not
@@ -720,8 +733,11 @@ fn read_understood(reply: &str, original: &str, has_history: bool) -> Option<Und
     // A message that stands alone keeps its own words: with no earlier turns, or a rewrite that
     // shares none of the message's terms (seen: a new question rewritten as the previous subject).
     let (asked, kept) = (terms(original), terms(&question));
-    let own = question.trim().is_empty() || !has_history || (!asked.is_empty() && asked.is_disjoint(&kept));
-    Some(Understood { intent, question: if own { original.to_owned() } else { question }, facts: read_facts(&v, original), asks_code: v["pede_codigo"].as_bool() == Some(true) })
+    let solves = v["resolver_problema"].as_bool() == Some(true);
+    // A problem keeps the student's whole message: the rewrite is capped at 400 characters, which cut
+    // the data and the question off a two-sample problem (and a stray token ended it).
+    let own = solves || question.trim().is_empty() || !has_history || (!asked.is_empty() && asked.is_disjoint(&kept));
+    Some(Understood { intent, question: if own { original.to_owned() } else { question }, facts: read_facts(&v, original), asks_code: v["pede_codigo"].as_bool() == Some(true), solves })
 }
 
 /// What passages are looked up by: the rewrite and the student's own words together, so a wrong
@@ -882,6 +898,7 @@ fn understand_messages(c: &Chat, question: &str) -> Vec<Value> {
     let ask = format!(
         "Leia a mensagem do aluno e responda os campos. {sources}\n\
          question: se a mensagem já faz sentido sozinha, copie-a sem mudar nada. Só se ela depende da conversa ('e quando...?', 'e a 13?', 'explica melhor'), reescreva como UMA pergunta completa e independente, na língua do aluno, dizendo o assunto a que ela se refere. Mantenha todo número que o aluno escreveu; não acrescente fatos nem números novos.\n\
+         resolver_problema: true se a mensagem traz um problema ou exercício com dados numéricos para resolver (enunciado com valores e uma pergunta a responder), mesmo que também peça outra coisa, como um resumo; senão false.\n\
          intent, um destes:\n\
          - talk: conversa com o Jay-AI, sobre ele (nome, apelido, 'quem é você?', 'o que você faz?'), sobre o aluno (nome, como se sente, desabafo) ou sobre a própria conversa (cumprimento, agradecimento, piada, papo solto). Pedir para explicar, resumir ou calcular um assunto NÃO é talk, mesmo dizendo 'você' ('você pode me explicar o que é ATP?' é material ou general)\n\
          - app: como usar o próprio aplicativo Jay-S (anexar material, provas, simulados, flashcards, Explicar, o chat, o Jay-AI, as configurações), mesmo sem dizer 'Jay-S'\n\
@@ -1423,6 +1440,7 @@ impl Store {
         if let Some(u) = understood.as_mut() {
             u.asks_code |= names_code(&question);
             u.intent = code_intent(u.intent, u.asks_code, c.scope.is_empty());
+            u.intent = problem_intent(u.intent, u.solves, has_numbers(&question, &u.question), u.asks_code);
         }
         let asks_code = understood.as_ref().is_some_and(|u| u.asks_code && u.intent == Intent::General);
         if let Some(u) = understood.as_mut().filter(|u| u.intent == Intent::Calc && !has_numbers(&question, &u.question)) {
@@ -1547,6 +1565,8 @@ impl Store {
         let schema = json!({ "type": "object", "properties": {
             // The question first: the model writes the fields in this order.
             "question": { "type": "string", "minLength": 1, "maxLength": 400 },
+            // Before the intent: the model states the fact first, then picks the route with it in view.
+            "resolver_problema": { "type": "boolean" },
             "intent": { "type": "string", "enum": ["talk", "app", "material", "general", "calc", "followup", "correction"] },
             "pede_codigo": { "type": "boolean" },
             "apelido_do_jay": { "type": "string", "maxLength": MAX_FACT },
@@ -1900,6 +1920,31 @@ mod tests {
     }
 
     #[test]
+    fn a_problem_with_numbers_takes_the_calc_route() {
+        use Intent::*;
+        // Flag + numbers: material and follow-up become calc.
+        assert_eq!((problem_intent(Material, true, true, false), problem_intent(FollowUp, true, true, false)), (Calc, Calc));
+        // Flag without numbers, or numbers without the flag: unchanged.
+        for i in [Material, FollowUp, Calc, General] {
+            assert_eq!((problem_intent(i, true, false, false), problem_intent(i, false, true, false)), (i, i));
+        }
+        // Other routes keep theirs; a request for code is never a calculation.
+        for i in [App, Talk, General, Correction] {
+            assert_eq!(problem_intent(i, true, true, false), i);
+        }
+        assert_eq!(problem_intent(Material, true, true, true), Material);
+        // The flag is read strictly, and a problem keeps the student's whole message (not the rewrite).
+        let read = |v: &str| read_understood(&format!(r#"{{"question":"cut","intent":"material","resolver_problema":{v}}}"#), "the whole cut message", true).unwrap();
+        let u = read("true");
+        assert!(u.solves && u.question == "the whole cut message");
+        for bad in ["false", "\"true\"", "1", "null"] {
+            let u = read(bad);
+            assert!(!u.solves, "{bad}");
+        }
+        assert!(!read_understood(r#"{"question":"x","intent":"material"}"#, "x", true).unwrap().solves);
+    }
+
+    #[test]
     fn a_request_for_code_takes_the_general_route_only_outside_the_sources() {
         use Intent::*;
         // App and calc never answer a request for a program; material does only with no sources chosen.
@@ -2075,7 +2120,7 @@ mod tests {
         assert_eq!(read_understood(r, "Para que serve o modo aprender?", true).unwrap().question, "Para que serve o modo aprender?");
         assert_eq!(read_understood(r, "e a 13?", false).unwrap().question, "e a 13?");
         assert_eq!(read_understood(r#"{"question":"Qual o desvio da questão 13?","intent":"followup"}"#, "e a 13?", true).unwrap().question, "Qual o desvio da questão 13?");
-        let of = |intent| Understood { intent, question: String::new(), facts: Facts::default(), asks_code: false };
+        let of = |intent| Understood { intent, question: String::new(), facts: Facts::default(), asks_code: false, solves: false };
         assert!(needs_conversation(None) && needs_conversation(Some(&of(Intent::FollowUp))));
         assert!(![Intent::App, Intent::Material, Intent::General, Intent::Calc, Intent::Talk].iter().any(|&i| needs_conversation(Some(&of(i)))));
         assert_eq!(lookup_text("a", "a"), "a");
@@ -2634,7 +2679,7 @@ mod tests {
 
     #[test]
     fn the_app_route_follows_the_classifier_and_falls_back_on_the_apps_name() {
-        let of = |intent| Understood { intent, question: String::new(), facts: Facts::default(), asks_code: false };
+        let of = |intent| Understood { intent, question: String::new(), facts: Facts::default(), asks_code: false, solves: false };
         assert!(is_app(Some(&of(Intent::App)), "x") && !is_app(Some(&of(Intent::Material)), "como uso o Jay-S?"));
         for q in ["Como faço isso no Jay-S?", "como uso o Jays", "no jay s tem simulado?"] {
             assert!(is_app(None, q), "{q}");
