@@ -143,7 +143,7 @@ Navegação lateral como o Jay-A: **Materiais**, **Provas**, **Simulado**, **Fla
 
 - **Sob demanda:** o `llama-server` só sobe quando um pedido chega e fecha 2 min depois do último. Gerar uma prova inteira é uma fila de pedidos no mesmo processo.
 - **GPU quando cabe:** o `--fit` do llama.cpp (ligado por padrão) põe na GPU as camadas que cabem; sem GPU, CPU pura. Contexto 8 192, `--parallel 1`.
-- **Sem mapear o arquivo (`--load-mode none`):** medido na RTX 3050, o servidor ficava com **3,4 GB de RAM** com o arquivo mapeado (as páginas lidas para a GPU continuam na memória); lendo o arquivo uma vez, **0,7 GB** ocioso e ~1 GB depois de um pedido, e carrega mais rápido (2–3 s). O "privado" de ~4 GB que o Windows mostra é memória da GPU contada como reservada, não RAM.
+- **Sem mapear o arquivo (`--load-mode none`):** medido na RTX 3050, o servidor ficava com **3,4 GB de RAM** com o arquivo mapeado (as páginas lidas para a GPU continuam na memória); lendo o arquivo uma vez, **0,7 GB** ocioso e ~1 GB depois de um pedido, e carrega mais rápido (2–3 s). O "privado" de ~4 GB que o Windows mostra é memória da GPU contada como reservada, não RAM. Com o `--cache-ram 0` (fim da seção 7), o pico numa conversa longa é de ~1,0 a 1,2 GB, e não 5,5 GB.
 - **Fechar ocioso, medido:** 2 min depois do último pedido o processo some e a memória volta. O servidor roda num *job object* do Windows: se o Jay-S fechar ou travar, o Windows encerra o servidor junto.
 - **Um pedido por vez**, com Parar (fecha o pedido HTTP; o servidor descarta a geração) e tempo limite por pedido. O Parar vale para o pedido em andamento e para os que esperam a vez; a carga do modelo (2–3 s) não é interrompida, o pedido para logo depois dela.
 - **A janela não espera o modelo:** nenhuma trava que a tela consulta (`status()`) fica presa enquanto o servidor sobe. Medido: quatro comandos mandados durante a carga respondem em 10 ms (antes, 2,3 s, a janela inteira parada).
@@ -624,7 +624,25 @@ Com o banco `examples/reason_bench.rs` (25 perguntas de resposta conhecida, corr
 
 \* GPU dividida com outro processo na primeira rodada.
 
-O que se aprendeu: a variação entre rodadas da mesma configuração (de 18 a 22 em 25) é maior que qualquer diferença entre as configurações; a mesma pergunta acerta numa rodada e erra na outra. Os erros que sobram são do modelo de 4B: rotear uma conta para a resposta do material (que dá a fórmula e não o número), escolher a fórmula do erro relativo sem a média, esquecer o último passo, não dividir a soma na média, e o silogismo ("Ana é cuidadosa?"), que ele recusa por cautela (certo em 1 de 10 rodadas, a com pensamento nativo). O pensamento nativo funciona na versão empacotada do llama.cpp (b12229) mesmo com `--reasoning off` no servidor, a resposta com esquema JSON sai depois do pensamento, e sem limite o modelo pensa mais de 1.500 tokens; não foi documentado no README dessa versão, foi medido. Pelos 10 pontos: nada disto ficou no código; o banco é um exemplo, que lê as aulas pelo motor e só guarda as nossas perguntas e os números esperados (1, 3, 8, 9: nada novo). **Achado à parte, de memória (RNF-1):** durante uma rodada do banco, o *working set* do `llama-server` foi de cerca de 0,9 GB para 5 GB em 25 perguntas; a versão empacotada guarda prompts em RAM por padrão (`--cache-ram`, padrão 8192 MiB, "0 - disable"), e o Jay-S não muda esse padrão. Não foi corrigido nesta rodada; pede uma medida própria do `--cache-ram 0` (memória e tempo) antes de mudar.
+O que se aprendeu: a variação entre rodadas da mesma configuração (de 18 a 22 em 25) é maior que qualquer diferença entre as configurações; a mesma pergunta acerta numa rodada e erra na outra. Os erros que sobram são do modelo de 4B: rotear uma conta para a resposta do material (que dá a fórmula e não o número), escolher a fórmula do erro relativo sem a média, esquecer o último passo, não dividir a soma na média, e o silogismo ("Ana é cuidadosa?"), que ele recusa por cautela (certo em 1 de 10 rodadas, a com pensamento nativo). O pensamento nativo funciona na versão empacotada do llama.cpp (b12229) mesmo com `--reasoning off` no servidor, a resposta com esquema JSON sai depois do pensamento, e sem limite o modelo pensa mais de 1.500 tokens; não foi documentado no README dessa versão, foi medido. Pelos 10 pontos: nada disto ficou no código; o banco é um exemplo, que lê as aulas pelo motor e só guarda as nossas perguntas e os números esperados (1, 3, 8, 9: nada novo). **Achado à parte, de memória (RNF-1):** durante uma rodada do banco, o *working set* do `llama-server` foi de cerca de 0,9 GB para 5 GB em 25 perguntas; a versão empacotada guarda prompts em RAM por padrão (`--cache-ram`, padrão 8192 MiB, "0 - disable"), e o Jay-S não muda esse padrão. Corrigido na subseção seguinte (`--cache-ram 0`, medido).
+
+### A memória do servidor do Jay-AI: sem o cache de prompts na RAM
+
+O `llama-server` empacotado (b12229) guarda o estado de prompts antigos na RAM comum do computador, para não reprocessá-los (PR 16391, "server : host-memory prompt caching"); o limite é `-cram, --cache-ram N` em MiB, padrão 8192, "0 - disable". O Jay-S nunca o definia. Agora o servidor sobe com `--cache-ram 0` (`server_args` em `ai.rs`). Continua valendo o cache do próprio slot (`--cache-prompt`, ligado por padrão: um pedido reaproveita o prefixo que divide com o prompt anterior do slot; com `--parallel 1` há um slot), então a conversa com o mesmo material não perde esse ganho.
+
+Medido com o modelo de verdade (*working set* do `llama-server` a cada 5 s; o banco de 25 perguntas, depois a sonda do chat com 34 turnos e perguntas de seguimento, depois um baralho de 5 cartões duas vezes):
+
+| `--cache-ram` | WS início → pico (banco) | WS pico (sonda) | s por pergunta | seguimento ("E quando o desvio…") / correção | baralho de 5 cartões (1º, 2º) |
+|---|---|---|---|---|---|
+| padrão (8192) | 662 → 5.503 MB | 5.531 MB | 12,1 | 11,7 s / 4,0 s | 11,6 s, 9,1 s |
+| 0 | 879 → 1.013 MB | 1.174 MB | 10,0 | 11,7 s / 4,5 s | 11,9 s, 8,4 s |
+| 512 | 1.052 → 1.562 MB | 1.673 MB | 10,1 | 19,1 s / 3,7 s | 12,0 s, 10,1 s |
+
+Decisão: `--cache-ram 0` (nenhum tempo perdido, dentro do ruído; pico de ~5,5 GB para ~1,0 a 1,2 GB). Só o *working set* do `llama-server` foi medido, num processo iniciado pela sonda (não pelo app): a árvore do app (Jay-S + WebView2) não foi medida aqui.
+
+Pelos 10 pontos: 1. a linha de comando do servidor vale para o app inteiro (provas, cartões, Explicar, análise, chat); 2 a 6, 8 e 9: nada novo (mesmo binário, mesmo `127.0.0.1`, mesma chave por ambiente); 7. é este o ponto: a memória do servidor deixa de crescer com o histórico de prompts (RNF-1); 10. o teste dos argumentos (`the_server_starts_local_closed_and_without_a_ram_prompt_cache`) confere `--cache-ram 0` e que `--host 127.0.0.1`, `--reasoning off`, `--cors-origins https://jay-s.invalid` e `--load-mode none` continuam, e a medida está na tabela.
+
+**Limites:** o cache do slot e os pontos de controle de contexto (`--ctx-checkpoints`) continuam; um prompt que não divide prefixo com o anterior é reprocessado por inteiro, como já era com o slot.
 
 ## 8. Etapas
 

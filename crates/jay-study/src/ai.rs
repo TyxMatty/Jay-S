@@ -275,6 +275,31 @@ pub const CONTEXT_TOKENS: u32 = 8192;
 /// The biggest reply read back.
 const MAX_REPLY_BYTES: usize = 256 << 10;
 
+/// The `llama-server` command line (the API key goes by environment, not here).
+fn server_args(model: &Path, port: u16) -> Vec<std::ffi::OsString> {
+    let mut args: Vec<std::ffi::OsString> = vec!["--model".into(), model.into()];
+    args.extend(
+        [
+            "--host", "127.0.0.1", "--port", &port.to_string(),
+            "--ctx-size", &CONTEXT_TOKENS.to_string(), "--parallel", "1",
+            // Questions and cards come out directly, without the model's thinking first.
+            "--reasoning", "off", "--no-webui",
+            // Read the weights once into the GPU instead of memory-mapping the file: measured on an
+            // RTX 3050, the server's RAM went from 3.4 GB (the mapped file stays resident) to 0.7 GB,
+            // and it loads faster (2.4 s).
+            "--load-mode", "none",
+            // No page in a browser has this origin, so a site can't read the server's replies.
+            "--cors-origins", "https://jay-s.invalid",
+            // No host-RAM cache of old prompts (default 8192 MiB): over 25 chat questions the working
+            // set peaked at 5.5 GB with it, 1.0 GB without, and no slower. The slot's own cache still
+            // reuses the prefix a prompt shares with the previous one.
+            "--cache-ram", "0",
+        ]
+        .map(std::ffi::OsString::from),
+    );
+    args
+}
+
 impl Server {
     /// Starts the server on `model` and waits until the model is loaded.
     pub fn start(paths: &AiPaths, choice: ModelChoice) -> Result<Self, AiError> {
@@ -287,18 +312,7 @@ impl Server {
         let mut command = Command::new(paths.server_exe());
         command
             .current_dir(paths.runtime_dir())
-            .args(["--model"])
-            .arg(paths.model_path(choice))
-            .args(["--host", "127.0.0.1", "--port", &port.to_string()])
-            .args(["--ctx-size", &CONTEXT_TOKENS.to_string(), "--parallel", "1"])
-            // Questions and cards come out directly, without the model's thinking first.
-            .args(["--reasoning", "off", "--no-webui"])
-            // Read the weights once into the GPU instead of memory-mapping the file: measured on an
-            // RTX 3050, the server's RAM went from 3.4 GB (the mapped file stays resident) to 0.7 GB,
-            // and it loads faster (2.4 s).
-            .args(["--load-mode", "none"])
-            // No page in a browser has this origin, so a site can't read the server's replies.
-            .args(["--cors-origins", "https://jay-s.invalid"])
+            .args(server_args(&paths.model_path(choice), port))
             .env("LLAMA_API_KEY", &key)
             .stdin(Stdio::null())
             .stdout(log.try_clone()?)
@@ -521,6 +535,23 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("jay-study-ai-{}", id::new_id()));
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn the_server_starts_local_closed_and_without_a_ram_prompt_cache() {
+        let args: Vec<String> =
+            server_args(Path::new("m.gguf"), 4242).iter().map(|a| a.to_string_lossy().into_owned()).collect();
+        for pair in [
+            ["--host", "127.0.0.1"],
+            ["--reasoning", "off"],
+            ["--cors-origins", "https://jay-s.invalid"],
+            ["--load-mode", "none"],
+            ["--cache-ram", "0"],
+            ["--port", "4242"],
+        ] {
+            assert!(args.windows(2).any(|w| w == pair), "missing {pair:?} in {args:?}");
+        }
+        assert!(!args.iter().any(|a| a.contains("key")), "the key must not be on the command line");
     }
 
     #[test]
