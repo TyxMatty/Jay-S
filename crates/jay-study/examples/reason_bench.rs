@@ -144,7 +144,18 @@ fn main() {
     let root = std::env::temp_dir().join(format!("jay-s-reason-bench-{}", jay_study::id::new_id()));
     let store = Store::open(&root).expect("store");
     let materials: Vec<String> = args[2..].iter().map(|f| store.import(std::path::Path::new(f)).expect("import").id).collect();
-    let server = Server::start(&AiPaths::new(std::path::Path::new(&args[1])), ModelChoice::Standard).expect("server");
+    let paths = AiPaths::new(std::path::Path::new(&args[1]));
+    let server = match std::env::var("BENCH_MODEL") {
+        Ok(file) => {
+            println!("model file: {file}");
+            Server::start_with_model_file(&paths, std::path::Path::new(&file))
+        }
+        Err(_) => {
+            println!("model file: {}", paths.model_path(ModelChoice::Standard).display());
+            Server::start(&paths, ModelChoice::Standard)
+        }
+    }
+    .expect("server");
     let cancel = AtomicBool::new(false);
     // results[question] = one verdict per seed
     let mut results: Vec<Vec<bool>> = vec![vec![]; QUESTIONS.len()];

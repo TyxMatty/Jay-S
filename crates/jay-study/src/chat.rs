@@ -130,8 +130,8 @@ const SECTIONS: [&str; 29] = [
 ];
 
 /// The words a passage is found by: `terms` with the plural folded ("provas" finds "prova").
-fn stems(s: &str) -> HashSet<String> {
-    terms(s).into_iter().map(|w| if w.chars().count() > 3 { w.strip_suffix('s').map(str::to_owned).unwrap_or(w) } else { w }).collect()
+fn stems(s: &str, letters: bool) -> HashSet<String> {
+    terms_in(s, letters).into_iter().map(|w| if w.chars().count() > 3 { w.strip_suffix('s').map(str::to_owned).unwrap_or(w) } else { w }).collect()
 }
 
 /// The passages sharing words with `about`, best first (none when nothing is shared). A word that
@@ -139,10 +139,12 @@ fn stems(s: &str) -> HashSet<String> {
 /// in a passage's `head` (the title of a paragraph of the guide) counts twice: by the count alone,
 /// "como faço flashcards de uma prova?" brought how to make an exam. Ties keep the pool's order.
 fn ranked(pool: Vec<Passage>, about: &str, head: fn(&Passage) -> &str) -> Vec<(usize, Passage)> {
-    let wanted = stems(about);
-    let found: Vec<HashSet<String>> = pool.iter().map(|p| stems(&p.text).intersection(&wanted).cloned().collect()).collect();
+    // A lone letter ("t", "Z", "σ") is a term only in a question with no digit ("país A", "B com 40" are labels);
+    // the passages always keep theirs, and only those the question asks for are intersected.
+    let wanted = stems(about, !about.chars().any(|c| c.is_ascii_digit()));
+    let found: Vec<HashSet<String>> = pool.iter().map(|p| stems(&p.text, true).intersection(&wanted).cloned().collect()).collect();
     let weight = |w: &String| 100 + (100.0 * (pool.len() as f32 / found.iter().filter(|f| f.contains(w)).count().max(1) as f32).ln()) as usize;
-    let scores: Vec<usize> = pool.iter().zip(&found).map(|(p, f)| f.iter().map(|w| weight(w) * if stems(head(p)).contains(w) { 2 } else { 1 }).sum()).collect();
+    let scores: Vec<usize> = pool.iter().zip(&found).map(|(p, f)| f.iter().map(|w| weight(w) * if stems(head(p), true).contains(w) { 2 } else { 1 }).sum()).collect();
     let mut scored: Vec<(usize, Passage)> = scores.into_iter().zip(pool).filter(|(s, _)| *s > 0).collect();
     scored.sort_by(|a, b| b.0.cmp(&a.0));
     scored
@@ -574,13 +576,19 @@ const STOP: &[&str] = &[
     "que", "qual", "quais", "como", "onde", "quando", "quem", "por", "para", "pra", "com", "sem", "uma", "uns", "umas", "dos", "das", "nos", "nas", "aos", "pelo", "pela", "este", "esta", "esse",
     "essa", "isso", "isto", "aquele", "aquela", "ele", "ela", "eles", "elas", "seu", "sua", "meu", "minha", "sao", "foi", "ser", "tem", "ter", "mais", "menos", "muito", "sobre", "entre", "mas",
     "nao", "sim", "tambem", "porque", "voce", "pode", "questao", "questoes", "explique", "explica", "explicar", "fale", "diga", "melhor", "exemplo", "faco", "fazer", "faz", "fiz", "the", "and",
-    "what", "how", "why", "where", "when", "who", "are", "for", "with", "does", "about", "this", "that", "question", "make",
+    "a", "e", "o", "i", "vez", "what", "how", "why", "where", "when", "who", "are", "for", "with", "does", "about", "this", "that", "question", "make",
 ];
 
 /// The words a passage is looked up by: 3+ letters, so "ATP", "DNA", "CO2" and "luz" count
 /// (`generate::words` keeps only 5+, which left "o que é ATP?" with nothing to look for).
 fn terms(s: &str) -> HashSet<String> {
-    norm(s).split(' ').filter(|w| w.chars().count() >= 3 && !STOP.contains(w)).map(str::to_owned).collect()
+    terms_in(s, false)
+}
+
+/// `terms`, and with `letters` also a lone letter ("t", "Z", "σ"): a symbol is the subject of "por que
+/// se usa t em vez de Z?". The articles "a", "e", "o", "i" are in `STOP`, so they never get in.
+fn terms_in(s: &str, letters: bool) -> HashSet<String> {
+    norm(s).split(' ').filter(|w| (w.chars().count() >= 3 || (letters && w.chars().count() == 1 && w.chars().all(char::is_alphabetic))) && !STOP.contains(w)).map(str::to_owned).collect()
 }
 
 /// Small talk: a short message made only of greeting, thanks and "how are you" words (pt and en).
@@ -1136,6 +1144,22 @@ fn calc_steps(reply: &Value, question: &str, passages: &[Passage], lang: Lang) -
         .collect()
 }
 
+/// A count asked for and left fractional (22,1276 people, 864,36 cards): Rust adds the rounding up
+/// as a step, since the model once wrote the `teto` around the wrong part. Measured: 22,1276 stood
+/// for 23. shortcut: the question's words decide what is a count; a miss leaves the result as is.
+fn round_count(sentences: &mut Vec<Sentence>, reply: &Value, asked: &str, lang: Lang) {
+    let q = format!(" {} ", norm(asked));
+    if !["tamanho da amostra", "quantos", "quantas", "numero de", "how many", "sample size"].iter().any(|w| q.contains(&format!(" {w} "))) {
+        return;
+    }
+    let last = reply["passos"].as_array().into_iter().flatten().take(6).filter_map(|s| calc::eval(s["conta"].as_str()?.trim()).ok()).last();
+    // A result already whole (a `teto`, or float noise like 24.0000000001) needs nothing.
+    let Some(r) = last.filter(|r| r.is_finite() && (r - 1e-9).ceil() - r > 1e-9) else { return };
+    let shown = calc::show_with((r - 1e-9).ceil(), lang == Lang::En);
+    let text = if lang == Lang::En { format!("Rounding up (it is a count): {shown}") } else { format!("Arredondando para cima (é uma contagem): {shown}") };
+    sentences.push(Sentence { text, sources: vec![], status: Status::Plain });
+}
+
 /// Whether the calc route has something to compute: a number in the message or in its rewrite.
 /// "Consegue escrever uma calculadora em py?" has none, and a computed badge over it would lie.
 fn has_numbers(question: &str, rewritten: &str) -> bool {
@@ -1168,10 +1192,11 @@ fn calc_reply(question: &str, rewritten: &str, passages: &[Passage], facts: &Fac
     // Tokens: plano 600 + 6 × (texto 300 + conta 200) chars + JSON is about 4,500 chars, ~1,500 tokens.
     let reply = server.chat_at(0.2, &messages, Some(&calc_schema()), 1800, &mut |_| {}, cancel)?;
     let reply = json_in(&reply)?;
-    let sentences = calc_steps(&reply, question, passages, lang);
+    let mut sentences = calc_steps(&reply, question, passages, lang);
     if !evaluated_any(&reply) || sentences.iter().all(|s| s.status != Status::Plain) {
         return Ok(None);
     }
+    round_count(&mut sentences, &reply, &format!("{question} {rewritten}"), lang);
     // The closest passages, to compare the formula with: their beginning, like "not in your sources".
     let sources = passages.iter().take(2).enumerate().map(|(i, p)| Source { n: i + 1, label: p.label.clone(), quotes: vec![p.text.chars().take(280).collect::<String>() + "…"], key: p.key.clone() }).collect();
     Ok(Some(Reply { kind: Kind::Calc, sentences, sources, checks: Checks::default(), list: true, go: None, code: None }))
@@ -2563,6 +2588,30 @@ mod tests {
     }
 
     #[test]
+    fn a_lone_letter_is_a_term_only_in_a_question_without_digits() {
+        let pool = |ts: &[&str]| -> Vec<Passage> { ts.iter().map(|t| Passage { label: "m".into(), text: (*t).into(), key: None, student: None }).collect() };
+        let got = ranked(
+            pool(&[
+                "Intervalo de confiança: valores que estimam um parâmetro desconhecido.",
+                "Média com variância populacional conhecida: usa-se Z, pois a média amostral é normal.",
+                "Intervalo para a média com σ desconhecido: usa t com n-1 graus de liberdade.",
+                "Média e mediana: outras medidas de tendência central.",
+            ]),
+            "Por que no intervalo de confiança da média se usa t em vez de Z?",
+            |_| "",
+        );
+        assert!(got[0].1.text.starts_with("Intervalo para a média com σ"), "{}", got[0].1.text);
+        // Articles and conjunctions never count, digit or not; "vez" is a stop word.
+        assert_eq!(stems("a e o i vez, e o t", true), HashSet::from(["t".to_owned()]));
+        assert!(stems("a e o i vez", true).is_empty());
+        // With a digit, the letters are labels: "A" matches nothing, so only the words rank.
+        assert!(ranked(pool(&["Grupo T", "Grupo B"]), "No país T, 312 de 430 consumidores usam a marca; no país B, 243 de 400", |_| "").is_empty());
+        assert!(ranked(pool(&["Grupo T", "Grupo B"]), "No país T, quem usa a marca?", |_| "").len() == 1);
+        // Other callers of `terms` keep the old rule.
+        assert!(!terms("Por que se usa t?").contains("t"));
+    }
+
+    #[test]
     fn a_question_that_shares_nothing_gets_the_overview_and_limits_hold() {
         let overview = manual_paragraphs(MANUALS[0]);
         let got = manual_passages("xyzzy plugh");
@@ -2683,6 +2732,32 @@ mod tests {
         let s = calc_schema();
         assert_eq!(s["properties"].as_object().unwrap().keys().collect::<Vec<_>>(), ["plano", "passos"]);
         assert_eq!((s["properties"]["passos"]["maxItems"].as_u64(), s["properties"]["passos"]["items"]["properties"]["conta"]["maxLength"].as_u64()), (Some(6), Some(200)));
+    }
+
+    #[test]
+    fn a_fractional_count_is_rounded_up_by_rust() {
+        let run = |q: &str, conta: &str, lang| {
+            let reply = json!({ "plano": "x", "passos": [{ "texto": "Passo:", "conta": conta }] });
+            let mut s = calc_steps(&reply, q, &[], lang);
+            round_count(&mut s, &reply, q, lang);
+            s
+        };
+        let q = "Controlando o erro absoluto w = 5, desvio 12, 95%, qual o tamanho da amostra?";
+        let s = run(q, "(1,96 * 12 / 5)^2", Lang::Pt);
+        assert_eq!((s.len(), s[1].text.as_str(), s[1].status), (2, "Arredondando para cima (é uma contagem): 23", Status::Plain));
+        assert_eq!(run("what is the sample size with w = 5, s = 12, 95%?", "(1.96 * 12 / 5)^2", Lang::En)[1].text, "Rounding up (it is a count): 23");
+        assert_eq!(run("Tamanho da amostra: 95%, erro 2%, estimativa 10%", "1,96^2 * 0,10 * 0,90 / 0,02^2", Lang::Pt)[1].text, "Arredondando para cima (é uma contagem): 865");
+        assert_eq!(run("Quantos alunos? 0,25 * 96,04", "0,25 * 96,04", Lang::Pt)[1].text, "Arredondando para cima (é uma contagem): 25");
+        // Whole already (a teto, or an integer result), or not a count: nothing added.
+        assert_eq!(run(q, "teto((1,96 * 12 / 5)^2)", Lang::Pt).len(), 1);
+        assert_eq!(run("Quantos? 3 * 4", "3 * 4", Lang::Pt).len(), 1);
+        assert_eq!(run("Qual a média de 4, 8 e 9?", "(4 + 8 + 9) / 2,5", Lang::Pt).len(), 1);
+        // Not a count (interval, proportion, probability, mean, money): a fractional result stays. "quanto" is not "quantos".
+        for q in ["Qual o intervalo de confiança de 95% para média 10, desvio 2, n = 30?", "Qual a proporção de 3 em 7?", "Qual a probabilidade de 3 em 7?", "Qual a média de 4, 8, 15?", "Qual o montante de R$ 2.000 a 1,5% ao mês?", "Quanto o cliente paga?"] {
+            assert_eq!(run(q, "2000 / 7", Lang::Pt).len(), 1, "{q}");
+        }
+        // No evaluated step: nothing happens.
+        assert_eq!(run(q, "rm -rf /", Lang::Pt).len(), 1);
     }
 
     #[test]

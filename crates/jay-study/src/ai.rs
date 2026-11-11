@@ -308,13 +308,25 @@ impl Server {
         if !paths.runtime_ready() || !paths.model_ready(choice) {
             return Err(AiError::NotInstalled);
         }
+        Self::start_on(paths, &paths.model_path(choice))
+    }
+
+    /// Starts the server on any model file. For measurements only; the app never calls it.
+    pub fn start_with_model_file(paths: &AiPaths, model: &Path) -> Result<Self, AiError> {
+        if !paths.runtime_ready() || !model.is_file() {
+            return Err(AiError::NotInstalled);
+        }
+        Self::start_on(paths, model)
+    }
+
+    fn start_on(paths: &AiPaths, model: &Path) -> Result<Self, AiError> {
         let port = std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.port();
         let key = id::hex(&id::random_bytes::<32>());
         let log = std::fs::File::create(paths.log_path())?;
         let mut command = Command::new(paths.server_exe());
         command
             .current_dir(paths.runtime_dir())
-            .args(server_args(&paths.model_path(choice), port))
+            .args(server_args(model, port))
             .env("LLAMA_API_KEY", &key)
             .stdin(Stdio::null())
             .stdout(log.try_clone()?)
@@ -569,6 +581,19 @@ mod tests {
             assert!(args.windows(2).any(|w| w == pair), "missing {pair:?} in {args:?}");
         }
         assert!(!args.iter().any(|a| a.contains("key")), "the key must not be on the command line");
+    }
+
+    #[test]
+    fn a_missing_model_file_or_runtime_is_refused_before_anything_spawns() {
+        let dir = temp_dir();
+        let paths = AiPaths::new(&dir);
+        // no runtime here, and no file: both checks refuse
+        assert!(matches!(Server::start_with_model_file(&paths, &dir.join("nope.gguf")), Err(AiError::NotInstalled)));
+        // a file that exists still needs the runtime
+        let file = dir.join("m.gguf");
+        std::fs::write(&file, b"x").unwrap();
+        assert!(matches!(Server::start_with_model_file(&paths, &file), Err(AiError::NotInstalled)));
+        assert!(!paths.log_path().exists(), "nothing was started");
     }
 
     #[test]
