@@ -1109,7 +1109,83 @@ fn calc_schema() -> Value {
             "texto": { "type": "string", "minLength": 1, "maxLength": 300 },
             "conta": { "type": "string", "maxLength": 200 },
         }, "required": ["texto", "conta"] } },
+        // After the steps, optional: the test statistic and the critical value as expressions, then the
+        // two conclusions. The engine compares the two numbers and picks one; the model never says which.
+        "decisao": { "type": "object", "properties": {
+            "passo_da_estatistica": { "type": "integer", "minimum": 1, "maximum": 6 },
+            "critico": { "type": "string", "maxLength": 200 },
+            "cauda": { "type": "string", "enum": ["bilateral", "direita", "esquerda"] },
+            "se_rejeita": { "type": "string", "minLength": 1, "maxLength": MAX_DECISION },
+            "se_nao_rejeita": { "type": "string", "minLength": 1, "maxLength": MAX_DECISION },
+        }, "required": ["passo_da_estatistica", "critico", "cauda", "se_rejeita", "se_nao_rejeita"] },
     }, "required": ["plano", "passos"] })
+}
+
+const MAX_DECISION: usize = 200;
+
+/// The value of the step at 1-based position `n` of a calc reply, when the engine can compute it.
+fn step_value(reply: &Value, n: &Value) -> Option<f64> {
+    let n = n.as_u64().filter(|n| (1..=6).contains(n))?;
+    calc::eval(reply["passos"].get(n as usize - 1)?["conta"].as_str()?.trim()).ok().filter(|v| v.is_finite())
+}
+
+/// The numbers written in a text, decimal comma or point included ("1,96" is 1.96, not 1 and 96).
+fn decimals(s: &str) -> Vec<f64> {
+    let mut out = vec![];
+    let mut cur = String::new();
+    for c in s.chars().chain(std::iter::once(' ')) {
+        if c.is_ascii_digit() || (matches!(c, ',' | '.') && !cur.is_empty() && !cur.contains('.')) {
+            cur.push(if c == ',' { '.' } else { c });
+        } else {
+            out.extend(cur.trim_end_matches('.').parse::<f64>().ok());
+            cur.clear();
+        }
+    }
+    out
+}
+
+/// The optional `decisao` of a calc reply as two sentences: the engine's comparison of the statistic
+/// with the critical value (absolute value of the statistic when two-sided; left tail: statistic <= -critical value), then the conclusion the
+/// comparison picks. Dropped (empty) when either expression fails or is not finite, a text is missing
+/// or too long, or `cauda` is not one of the three tails. A number in the picked conclusion that is
+/// not in the question or the passages makes that sentence Unconfirmed, like a `texto`.
+/// shortcut: the statistic is whichever step the model points at; pointing at the wrong step (seen once:
+/// an interval limit) gives a wrong conclusion on the engine's own numbers. Upgrade if it recurs.
+fn calc_decision(reply: &Value, question: &str, passages: &[Passage], lang: Lang) -> Vec<Sentence> {
+    let d = &reply["decisao"];
+    let text = |k: &str| d[k].as_str().map(str::trim).filter(|t| !t.is_empty() && t.chars().count() <= MAX_DECISION);
+    // The statistic is the value of a step the engine already computed: the model, asked to write it
+    // again, once got a different one (2,2361 beside a step that said 1,4639).
+    let stat = step_value(reply, &d["passo_da_estatistica"]);
+    let value = |k: &str| d[k].as_str().and_then(|c| calc::eval(c.trim()).ok()).filter(|v| v.is_finite());
+    let (Some(stat), Some(crit), Some(tail), Some(yes), Some(no)) = (stat, value("critico"), d["cauda"].as_str().filter(|t| ["bilateral", "direita", "esquerda"].contains(t)), text("se_rejeita"), text("se_nao_rejeita")) else { return vec![] };
+    // The critical value must be one the student's material states (a table or a worked example): the
+    // model once wrote `0` and the engine "compared" against it. Measured: wrong values happen.
+    // shortcut: a critical value that is in no retrieved passage drops the decision (the steps still
+    // show); upgrade when a critical-value table lookup exists.
+    let stated = |x: f64| [question].into_iter().chain(passages.iter().map(|p| p.text.as_str())).flat_map(decimals).any(|v| (v - x.abs()).abs() < 1e-9);
+    if !stated(crit) {
+        return vec![];
+    }
+    let en = lang == Lang::En;
+    // The critical value's sign is the model's to get wrong (-1,64 for the left tail, 1,64 for the right): only its size counts.
+    let c = crit.abs();
+    let (shown, reject, limit) = match tail {
+        "bilateral" => (stat.abs(), stat.abs() >= c, c),
+        "direita" => (stat, stat >= c, c),
+        _ => (stat, stat <= -c, -c),
+    };
+    let (stat_s, crit_s, cmp) = (calc::show_with(shown, en), calc::show_with(limit, en), match (tail, reject) { ("esquerda", true) => "≤", ("esquerda", false) => ">", (_, true) => "≥", _ => "<" });
+    let bars = if tail == "bilateral" { "|" } else { "" };
+    let label = if en { ("Statistic", "critical value") } else { ("Estatística", "valor crítico") };
+    let compare = format!("{}: {bars}{stat_s}{bars} {cmp} {crit_s} ({})", label.0, label.1);
+    let chosen = if reject { yes } else { no };
+    let known: HashSet<String> = numbers(question).into_iter().chain(passages.iter().flat_map(|p| numbers(&p.text))).collect();
+    let wrote_result = numbers(chosen).iter().any(|n| !n.is_empty() && !known.contains(n));
+    vec![
+        Sentence { text: compare, sources: vec![], status: Status::Plain },
+        Sentence { text: chosen.to_owned(), sources: vec![], status: if wrote_result { Status::Unconfirmed } else { Status::Plain } },
+    ]
 }
 
 /// The steps of a calc reply as sentences: Rust computes each `conta` and writes the result after
@@ -1194,7 +1270,7 @@ fn calc_ask(question: &str, rewritten: &str, passages: &[Passage], facts: &Facts
     let full = if norm(rewritten) == norm(question) { String::new() } else { format!("Pergunta completa, pelo contexto: <pergunta>{}</pergunta>\n", data(rewritten)) };
     format!(
         "Há uma conta a fazer. Se os trechos trazem a fórmula, use a deles e diga num passo qual é; senão, use a fórmula que você conhece e diga isso. Em 'plano', antes, anote em poucas palavras a fórmula, os dados da pergunta e os passos; o aluno não vê o plano. \
-         Em 'passos' (de 1 a 6), cada passo tem 'texto', uma explicação curta SEM escrever nenhum resultado nem número de passo, e 'conta', uma expressão aritmética completa com os números (só números, + - * / ^, sqrt(), teto(), parênteses; vírgula decimal vale; sem letras, sem '=' e sem resultado). O app calcula cada 'conta' e mostra o resultado depois do 'texto', então termine o 'texto' com ':' quando houver conta. Cada 'conta' vale sozinha, sem usar o resultado de outro passo: o arredondamento para cima final é teto(<a expressão inteira>). Um tamanho de amostra é sempre arredondado para cima: o último passo é teto(<a expressão inteira>). 'conta' fica vazia num passo que só explica. Não escreva 'trecho' no texto. Responda na língua da pergunta.\n{}{}{full}<pergunta>{}</pergunta>{}",
+         Em 'passos' (de 1 a 6), cada passo tem 'texto', uma explicação curta SEM escrever nenhum resultado nem número de passo, e 'conta', uma expressão aritmética completa com os números (só números, + - * / ^, sqrt(), teto(), parênteses; vírgula decimal vale; sem letras, sem '=' e sem resultado). O app calcula cada 'conta' e mostra o resultado depois do 'texto', então termine o 'texto' com ':' quando houver conta. Cada 'conta' vale sozinha, sem usar o resultado de outro passo: o arredondamento para cima final é teto(<a expressão inteira>). Um tamanho de amostra é sempre arredondado para cima: o último passo é teto(<a expressão inteira>). 'conta' fica vazia num passo que só explica. Não escreva 'trecho' no texto. Se a pergunta é um teste de hipótese ou pergunta se há diferença ou efeito ao nível de α, preencha também 'decisao' (depois dos passos), e a conclusão do teste vai só nela, não nos passos: 'passo_da_estatistica' é a posição (1 a 6) do passo cuja 'conta' calcula a estatística do teste, 'critico' é uma expressão como as de 'conta' com o valor crítico do nível pedido, escrito como a tabela ou os trechos o trazem, 'cauda' é 'bilateral', 'direita' ou 'esquerda' (a hipótese alternativa: diferente, maior ou menor), e 'se_rejeita' e 'se_nao_rejeita' são as duas conclusões possíveis, cada uma uma frase completa e afirmativa (não condicional), SEM números; o app compara a estatística com o crítico e escolhe a conclusão, então não diga qual vale. Sem teste de hipótese, omita 'decisao'. Responda na língua da pergunta.\n{}{}{full}<pergunta>{}</pergunta>{}",
         facts_block(facts),
         trechos(passages),
         data(question),
@@ -1210,10 +1286,12 @@ fn calc_reply(question: &str, rewritten: &str, passages: &[Passage], facts: &Fac
     let reply = server.chat_at(0.2, &messages, Some(&calc_schema()), 1800, &mut |_| {}, cancel)?;
     let reply = json_in(&reply)?;
     let mut sentences = calc_steps(&reply, question, passages, lang);
+    let decision = calc_decision(&reply, question, passages, lang);
     if !evaluated_any(&reply) || sentences.iter().all(|s| s.status != Status::Plain) {
         return Ok(None);
     }
     round_count(&mut sentences, &reply, &format!("{question} {rewritten}"), lang);
+    sentences.extend(decision);
     // The closest passages, to compare the formula with: their beginning, like "not in your sources".
     let sources = passages.iter().take(2).enumerate().map(|(i, p)| Source { n: i + 1, label: p.label.clone(), quotes: vec![p.text.chars().take(280).collect::<String>() + "…"], key: p.key.clone() }).collect();
     Ok(Some(Reply { kind: Kind::Calc, sentences, sources, checks: Checks::default(), list: true, go: None, code: None }))
@@ -2776,8 +2854,58 @@ mod tests {
         assert_eq!(r[0].status, Status::Unconfirmed);
         // The calc route's schema: plan first, then 1-6 steps.
         let s = calc_schema();
-        assert_eq!(s["properties"].as_object().unwrap().keys().collect::<Vec<_>>(), ["plano", "passos"]);
+        assert_eq!(s["properties"].as_object().unwrap().keys().collect::<Vec<_>>(), ["plano", "passos", "decisao"]);
+        assert_eq!(s["required"], json!(["plano", "passos"]));
         assert_eq!((s["properties"]["passos"]["maxItems"].as_u64(), s["properties"]["passos"]["items"]["properties"]["conta"]["maxLength"].as_u64()), (Some(6), Some(200)));
+    }
+
+    #[test]
+    fn the_engine_compares_the_statistic_and_picks_the_conclusion() {
+        let d = |stat: &str, crit: &str, two: Value, no: &str| {
+            let reply = json!({ "passos": [{ "texto": "t", "conta": stat }], "decisao": { "passo_da_estatistica": 1, "critico": crit, "cauda": two, "se_rejeita": "Rejeita H0.", "se_nao_rejeita": no } });
+            calc_decision(&reply, "alfa 5%, z = 1,96, 1,645 ou 1,64", &[], Lang::Pt)
+        };
+        // Two-sided, within the critical value: not rejected, with the engine's numbers.
+        let s = d("(6-5)/sqrt(2^2/10+1^2/15)", "1,96", json!("bilateral"), "Não rejeita H0.");
+        assert_eq!((s[0].text.as_str(), s[1].text.as_str(), s[1].status), ("Estatística: |1,4639| < 1,96 (valor crítico)", "Não rejeita H0.", Status::Plain));
+        // A negative statistic counts by its absolute value when two-sided, not when one-sided.
+        assert_eq!(d("0-2,5", "1,96", json!("bilateral"), "Não.")[1].text, "Rejeita H0.");
+        assert_eq!(d("0-2,5", "1,645", json!("direita"), "Não.")[1].text, "Não.");
+        assert!(d("0-2,5", "1,645", json!("direita"), "Não.")[0].text.contains("-2,5 < 1,645"));
+        // Left tail: rejects at or below minus the critical value, whichever sign the model wrote it with.
+        for crit in ["1,64", "0-1,64"] {
+            let left = d("0-2", crit, json!("esquerda"), "Não.");
+            assert_eq!((left[0].text.as_str(), left[1].text.as_str()), ("Estatística: -2 ≤ -1,64 (valor crítico)", "Rejeita H0."), "{crit}");
+        }
+        assert_eq!(d("0-1", "1,64", json!("esquerda"), "Não.")[0].text, "Estatística: -1 > -1,64 (valor crítico)");
+        assert_eq!(d("2", "1,64", json!("esquerda"), "Não.")[1].text, "Não.");
+        // Equality rejects (statistic >= critical value).
+        assert_eq!(d("1,96", "1,96", json!("bilateral"), "Não.")[1].text, "Rejeita H0.");
+        // A number the model wrote in the picked conclusion: not confirmed; one from the question is fine.
+        assert_eq!(d("1", "1,96", json!("bilateral"), "Dá 0,99.")[1].status, Status::Unconfirmed);
+        assert_eq!(d("1", "1,96", json!("bilateral"), "Não rejeita H0 a 5%.")[1].status, Status::Plain);
+        // A critical value the question and the passages never state (0, or one the model made up): dropped.
+        assert!(d("1", "0", json!("bilateral"), "Não.").is_empty() && d("1", "2,5", json!("bilateral"), "Não.").is_empty());
+        assert_eq!(calc_decision(&json!({ "passos": [{ "texto": "t", "conta": "3" }], "decisao": { "passo_da_estatistica": 1, "critico": "2,5", "cauda": "bilateral", "se_rejeita": "R.", "se_nao_rejeita": "N." } }), "q", &[passage("Tabela: z = 2,5.", None)], Lang::Pt)[1].text, "R.");
+        assert_eq!(decimals("z = 1,96; 0.05 e 12. Fim 3,"), [1.96, 0.05, 12.0, 3.0]);
+        // The step must exist, in 1..=6, and be computable; the statistic is never read from `decisao`.
+        for n in [json!(0), json!(2), json!(7), json!(-1), json!(1.5), json!("1"), json!(null), json!(u64::MAX)] {
+            let reply = json!({ "passos": [{ "texto": "t", "conta": "3" }], "decisao": { "passo_da_estatistica": n, "estatistica": "9", "critico": "1,96", "cauda": "bilateral", "se_rejeita": "R.", "se_nao_rejeita": "N." } });
+            assert!(calc_decision(&reply, "z 1,96", &[], Lang::Pt).is_empty(), "{n}");
+        }
+        // Hostile or incomplete: dropped, never a panic.
+        let long = "1+".repeat(5000);
+        for (st, cr, two) in [("1/0", "1,96", json!("bilateral")), ("1", "sqrt(-4)", json!("bilateral")), ("rm -rf", "1", json!("bilateral")), (long.as_str(), "1", json!("bilateral")), ("", "1", json!("bilateral")), ("9^9^9", "1", json!("direita")), ("1", "1", json!("true")), ("1", "1", json!(null))] {
+            assert!(d(st, cr, two, "Não.").is_empty(), "{st:.10} {cr}");
+        }
+        assert!(d("1", "2", json!("bilateral"), "").is_empty() && d("1", "2", json!("bilateral"), &"a".repeat(MAX_DECISION + 1)).is_empty());
+        for v in [json!(null), json!("x"), json!([]), json!({}), json!({ "passo_da_estatistica": 1, "critico": 4 })] {
+            assert!(calc_decision(&json!({ "decisao": v }), "q", &[], Lang::Pt).is_empty());
+        }
+        assert!(calc_decision(&json!({}), "q", &[], Lang::Pt).is_empty());
+        // English: decimal point.
+        let reply = json!({ "passos": [{ "texto": "t", "conta": "1,5" }], "decisao": { "passo_da_estatistica": 1, "critico": "1,96", "cauda": "bilateral", "se_rejeita": "Reject.", "se_nao_rejeita": "Do not reject." } });
+        assert_eq!(calc_decision(&reply, "q 1.96", &[], Lang::En)[0].text, "Statistic: |1.5| < 1.96 (critical value)");
     }
 
     #[test]
