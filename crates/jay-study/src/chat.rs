@@ -623,6 +623,15 @@ struct Understood {
 
 /// A request for code is never about the app or a calculation, and with no sources chosen it is not
 /// about the material: it takes the general route, the only one that offers code.
+/// A request for code in so many words: a verb of writing and a language or "código"/"programa"
+/// ("Consegue escrever uma calculadora simples em py?"). The classifier missed it in 1 of 3 runs.
+fn names_code(question: &str) -> bool {
+    let n = format!(" {} ", norm(question));
+    let has = |ws: &[&str]| ws.iter().any(|w| n.contains(&format!(" {w} ")));
+    has(&["escreva", "escrever", "escreve", "crie", "criar", "cria", "faca", "fazer", "gere", "gerar", "monte", "write", "make", "create"])
+        && has(&["py", "python", "javascript", "js", "sql", "java", "codigo", "programa", "script", "code", "program"])
+}
+
 fn code_intent(intent: Intent, asks_code: bool, no_sources: bool) -> Intent {
     match intent {
         Intent::App | Intent::Calc if asks_code => Intent::General,
@@ -788,9 +797,9 @@ fn understand_messages(c: &Chat, question: &str) -> Vec<Value> {
          question: se a mensagem já faz sentido sozinha, copie-a sem mudar nada. Só se ela depende da conversa ('e quando...?', 'e a 13?', 'explica melhor'), reescreva como UMA pergunta completa e independente, na língua do aluno, dizendo o assunto a que ela se refere. Mantenha todo número que o aluno escreveu; não acrescente fatos nem números novos.\n\
          intent, um destes:\n\
          - talk: conversa com o Jay-AI, sobre ele (nome, apelido, 'quem é você?', 'o que você faz?'), sobre o aluno (nome, como se sente, desabafo) ou sobre a própria conversa (cumprimento, agradecimento, piada, papo solto). Pedir para explicar, resumir ou calcular um assunto NÃO é talk, mesmo dizendo 'você' ('você pode me explicar o que é ATP?' é material ou general)\n\
-         - app: como usar o próprio aplicativo Jay-S (pedir para escrever um programa ou código NÃO é app)\n\
+         - app: como usar o próprio aplicativo Jay-S (anexar material, provas, simulados, flashcards, Explicar, o chat, o Jay-AI, as configurações), mesmo sem dizer 'Jay-S'\n\
          - material: sobre os materiais escolhidos ou a prova terminada\n\
-         - general: conhecimento geral, fora das fontes; pedir para escrever um programa, script ou código também é general\n\
+         - general: conhecimento geral, fora das fontes (um pedido de programa ou código é general)\n\
          - calc: uma conta com números a resolver ('qual o tamanho da amostra com erro de 2%?'). Perguntar como algo funciona, pedir um programa ou calculadora, ou falar de cálculo como assunto NÃO é calc ('escreva uma calculadora em Python' é general)\n\
          - followup: continua a vez anterior\n\
          - correction: o aluno diz que a última resposta entendeu errado ou errou e diz o que quis dizer ('não, eu quis dizer...', 'to me referindo a...', 'não foi isso', 'não é isso que eu perguntei', 'I meant...'); em question, escreva o que ele realmente quer\n\
@@ -1263,6 +1272,7 @@ impl Store {
             u.intent = Intent::General;
         }
         if let Some(u) = understood.as_mut() {
+            u.asks_code |= names_code(&question);
             u.intent = code_intent(u.intent, u.asks_code, c.scope.is_empty());
         }
         let asks_code = understood.as_ref().is_some_and(|u| u.asks_code && u.intent == Intent::General);
@@ -1802,6 +1812,13 @@ mod tests {
             assert!(!read(bad), "{bad}");
         }
         assert!(!read_understood(r#"{"question":"x","intent":"general"}"#, "x", false).unwrap().asks_code);
+        // The words alone also say it, when the classifier misses.
+        for q in ["Consegue escrever uma calculadora simples em py?", "Crie um programa que soma dois números", "write a python script"] {
+            assert!(names_code(q), "{q}");
+        }
+        for q in ["Como faço flashcards de uma prova que fiz?", "Como anexo um PDF?", "O que é um programa de amostragem?", "Escreva a fórmula do intervalo"] {
+            assert!(!names_code(q), "{q}");
+        }
     }
 
     #[test]
