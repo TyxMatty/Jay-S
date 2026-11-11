@@ -1662,6 +1662,26 @@ fieldset > h3 {
   white-space: nowrap;
 }
 
+.review-clock {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.review-clock-icon {
+  display: inline-flex;
+}
+
+.review-clock-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
 .card-pile {
   position: relative;
   width: min(560px, 100%);
@@ -1776,8 +1796,38 @@ fieldset > h3 {
 }
 
 .flip-card.is-dealt {
-  animation: deal-in 0.35s var(--ease-out);
+  animation: deal-in 0.26s var(--ease-out);
 }
+
+/* The question again, small, over the answer. */
+.card-back-question {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+/* The card just rated, leaving in the rating's direction (faster than the next one coming in). */
+.flip-ghost {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 2;
+  pointer-events: none;
+  animation: card-out-good 0.18s ease-in forwards;
+}
+
+.flip-ghost .flip-inner {
+  transition: none;
+}
+
+.flip-ghost[data-out='again'] { animation-name: card-out-again; }
+.flip-ghost[data-out='hard'] { animation-name: card-out-hard; }
+.flip-ghost[data-out='easy'] { animation-name: card-out-easy; }
+
+@keyframes card-out-again { to { opacity: 0; transform: translate(-48px, 16px) rotate(-4deg); } }
+@keyframes card-out-hard { to { opacity: 0; transform: translateY(40px); } }
+@keyframes card-out-good { to { opacity: 0; transform: translateX(56px); } }
+@keyframes card-out-easy { to { opacity: 0; transform: translate(48px, -32px); } }
 
 .review-actions {
   display: grid;
@@ -1842,6 +1892,35 @@ fieldset > h3 {
   color: #fff;
   font-weight: 800;
 }
+
+.rating-symbol svg {
+  width: 16px;
+  height: 16px;
+  stroke-width: 2.5;
+}
+
+/* What the rating did: a dot in its tone, the text stays in the normal color. */
+.review-actions .hint[data-tone] {
+  --tone: var(--accent);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.review-actions .hint[data-tone]::before {
+  content: '';
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--tone);
+}
+
+.review-actions .hint[data-tone='again'] { --tone: var(--danger); }
+.review-actions .hint[data-tone='hard'] { --tone: var(--warning); }
+.review-actions .hint[data-tone='good'] { --tone: var(--accent); }
+.review-actions .hint[data-tone='easy'] { --tone: var(--success); }
+.review-actions .hint[data-tone] { color: var(--text); }
 
 .rating-label {
   font-weight: 700;
@@ -1911,6 +1990,99 @@ fieldset > h3 {
   color: var(--text);
 }
 
+/* The end-of-session summary: a bar of the four ratings, a legend, what to look at next. */
+.deck-done.session-summary {
+  gap: var(--space-4);
+  padding: var(--space-5);
+}
+
+.session-bar {
+  display: flex;
+  width: min(420px, 100%);
+  height: 12px;
+  overflow: hidden;
+  border-radius: 6px;
+  background: var(--border);
+}
+
+.session-seg {
+  --tone: var(--accent);
+  min-width: 0;
+  background: var(--tone);
+  transform-origin: left;
+  animation: seg-in 260ms ease-out both;
+}
+
+.session-seg[hidden] { display: none; }
+.session-seg[data-tone='again'], .session-legend [data-tone='again'] { --tone: var(--danger); }
+.session-seg[data-tone='hard'], .session-legend [data-tone='hard'] { --tone: var(--warning); }
+.session-seg[data-tone='easy'], .session-legend [data-tone='easy'] { --tone: var(--success); }
+.session-legend [data-tone='hard'] .rating-symbol { color: #1a1608; }
+
+@keyframes seg-in {
+  from { transform: scaleX(0); }
+}
+
+.session-legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-2) var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.session-legend li {
+  --tone: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 600;
+}
+
+.session-forgot {
+  display: grid;
+  gap: var(--space-2);
+  width: min(420px, 100%);
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--danger);
+  border-radius: var(--radius);
+  background: var(--surface);
+  text-align: left;
+}
+
+.session-forgot h3 {
+  font-size: 14px;
+}
+
+.session-summary .button-row {
+  justify-content: center;
+}
+
+.session-forgot h3,
+.session-forgot p,
+.session-forgot ul {
+  margin: 0;
+}
+
+.session-forgot ul {
+  display: grid;
+  gap: var(--space-2);
+  padding-left: 0;
+  list-style: none;
+}
+
+.session-forgot li {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
 /* A deck in the list: a little pile with its number of cards. */
 .deck-thumb {
   position: relative;
@@ -1940,6 +2112,17 @@ fieldset > h3 {
   background: color-mix(in srgb, var(--accent) 22%, var(--surface));
   font-size: 12px;
   font-weight: 800;
+}
+
+/* A deck's first line says whether there is something to do now. */
+.deck-status {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.deck-status[data-due='false'] {
+  font-weight: 400;
+  color: var(--text-muted);
 }
 
 @keyframes deal-in {
@@ -2084,7 +2267,15 @@ fieldset > h3 {
 }
 
 .review-progress {
+  flex-wrap: wrap;
+  row-gap: var(--space-2);
   margin-bottom: var(--space-3);
+}
+
+/* With the practice badge, a narrow window puts the bar on its own line instead of squeezing it. */
+.review-progress .ai-progress {
+  flex: 1 1 160px;
+  width: auto;
 }
 
 .review-actions {
@@ -2122,6 +2313,8 @@ fieldset > h3 {
 
 [data-motion='reduced'] .flip-card.is-dealt,
 [data-motion='reduced'] .flip-card.is-flipping,
+[data-motion='reduced'] .flip-ghost,
+[data-motion='reduced'] .session-seg,
 [data-motion='reduced'] .runner-feedback,
 [data-motion='reduced'] .runner-timer[data-tone='low'] {
   animation: none;

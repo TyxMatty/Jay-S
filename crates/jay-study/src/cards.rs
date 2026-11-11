@@ -17,6 +17,29 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 const DAY_MS: u64 = 24 * 3600 * 1000;
 
+/// The ratings, in the order of the buttons: forgot, hard, good, easy.
+pub const QUALITIES: [u8; 4] = [1, 3, 4, 5];
+
+/// First pass of a card (new, or relearned after a lapse), in days: hard, good, easy.
+const FIRST_STEP: [f32; 3] = [0.5, 1.0, 4.0];
+/// No interval past 100 years (Anki's cap): beyond it the numbers mean nothing.
+const MAX_INTERVAL: f32 = 36_500.0;
+
+/// The interval in days after a passing rating (3 hard, 4 good, 5 easy), `reps` counting this pass.
+/// Good is SM-2's (1, 6, then the last interval times the ease); hard grows by 1.2 and at least a
+/// day; easy is good times 1.3. Good stays a day above hard and easy a day above good, so the three
+/// buttons never collapse into one, and an interval never shrinks.
+fn pass_interval(reps: u32, last: f32, ease: f32, quality: u8) -> f32 {
+    let k = (quality.clamp(3, 5) - 3) as usize;
+    if reps <= 1 {
+        return FIRST_STEP[k];
+    }
+    let hard = (last * 1.2).round().max((last + 1.0).round());
+    let good = if reps == 2 { 6.0 } else { (last * ease).round() }.max(hard + 1.0);
+    let easy = (good * 1.3).round().max(good + 1.0);
+    [hard, good, easy][k].min(MAX_INTERVAL)
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Card {
     pub front: String,
@@ -36,8 +59,8 @@ impl Card {
         Self { front, back, topic, ease: 2.5, interval: 0.0, reps: 0, lapses: 0, due: now }
     }
 
-    /// SM-2 with the student's rating: 1 forgot, 3 hard, 4 good, 5 easy. A forgotten card comes back
-    /// in 10 minutes.
+    /// SM-2 with Anki's split of the passing ratings: 1 forgot, 3 hard, 4 good, 5 easy. A forgotten
+    /// card comes back in 10 minutes; the ease moves exactly as in SM-2.
     pub fn review(&mut self, quality: u8, now: u64) {
         let q = quality.min(5) as f32;
         if quality < 3 {
@@ -47,14 +70,39 @@ impl Card {
             self.due = now + 10 * 60 * 1000;
         } else {
             self.reps += 1;
-            self.interval = match self.reps {
-                1 => 1.0,
-                2 => 6.0,
-                _ => (self.interval * self.ease).round(),
-            };
-            self.due = now + (self.interval * DAY_MS as f32) as u64;
+            self.interval = pass_interval(self.reps, self.interval, self.ease, quality);
+            // Saturating: a long interval must never wrap a u64 of ms.
+            self.due = now.saturating_add((self.interval * DAY_MS as f32) as u64);
         }
         self.ease = (self.ease + (0.1 - (5.0 - q) * (0.08 + (5.0 - q) * 0.02))).max(1.3);
+    }
+
+    /// A repeat of a card already forgotten in this session. Classic SM-2 sets the E-Factor from the
+    /// first answer of the day, repeats failed items until they pass, and restarts a lapsed item at
+    /// its first step: so a second "forgot" changes nothing but the 10 minutes, and a pass starts
+    /// over at the first step of that rating (half a day, 1 day or 4 days), ease untouched.
+    pub fn relearn(&mut self, quality: u8, now: u64) {
+        if quality < 3 {
+            self.due = now + 10 * 60 * 1000;
+        } else {
+            self.reps = 1;
+            self.interval = pass_interval(1, 0.0, self.ease, quality);
+            self.due = now.saturating_add((self.interval * DAY_MS as f32) as u64);
+        }
+    }
+
+    /// Ms from `now` until the card is due, for each of `QUALITIES`. Runs `review` (or `relearn`, for
+    /// `again`) on a copy, so it can't disagree with what is saved.
+    pub fn preview(&self, now: u64, again: bool) -> [u64; 4] {
+        QUALITIES.map(|q| {
+            let mut c = self.clone();
+            if again { c.relearn(q, now) } else { c.review(q, now) }
+            c.due.saturating_sub(now)
+        })
+    }
+
+    pub fn due_card(&self, index: usize, now: u64, again: bool) -> DueCard {
+        DueCard { index, front: self.front.clone(), back: self.back.clone(), topic: self.topic.clone(), next: self.preview(now, again) }
     }
 }
 
@@ -65,7 +113,25 @@ pub struct Deck {
     pub created: u64,
     pub materials: Vec<String>,
     pub cards: Vec<Card>,
+    /// The last `MAX_LOG` ratings; absent in old files and in decks never reviewed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub log: Vec<Review>,
 }
+
+/// One rating: the card (index in the deck), when (ms since 1970), the rating, and the ms from
+/// showing the card to flipping it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Review {
+    pub card: u32,
+    pub at: u64,
+    pub quality: u8,
+    pub ms: u32,
+}
+
+/// A thinking time above this is clamped: someone who walked away.
+pub const MAX_THINK_MS: u32 = 10 * 60 * 1000;
+/// A deck keeps its last 2000 reviews (~120 KB); the oldest go first.
+pub const MAX_LOG: usize = 2000;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct DeckSummary {
@@ -74,6 +140,12 @@ pub struct DeckSummary {
     pub created: u64,
     pub cards: usize,
     pub due: usize,
+    /// Never reviewed.
+    pub new: usize,
+    /// Last rating was a pass.
+    pub learned: usize,
+    /// Ms until the earliest card due in the future.
+    pub next_due: Option<u64>,
 }
 
 /// A card waiting for review, with its place in the deck.
@@ -83,6 +155,30 @@ pub struct DueCard {
     pub front: String,
     pub back: String,
     pub topic: String,
+    /// Ms until it would be due again for each rating (`QUALITIES`).
+    pub next: [u64; 4],
+}
+
+/// What a saved rating did: the time to the card's new due date, and the preview of its new state.
+#[derive(Debug, Clone, Serialize)]
+pub struct Reviewed {
+    pub due_in: u64,
+    pub next: [u64; 4],
+}
+
+/// What a session left in the deck, read from what was saved (the log and the cards).
+#[derive(Debug, Clone, Serialize)]
+pub struct SessionSummary {
+    /// Ratings since the session began, in `QUALITIES` order (repeats included).
+    pub counts: [u32; 4],
+    /// Thinking time of those ratings.
+    pub ms: u64,
+    /// The cards forgotten at least once, in order, ready to be reviewed again (`again`).
+    pub forgotten: Vec<DueCard>,
+    pub due_now: u32,
+    /// Ms until the earliest card due in the future, and how many fall within a day of it.
+    pub next_due: Option<u64>,
+    pub next_count: u32,
 }
 
 /// What Jay-AI is told about length, from the profile (-2 … 2).
@@ -170,7 +266,16 @@ impl Store {
         let mut list: Vec<DeckSummary> = self
             .all_json::<Deck>("decks")
             .into_iter()
-            .map(|d| DeckSummary { due: d.cards.iter().filter(|c| c.due <= now).count(), cards: d.cards.len(), id: d.id, title: d.title, created: d.created })
+            .map(|d| DeckSummary {
+                due: d.cards.iter().filter(|c| c.due <= now).count(),
+                new: d.cards.iter().filter(|c| c.reps == 0 && c.lapses == 0).count(),
+                learned: d.cards.iter().filter(|c| c.reps >= 1).count(),
+                next_due: d.cards.iter().map(|c| c.due).filter(|&due| due > now).min().map(|due| due - now),
+                cards: d.cards.len(),
+                id: d.id,
+                title: d.title,
+                created: d.created,
+            })
             .collect();
         list.sort_by(|a, b| b.created.cmp(&a.created));
         list
@@ -188,22 +293,69 @@ impl Store {
         self.remove_json("decks", deck)
     }
 
-    /// The cards due now: weak topics first, then the most overdue.
-    pub fn due_cards(&self, deck: &str, limit: usize) -> Result<Vec<DueCard>, StoreError> {
+    /// The cards due now: weak topics first, then the most overdue. `all`: every card in deck order
+    /// (a practice pass).
+    pub fn due_cards(&self, deck: &str, limit: usize, all: bool) -> Result<Vec<DueCard>, StoreError> {
         let d = self.deck(deck)?;
         let now = now_ms();
+        if all {
+            return Ok(d.cards.iter().enumerate().take(limit).map(|(index, c)| c.due_card(index, now, false)).collect());
+        }
         let weak = self.profile().weak_topics(10);
         let rank = |t: &str| weak.iter().position(|w| generate::similar(w, t) || w == t).unwrap_or(usize::MAX);
         let mut due: Vec<(usize, &Card)> = d.cards.iter().enumerate().filter(|(_, c)| c.due <= now).collect();
         due.sort_by(|a, b| rank(&a.1.topic).cmp(&rank(&b.1.topic)).then(a.1.due.cmp(&b.1.due)));
-        Ok(due.into_iter().take(limit).map(|(index, c)| DueCard { index, front: c.front.clone(), back: c.back.clone(), topic: c.topic.clone() }).collect())
+        Ok(due.into_iter().take(limit).map(|(index, c)| c.due_card(index, now, false)).collect())
     }
 
-    pub fn review_card(&self, deck: &str, index: usize, quality: u8) -> Result<(), StoreError> {
+    /// Rates a card; `again` is a repeat of one forgotten earlier in the session (`Card::relearn`).
+    pub fn review_card(&self, deck: &str, index: usize, quality: u8, again: bool, ms: u32) -> Result<Reviewed, StoreError> {
         let mut d = self.deck(deck)?;
         let card = d.cards.get_mut(index).ok_or(StoreError::NotFound)?;
-        card.review(quality, now_ms());
-        self.save_deck(&d)
+        let now = now_ms();
+        if again { card.relearn(quality, now) } else { card.review(quality, now) }
+        // What the buttons show if the card comes back in this session.
+        let reviewed = Reviewed { due_in: card.due.saturating_sub(now), next: card.preview(now, quality < 3) };
+        d.log.push(Review { card: index as u32, at: now, quality, ms: ms.min(MAX_THINK_MS) });
+        let extra = d.log.len().saturating_sub(MAX_LOG);
+        d.log.drain(..extra);
+        self.save_deck(&d)?;
+        Ok(reviewed)
+    }
+
+    /// What the ratings since `since` (ms since 1970) did to the deck. Read only.
+    pub fn session_summary(&self, deck: &str, since: u64) -> Result<SessionSummary, StoreError> {
+        let d = self.deck(deck)?;
+        let now = now_ms();
+        let mut sum = SessionSummary { counts: [0; 4], ms: 0, forgotten: vec![], due_now: 0, next_due: None, next_count: 0 };
+        let mut seen: Vec<u32> = vec![];
+        for r in d.log.iter().filter(|r| r.at >= since) {
+            if let Some(k) = QUALITIES.iter().position(|&q| q == r.quality) {
+                sum.counts[k] += 1;
+            }
+            sum.ms += r.ms as u64;
+            if r.quality == 1 && !seen.contains(&r.card) {
+                seen.push(r.card);
+                if let Some(c) = d.cards.get(r.card as usize) {
+                    sum.forgotten.push(c.due_card(r.card as usize, now, true));
+                }
+            }
+        }
+        sum.due_now = d.cards.iter().filter(|c| c.due <= now).count() as u32;
+        if let Some(first) = d.cards.iter().map(|c| c.due).filter(|&due| due > now).min() {
+            sum.next_due = Some(first - now);
+            sum.next_count = d.cards.iter().filter(|c| c.due >= first && c.due - first < DAY_MS).count() as u32;
+        }
+        Ok(sum)
+    }
+
+    /// Writes a deck back as it was (an undo), only if it still exists: an undo never recreates a
+    /// deleted deck.
+    pub fn restore_deck(&self, before: &Deck) -> Result<(), StoreError> {
+        if !self.item("decks", &before.id)?.exists() {
+            return Err(StoreError::NotFound);
+        }
+        self.save_deck(before)
     }
 
     pub fn card_vote(&self, too_long: bool) -> Result<Profile, StoreError> {
@@ -253,7 +405,7 @@ impl Store {
         if cards.is_empty() {
             return Err(BuildError::Empty);
         }
-        let deck = Deck { id: id::new_id(), title: title.chars().take(120).collect(), created: now, materials: materials.to_vec(), cards };
+        let deck = Deck { id: id::new_id(), title: title.chars().take(120).collect(), created: now, materials: materials.to_vec(), cards, log: vec![] };
         self.save_deck(&deck)?;
         Ok(deck)
     }
@@ -264,18 +416,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn sm2_matches_the_reference() {
+    fn schedule_matches_the_reference() {
+        // Good is SM-2's (1, 6, interval x ease); easy x1.3 on top; hard x1.2 and at least a day.
         let mut c = Card::new("f".into(), "b".into(), "t".into(), 0);
         c.review(4, 0);
         assert_eq!((c.reps, c.interval, c.ease), (1, 1.0, 2.5));
         c.review(4, 0);
         assert_eq!((c.reps, c.interval), (2, 6.0));
         c.review(5, 0);
-        assert_eq!((c.reps, c.interval), (3, 15.0));
+        assert_eq!((c.reps, c.interval), (3, 20.0)); // good would be 6 x 2.5 = 15; easy 15 x 1.3
         assert!((c.ease - 2.6).abs() < 1e-5);
         c.review(3, 0);
         assert!((c.ease - 2.46).abs() < 1e-5, "{}", c.ease);
-        assert_eq!(c.interval, 39.0);
+        assert_eq!(c.interval, 24.0); // 20 x 1.2
+        c.review(4, 0);
+        assert_eq!(c.interval, 59.0); // 24 x 2.46, SM-2's good
+        // A new card's first step: hard half a day, good 1 day, easy 4 days.
+        for (q, days) in [(3, 0.5), (4, 1.0), (5, 4.0)] {
+            let mut n = Card::new("f".into(), "b".into(), "t".into(), 0);
+            n.review(q, 0);
+            assert_eq!(n.interval, days);
+        }
         // Forgot: back to the start, due in 10 minutes, ease down 0.54.
         c.review(1, 1000);
         assert_eq!((c.reps, c.lapses, c.interval, c.due), (0, 1, 0.0, 1000 + 600_000));
@@ -284,6 +445,164 @@ mod tests {
             c.review(0, 0);
         }
         assert_eq!(c.ease, 1.3);
+    }
+
+    #[test]
+    fn hard_good_easy_keep_their_order_and_never_shrink() {
+        let now = 1_000_000;
+        let lasts = [0.0, 0.5, 1.0, 2.0, 3.0, 4.0, 6.0, 10.0, 15.0, 40.0, 100.0, 365.0, 1000.0, 10_000.0, 30_000.0, 36_500.0];
+        let mut checked = 0;
+        for reps in 0..6 {
+            for &interval in &lasts {
+                for e in 0..=20 {
+                    let ease = 1.3 + e as f32 * 0.1;
+                    let card = Card { ease, interval, reps, ..Card::new("f".into(), "b".into(), "t".into(), now) };
+                    for again in [false, true] {
+                        let [forgot, hard, good, easy] = card.preview(now, again);
+                        assert!(forgot < hard, "{card:?} {again}");
+                        let capped = good >= (MAX_INTERVAL * DAY_MS as f32) as u64;
+                        assert!(hard <= good && good <= easy, "{card:?} {again}");
+                        assert!(capped || (hard < good && good < easy), "{card:?} {again}: {hard} {good} {easy}");
+                        if !again && reps >= 1 {
+                            // Past the first step, a pass never brings the card back sooner than before.
+                            // (in days, with room for the f32 ms of a 100-year interval)
+                            assert!(hard as f64 / DAY_MS as f64 >= interval as f64 - 0.01, "{card:?}");
+                        }
+                        checked += 1;
+                    }
+                }
+            }
+        }
+        assert_eq!(checked, 6 * 16 * 21 * 2);
+        // Easy forever: the interval stops at the cap and the due date never wraps.
+        let mut c = Card::new("f".into(), "b".into(), "t".into(), now);
+        for _ in 0..200 {
+            c.review(5, u64::MAX - 1);
+        }
+        assert_eq!((c.interval, c.due), (MAX_INTERVAL, u64::MAX));
+    }
+
+    #[test]
+    fn preview_matches_review() {
+        let now = 1_000_000;
+        let mut states = vec![];
+        let mut c = Card::new("f".into(), "b".into(), "t".into(), now);
+        states.push(c.clone());
+        for q in [4, 4, 5] {
+            c.review(q, now);
+            states.push(c.clone());
+        }
+        let mut forgot = Card::new("f".into(), "b".into(), "t".into(), now);
+        forgot.review(4, now);
+        forgot.review(1, now);
+        states.push(forgot);
+        states.push(Card { ease: 1.3, interval: 40.0, reps: 5, ..Card::new("f".into(), "b".into(), "t".into(), now) });
+        for s in &states {
+            let p = s.preview(now, false);
+            for (k, q) in QUALITIES.into_iter().enumerate() {
+                let mut x = s.clone();
+                x.review(q, now);
+                assert_eq!(p[k], x.due - now, "{s:?} quality {q}");
+            }
+        }
+        let new = Card::new("f".into(), "b".into(), "t".into(), now);
+        assert_eq!(new.preview(now, false), [600_000, DAY_MS / 2, DAY_MS, 4 * DAY_MS]);
+        let mut two = new;
+        two.review(4, now);
+        two.review(4, now);
+        assert_eq!(two.preview(now, false), [600_000, 7 * DAY_MS, 15 * DAY_MS, 20 * DAY_MS]);
+    }
+
+    #[test]
+    fn relearn_keeps_sm2() {
+        let now = 1_000_000;
+        let mut c = Card::new("f".into(), "b".into(), "t".into(), now);
+        c.review(4, now);
+        c.review(4, now);
+        c.review(1, now);
+        assert_eq!((c.lapses, c.reps), (1, 0));
+        assert!((c.ease - 1.96).abs() < 1e-5, "{}", c.ease);
+        let ease = c.ease;
+        for _ in 0..2 {
+            c.relearn(1, now);
+            assert_eq!((c.lapses, c.reps, c.ease, c.due), (1, 0, ease, now + 600_000));
+        }
+        let p = c.preview(now, true);
+        for (k, q) in QUALITIES.into_iter().enumerate() {
+            let mut x = c.clone();
+            x.relearn(q, now);
+            assert_eq!(p[k], x.due - now);
+        }
+        assert_eq!(c.preview(now, true), [600_000, DAY_MS / 2, DAY_MS, 4 * DAY_MS]);
+        c.relearn(4, now);
+        assert_eq!((c.reps, c.interval, c.due, c.ease, c.lapses), (1, 1.0, now + DAY_MS, ease, 1));
+        c.review(4, now);
+        assert_eq!((c.reps, c.interval), (2, 6.0));
+    }
+
+    #[test]
+    fn rate_then_undo_is_byte_identical() {
+        let root = std::env::temp_dir().join(format!("jay-study-undo-{}", id::new_id()));
+        let store = Store::open(&root).unwrap();
+        let now = now_ms();
+        let mut c = Card::new("a".into(), "b".into(), "t".into(), now - 1);
+        c.review(4, now);
+        c.review(3, now);
+        c.review(1, now);
+        c.due = now - 1;
+        let deck = Deck { id: id::new_id(), title: "Bio".into(), created: now, materials: vec![], cards: vec![c, Card::new("c".into(), "d".into(), "t".into(), now - 2)], log: vec![] };
+        store.save_deck(&deck).unwrap();
+        let path = root.join("decks").join(format!("{}.json", deck.id));
+        let bytes = std::fs::read(&path).unwrap();
+        let before = store.deck(&deck.id).unwrap();
+        store.review_card(&deck.id, 0, 4, false, 0).unwrap();
+        assert_ne!(std::fs::read(&path).unwrap(), bytes);
+        store.restore_deck(&before).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        store.delete_deck(&deck.id).unwrap();
+        assert!(matches!(store.restore_deck(&before), Err(StoreError::NotFound)));
+        assert!(!path.exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn review_log_is_bounded() {
+        let root = std::env::temp_dir().join(format!("jay-study-log-{}", id::new_id()));
+        let store = Store::open(&root).unwrap();
+        let now = now_ms();
+        let deck = Deck { id: id::new_id(), title: "Bio".into(), created: now, materials: vec![], cards: vec![Card::new("a".into(), "b".into(), "t".into(), now - 1)], log: vec![] };
+        store.save_deck(&deck).unwrap();
+        store.review_card(&deck.id, 0, 4, false, u32::MAX).unwrap();
+        assert_eq!(store.deck(&deck.id).unwrap().log[0].ms, MAX_THINK_MS);
+        // `ms` doubles as the review's number, to tell which one is first.
+        for k in 1..(MAX_LOG as u32 + 5) {
+            store.review_card(&deck.id, 0, 1, false, k).unwrap();
+        }
+        let log = store.deck(&deck.id).unwrap().log;
+        assert_eq!(log.len(), MAX_LOG);
+        assert_eq!(log[0].ms, 5);
+        assert_eq!(log[MAX_LOG - 1].ms, MAX_LOG as u32 + 4);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn old_deck_files_still_load() {
+        let root = std::env::temp_dir().join(format!("jay-study-old-{}", id::new_id()));
+        let store = Store::open(&root).unwrap();
+        let now = now_ms();
+        let deck = Deck { id: id::new_id(), title: "Bio".into(), created: now, materials: vec![], cards: vec![Card::new("a".into(), "b".into(), "t".into(), now - 1)], log: vec![] };
+        // Saved without a log, as every file was before it existed.
+        store.save_deck(&deck).unwrap();
+        let path = store.item("decks", &deck.id).unwrap();
+        let old = std::fs::read(&path).unwrap();
+        assert!(!String::from_utf8_lossy(&old).contains("\"log\""));
+        let before = store.deck(&deck.id).unwrap();
+        assert!(before.log.is_empty());
+        store.review_card(&deck.id, 0, 4, false, 1500).unwrap();
+        assert!(String::from_utf8_lossy(&std::fs::read(&path).unwrap()).contains("\"log\""));
+        store.restore_deck(&before).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), old);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -322,19 +641,72 @@ mod tests {
         let root = std::env::temp_dir().join(format!("jay-study-cards-{}", id::new_id()));
         let store = Store::open(&root).unwrap();
         let now = now_ms();
-        let deck = Deck { id: id::new_id(), title: "Bio".into(), created: now, materials: vec![], cards: vec![Card::new("a".into(), "b".into(), "Fotossíntese".into(), now - 1), Card::new("c".into(), "d".into(), "Mitose".into(), now - 2)] };
+        let deck = Deck { id: id::new_id(), title: "Bio".into(), created: now, materials: vec![], cards: vec![Card::new("a".into(), "b".into(), "Fotossíntese".into(), now - 1), Card::new("c".into(), "d".into(), "Mitose".into(), now - 2)], log: vec![] };
         store.save_deck(&deck).unwrap();
         // Weak topic first, even though the other is more overdue.
         let mut p = Profile::default();
         p.topics.insert("Fotossíntese".into(), (0.0, 3));
         store.save_profile(&p).unwrap();
-        let due = store.due_cards(&deck.id, 10).unwrap();
+        let due = store.due_cards(&deck.id, 10, false).unwrap();
         assert_eq!(due.iter().map(|c| c.topic.as_str()).collect::<Vec<_>>(), ["Fotossíntese", "Mitose"]);
-        store.review_card(&deck.id, 0, 4).unwrap();
-        assert_eq!(store.due_cards(&deck.id, 10).unwrap().len(), 1);
+        assert!(due.iter().all(|c| c.next.len() == 4));
+        let reviewed = store.review_card(&deck.id, 0, 4, false, 0).unwrap();
+        assert_eq!(reviewed.due_in, DAY_MS);
+        assert_eq!(reviewed.next.len(), 4);
+        assert_eq!(store.due_cards(&deck.id, 10, false).unwrap().len(), 1);
         assert_eq!(store.decks()[0].due, 1);
-        assert!(matches!(store.review_card(&deck.id, 9, 4), Err(StoreError::NotFound)));
+        assert!(matches!(store.review_card(&deck.id, 9, 4, false, 0), Err(StoreError::NotFound)));
         assert!(matches!(store.deck("../profile"), Err(StoreError::NotFound)));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn deck_list_counts_and_practice_pass() {
+        let root = std::env::temp_dir().join(format!("jay-study-list-{}", id::new_id()));
+        let store = Store::open(&root).unwrap();
+        let now = now_ms();
+        let cards = (0..3).map(|k| Card::new(format!("f{k}"), "b b".into(), "t".into(), now - 1)).collect();
+        let deck = Deck { id: id::new_id(), title: "Bio".into(), created: now, materials: vec![], cards, log: vec![] };
+        store.save_deck(&deck).unwrap();
+        store.review_card(&deck.id, 1, 4, false, 0).unwrap(); // good: a day out
+        store.review_card(&deck.id, 2, 1, false, 0).unwrap(); // forgotten: 10 min
+        let d = &store.decks()[0];
+        assert_eq!((d.cards, d.new, d.learned, d.due), (3, 1, 1, 1));
+        let next = d.next_due.unwrap();
+        assert!(next <= 600_000 && next > 600_000 - 5_000, "{next}");
+        let path = root.join("decks").join(format!("{}.json", deck.id));
+        let before = std::fs::read(&path).unwrap();
+        let all = store.due_cards(&deck.id, 50, true).unwrap();
+        assert_eq!(all.iter().map(|c| c.index).collect::<Vec<_>>(), [0, 1, 2]);
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn session_summary_counts_what_was_saved() {
+        let root = std::env::temp_dir().join(format!("jay-study-summary-{}", id::new_id()));
+        let store = Store::open(&root).unwrap();
+        let now = now_ms();
+        let cards = (0..3).map(|k| Card::new(format!("f{k}"), "b b".into(), "t".into(), now - 1)).collect();
+        let deck = Deck { id: id::new_id(), title: "Bio".into(), created: now, materials: vec![], cards, log: vec![] };
+        store.save_deck(&deck).unwrap();
+        store.review_card(&deck.id, 2, 4, false, 7000).unwrap(); // before the session: not counted
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        let since = now_ms();
+        store.review_card(&deck.id, 0, 1, false, 1000).unwrap();
+        store.review_card(&deck.id, 0, 4, true, 2000).unwrap();
+        store.review_card(&deck.id, 1, 5, false, 3000).unwrap();
+        store.review_card(&deck.id, 2, 3, false, 4000).unwrap();
+        let s = store.session_summary(&deck.id, since).unwrap();
+        assert_eq!(s.counts, [1, 1, 1, 1]);
+        assert_eq!(s.ms, 10_000);
+        assert_eq!(s.forgotten.len(), 1);
+        assert_eq!((s.forgotten[0].index, s.forgotten[0].next.len()), (0, 4));
+        assert_eq!(s.forgotten[0].next[0], 600_000); // the again-preview: forgot twice is still 10 min
+        assert_eq!(s.due_now, 0);
+        let next = s.next_due.unwrap();
+        assert!(next <= DAY_MS && next > DAY_MS - 60_000, "{next}");
+        assert_eq!(s.next_count, 1); // card 0 (relearned, 1 day); card 1 easy on its first pass is 4 days, card 2 hard on its second is 2
         std::fs::remove_dir_all(root).unwrap();
     }
 }

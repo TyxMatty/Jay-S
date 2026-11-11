@@ -32,11 +32,14 @@ pub struct Library {
     write: Mutex<()>,
     /// Files just dropped on the window, waiting for the page to say which zone they fell on.
     pub dropped: Mutex<Vec<PathBuf>>,
+    /// The deck as it was before the last card rating, with the card's index and whether it was a
+    /// repeat: what `card_undo` puts back.
+    pub last_review: Mutex<Option<(jay_study::cards::Deck, usize, bool)>>,
 }
 
 impl Library {
     pub fn new(store: Store) -> Self {
-        Self { store, write: Mutex::new(()), dropped: Mutex::new(Vec::new()) }
+        Self { store, write: Mutex::new(()), dropped: Mutex::new(Vec::new()), last_review: Mutex::new(None) }
     }
 
     /// Held by every command that changes a file: Tauri runs commands in parallel, and two quick

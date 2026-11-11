@@ -106,7 +106,7 @@ flowchart TD
 | DOCX (text) | `zip` + `quick-xml` (like Jay-E), only paragraph and table text | The minimum to read content and exams. |
 | Photos | **Windows OCR** (`Windows.Media.Ocr`, like Jay-E 0.2) | Ships with Windows, no extra model. Needs the Portuguese language pack (the app says so). |
 | Data | **JSON files** in the app data folder, one per item, atomic writes | One student's volume; no SQLite (C to compile, more memory). *shortcut: switch to SQLite if the library grows past a few thousand items.* |
-| Spaced repetition | **SM-2** (Anki's classic algorithm), ~30 lines | Enough and testable; FSRS later if needed. |
+| Spaced repetition | **SM-2** (Anki's classic algorithm), ~30 lines; later, with Anki's split of the passing ratings: "good" is SM-2 (1 day, 6 days, interval × ease), "hard" multiplies by 1.2 (and adds at least 1 day), "easy" is "good" × 1.3; on the first pass, 12 hours, 1 day and 4 days; a 100-year cap. The ease moves as in SM-2. | Enough and testable; FSRS later if needed. In plain SM-2, hard, good and easy gave the same next interval (only the ease changed), which the buttons made plain once they showed the interval. |
 | Exam styles | **Data files** (`presets/*.json`), read with validation like Jay-A's presets | First: ENEM (5 choices A–E, base text) and the Paraná entrance exams (UEPG, UEM, UNICENTRO…; sum-type with propositions 01, 02, 04, 08, 16, 32, 64). Essay, true/false and custom later. New style = one file. |
 | Grading | **In Rust**, from the answer key stored in the exam; the page gets a question's answer key only when it's graded (learning mode) or at the end (exam mode) | The student can't find the answer through DevTools in the middle of a mock test, and the score comes from one place. Sum-type: each entrance exam's rule comes with its style. UEPG (2025 exam instructions) gives **partial credit**: the question counts if the sum has at least one correct proposition and **no wrong one**; with a wrong one, zero. The result shows which propositions were right. |
 | Splitting questions | **Rules**, a line-by-line state machine: a header ("QUESTÃO 06") or a numbered stem ("16– …"); choices and propositions only count inside a **confirmed run** (a→b→c→d or 01→02→04, with the same mark after the label, up to 25 lines apart) | Measured on real exams: alone, "A sessão do Comitê…" (ENEM) looks like choice A, "01– Sobre o texto…" (UEPG) like proposition 01, and "32– Prática…" right after "16)" like proposition 32. Footers are short lines repeated at the edge of 3 pages or more; whatever comes before question 1 (examples in the instructions) is dropped. |
@@ -159,7 +159,7 @@ Side navigation like Jay-A: **Materials**, **Exams**, **Mock test**, **Flashcard
 │                \text.json        # extracted text, chunks, kind (content/exam), split questions
 ├─ exams\<id>.json                 # built exam: style, questions, answer key, origin of each question
 ├─ attempts\<id>.json              # attempt: answers, times, result per topic (saved on every answer)
-├─ decks\<id>.json                 # cards + SM-2 state
+├─ decks\<id>.json                 # cards + SM-2 state + the latest ratings (time, rating, time to flip)
 ├─ chats\<id>.json                 # Jay-AI conversations: chosen sources and checked turns
 ├─ profile.json                    # student profile (preferred length/tone, weak topics)
 └─ ai\                             # downloaded llama-server and model
@@ -660,6 +660,23 @@ With the rebuilt benchmark (42 questions in four groups, each setup run with see
 
 Dashes are groups the fix doesn't touch and that were not run. None went in. The relative-error question (the formula without the mean) stayed wrong in all of them. By the 10 points: none of this stayed in the code (1 to 9); the tests are the benchmark itself (10). Each one's diff was kept outside the repository.
 
+### Time per card (the flashcard review)
+
+New student data: every rating given to a card is kept in its own deck (`decks\<id>.json`, field `log`): the card's number in the deck, the time, the rating and the milliseconds from the card showing to being flipped. The page measures that time with a stopwatch that stops when the window is hidden or the student leaves the screen (the same one behind the quiet session clock, no countdown) and sends the number with the rating; the end-of-session summary reads from there. By the 10 points:
+
+1. **Attack surface.** One new field in `card_review` (`ms`, an unsigned 32-bit integer); no new command, file, network or process. The cards' text does not go into the `log`.
+2. **Access control / IDOR.** Unchanged: the deck still goes by the checked `id` and the card by the index checked in Rust (`not_found` outside the deck).
+3. **Data permissions.** The `log` lives in the deck's file, in the data folder of the Windows profile, and goes with the deck when it is deleted. It never leaves the machine.
+4. **Untrusted input.** `ms` comes from the page: `serde` refuses negatives, fractions and numbers above `u32`; the engine caps it at 10 minutes (`MAX_THINK_MS`: longer means someone walked away). The page can lie about the time, but only to itself (one user, nothing is scored against them).
+5. **Exposed credentials.** None.
+6. **Authentication.** Not applicable.
+7. **Resource abuse and races.** The `log` keeps the deck's last 2,000 ratings (`MAX_LOG`, about 120 KB; the oldest go first), so the file does not grow without bound. Writing is the same as before (one per rating, atomic, under the write lock). Undo writes back the whole deck as it was, `log` included.
+8. **Dependency chain.** Nothing new.
+9. **Network and exposure.** Nothing new.
+10. **Adversarial tests.** `review_log_is_bounded` (an `ms` of `u32::MAX` becomes 10 minutes; after 2,005 ratings 2,000 remain, the latest), `old_deck_files_still_load` (a deck written before this change, without `log`, opens; rating and undoing gives back the file byte for byte, without an empty `"log"`), `rate_then_undo_is_byte_identical`. A deck never rated is written as before (an empty `log` is not written).
+
+**Limits:** the time is measured in the page (Rust checks only the format and the cap). The stopwatch checks once a second whether the screen is visible, so up to 1 s off screen can count.
+
 ## 8. Stages
 
 Each stage ends with something testable; at the end of each one: commit, summary, and the question whether to go on to the next.
@@ -671,7 +688,7 @@ Each stage ends with something testable; at the end of each one: commit, summary
 | 2 ✅ | Jay-AI (spike S1): download with SHA-256 and resume, start/stop on demand, close when idle, JSON with schema, Stop; the Jay-AI section and the pill | app memory measured before/during/after (RNF-1); `fetch` without the key gives 401; a request with a schema returns valid JSON |
 | 3 ✅ | Exams: split an exam's questions; build in modes 1 and 2; ENEM and Paraná styles (UEPG/UEM/UNICENTRO, sum-type) | 10 ENEM questions from a handout; a UEPG exam reused with 5 new questions from the content; prompt injection in a PDF shows up as text |
 | 4 ✅ | Take the exam in the app (X and sum-type), exam mode and learning mode; mock test with a timer; saved on every answer; result per topic | in exam mode no answer key reaches the page before the end (checked through DevTools); in learning mode each answer is graded at once; sum 01+04+16 = 21 graded right; killing the app midway and reopening keeps the answers |
-| 5 ✅ | Flashcards: generate, SM-2, rate the card, weak topics first | the SM-2 interval matches the reference table in the tests |
+| 5 ✅ | Flashcards: generate, SM-2, rate the card, weak topics first | the interval matches the reference table in the tests (`schedule_matches_the_reference`: SM-2 on "good", Anki's split on "hard" and "easy"), and hard < good < easy in every state (`hard_good_easy_keep_their_order_and_never_shrink`) |
 | 6 ✅ | Profile and adaptation: learned length and tone, mock test analysis feeding cards and exams | after 10 "too long" ratings, new cards get shorter (measured in characters) |
 | 7 | Release: NSIS installer, Jay-S in Jay-H, CI with tests, audits and the adversarial tests; then the Jay-I setup as the release file and self-update through the `jay-i` crate (section 7, "The Jay-I setup and self-update") | install on a test account; Jay-H installs and updates Jay-S; Jay-S updates itself from a newer release |
 | 8 ✅ | Training: content-vs-exam classifier. (a) ✅ export to CSV the signals `classify.rs` computes (`examples/signals.rs`); the set ✅ (370 files under 5 labels; 228 in the measures up to the sum-type answer key, outside the repository; `ml/sources.csv`, `ml/sha256.txt`, `ml/signals.csv`); (b) ✅ `ml/train.py`: Python + scikit-learn, 5 folds by edition (the `source-year` prefix of the file name), fixed seeds, compared with the rules (`ml/results.txt`): 210 to 213 of 228 against the rules' 196, but the gain is the sum-type answer keys, found by size; on the other 192 files the rules tie or win; `parse_answer_key` ✅ learned the sum-type answer keys (UEM, UEPG): rules at 218 of 228, 36 of 36 keys, and no model passes them in any split; with the enlarged set ✅ (ENCCEJA, more Wikipedia and Wikibooks), rules 316 of 370, logistic 325, tree 324: the models' gain is 12 exams with fonts that have no Unicode mapping (only the question headers were read) and 4 answer keys that are images; the headers rule ✅ (20 question headers or more, dense, and fewer than 3 questions read → exam, unsure) takes the rules to 329 of 370; (c) ✅ decided: the weights do not go into the app and the rules stay (the logistic passes them in 4 of 11 splits, by 1 to 3 files, and gets wrong 15 they get right); in the review ✅, the `longest_prose` signal and the handout rules take the rules to 340 of 370, above both models in the 11 splits | on a test set the model hasn't seen, precision, recall and confusion matrix measured next to the rules' (a tie is a valid result); the app's installer and RAM unchanged (RNF-1, RNF-2) |
