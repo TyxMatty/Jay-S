@@ -1320,6 +1320,10 @@ fieldset > h3 {
   padding-left: 20px;
 }
 
+.analysis > .btn {
+  margin-top: var(--space-2);
+}
+
 .analysis .spinner {
   display: inline-block;
   vertical-align: middle;

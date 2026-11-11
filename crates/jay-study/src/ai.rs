@@ -79,6 +79,8 @@ pub enum AiError {
     Start(String),
     /// The model's reply was cut, too long or not what was asked.
     BadReply(String),
+    /// The request didn't fit the server's context (it answers HTTP 400).
+    TooLong,
     Io(String),
 }
 
@@ -400,7 +402,11 @@ impl Server {
             .timeout_global(Some(Duration::from_secs(900)))
             .build()
             .send_json(&body)
-            .map_err(|e| AiError::BadReply(e.to_string()))?;
+            .map_err(|e| match e {
+                // shortcut: every 400 is read as "too long" (the one measured: a prompt past the context); a bad schema would be mislabelled, read the body if that ever shows up.
+                ureq::Error::StatusCode(400) => AiError::TooLong,
+                e => AiError::BadReply(e.to_string()),
+            })?;
         let reader = BufReader::new(response.into_body().into_with_config().limit(64 << 20).reader());
         let mut text = String::new();
         let mut finished = None;

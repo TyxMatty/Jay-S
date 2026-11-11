@@ -82,6 +82,7 @@ export default {
   "Download Jay-AI first (Jay-AI section).": "Baixe o Jay-AI primeiro (seção Jay-AI).",
   "Jay-AI couldn't start ({detail}).": "O Jay-AI não conseguiu iniciar ({detail}).",
   "Jay-AI answered something unexpected. Try again.": "O Jay-AI respondeu algo inesperado. Tente de novo.",
+  "This was too much for Jay-AI to read at once.": "Isso foi coisa demais para o Jay-AI ler de uma vez.",
   "A download is already running.": "Já tem um download em andamento.",
   "Something went wrong ({detail}).": "Algo deu errado ({detail}).",
   "Standard": "Padrão",

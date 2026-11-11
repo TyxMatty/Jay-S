@@ -273,9 +273,17 @@ export function createResult(attempt, questions, { onBack }) {
   renderAnalysis(attempt.analysis);
   // An attempt that ended while Jay-S was busy with something else (or before Jay-AI was there)
   // was never sent: ask again when this opens, when the other job ends, when Jay-AI gets ready.
-  const ask = () => !analyzed && aiReady() && invoke('attempt_analyze').catch(() => {});
+  // After an error nothing asks again by itself (each run changes the Jay-AI status and the jobs,
+  // which would bring the spinner back and fail again, forever): only the Try again button does.
+  let failed = false;
+  const ask = () => !analyzed && !failed && aiReady() && invoke('attempt_analyze').catch(() => {});
   ask();
-  const unwatch = attempt.analysis ? null : onAiStatus(() => !analyzed && (renderAnalysis(null), ask()));
+  const unwatch = attempt.analysis ? null : onAiStatus(() => !analyzed && !failed && (renderAnalysis(null), ask()));
+  const retry = () => {
+    failed = false;
+    renderAnalysis(null);
+    ask();
+  };
   const stop = attempt.analysis
     ? null
     : listen('study-job', async (e) => {
@@ -285,7 +293,8 @@ export function createResult(attempt, questions, { onBack }) {
           const [fresh] = await invoke('attempt_result', { id: attempt.id });
           renderAnalysis(fresh.analysis);
         } else if (e.state === 'error') {
-          analysis.replaceChildren(h('p', { class: 'hint', 'data-tone': 'error' }, studyFailureText(e.error)));
+          failed = true;
+          analysis.replaceChildren(h('p', { class: 'hint', 'data-tone': 'error' }, studyFailureText(e.error)), h('button', { type: 'button', class: 'btn btn-secondary', onClick: retry }, t('Try again')));
         }
       });
 
