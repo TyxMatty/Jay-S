@@ -304,6 +304,10 @@ fn option_text(line: &str) -> String {
     t[skip..].trim_start().trim_start_matches([')', '.', '-', '–', '—']).trim().to_owned()
 }
 
+/// Bump it when `split_questions` changes what it produces: catalogue exams stored with an older
+/// version are re-split in place (catalog.rs).
+pub const SPLIT_VERSION: u32 = 1;
+
 /// The questions of an exam's text, in order. Lines that aren't part of a recognized question (cover
 /// pages, instructions) are left out.
 pub fn split_questions(text: &str) -> Vec<Question> {

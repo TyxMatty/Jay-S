@@ -179,6 +179,8 @@ pub fn catalog_get(app: AppHandle, id: String) -> Result<(), Failure> {
 
 #[tauri::command]
 pub fn exams_list(library: State<Library>) -> Vec<ExamSummary> {
+    // Rebuilds catalogue exams of an older split first (offline), so Exams and Mock test open the new one.
+    library.store.catalog();
     library.store.exams()
 }
 
