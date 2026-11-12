@@ -312,6 +312,9 @@ pub struct CatalogItem {
 struct Record {
     material: String,
     exam: String,
+    /// `exam::SPLIT_VERSION` the exam was split with (missing = 0 = before it existed).
+    #[serde(default)]
+    split: u32,
 }
 
 impl Store {
@@ -319,10 +322,17 @@ impl Store {
         self.root().join("catalog")
     }
 
-    /// The exam built from `entry`, if it still exists (the student may have deleted it).
+    /// The exam built from `entry`, if it still exists (the student may have deleted it). One made
+    /// by an older split is rebuilt in place first (offline; see `rebuild_catalog_exam`).
     fn catalog_exam(&self, entry: &Entry) -> Option<String> {
-        let record: Record = read_json(&self.catalog_dir().join(format!("{}.json", entry.id))).ok()?;
-        self.exam(&record.exam).ok().map(|e| e.id)
+        let path = self.catalog_dir().join(format!("{}.json", entry.id));
+        let record: Record = read_json(&path).ok()?;
+        let exam = self.exam(&record.exam).ok()?;
+        let id = exam.id.clone();
+        if record.split < exam::SPLIT_VERSION {
+            let _ = self.rebuild_catalog_exam(entry, &record, exam, &path);
+        }
+        Some(id)
     }
 
     pub fn catalog(&self) -> Vec<CatalogItem> {
@@ -378,7 +388,8 @@ impl Store {
         built
     }
 
-    fn build_catalog_exam(&self, entry: &Entry, material: &str) -> Result<String, BuildError> {
+    /// `entry`'s questions split from `material`'s text, numbered 1..=N, sourced and with the key.
+    fn catalog_questions(&self, entry: &Entry, material: &str) -> Result<Vec<Question>, BuildError> {
         let all = exam::split_questions(&self.text(material, usize::MAX)?);
         let mut questions = entry.keep_language(all);
         if questions.iter().map(|q| q.number).ne(1..=entry.questions) {
@@ -390,9 +401,41 @@ impl Store {
         if entry.apply(&mut questions) != entry.answers.len() {
             return Err(BuildError::Empty);
         }
+        Ok(questions)
+    }
+
+    /// Re-splits a stored catalogue exam made by an older `split_questions`, from the material's
+    /// `text.txt` (no network, no PDF extraction). Any doubt leaves the stored exam untouched: the
+    /// material's PDF must still be the catalogue file, and the new split must have the same count.
+    fn rebuild_catalog_exam(&self, entry: &Entry, record: &Record, mut exam: Exam, record_path: &std::path::Path) -> Option<()> {
+        use sha2::{Digest, Sha256};
+        // `original` checks the material id (a hostile one is NotFound).
+        let bytes = std::fs::read(self.original(&record.material).ok()?.0).ok()?;
+        if id::hex(&Sha256::digest(&bytes)) != entry.download.sha256 {
+            return None;
+        }
+        let mut questions = self.catalog_questions(entry, &record.material).ok()?;
+        if questions.len() != exam.questions.len() {
+            return None;
+        }
+        // Numbers are exactly 1..=N on both sides, so index i is still question i+1 and the
+        // attempts' per-index answers, times and results stay valid: attempt files are not touched.
+        // Nothing sets topic/explanation on a catalogue exam today (only the Jay-AI build path does),
+        // but keep them if present.
+        for (new, old) in questions.iter_mut().zip(exam.questions.drain(..)) {
+            new.topic = new.topic.take().or(old.topic);
+            new.explanation = new.explanation.take().or(old.explanation);
+        }
+        exam.questions = questions;
+        self.save_exam(&exam).ok()?;
+        write_json(record_path, &Record { material: record.material.clone(), exam: record.exam.clone(), split: exam::SPLIT_VERSION }).ok()
+    }
+
+    fn build_catalog_exam(&self, entry: &Entry, material: &str) -> Result<String, BuildError> {
+        let questions = self.catalog_questions(entry, material)?;
         let exam = Exam { id: id::new_id(), title: entry.title.to_owned(), style: entry.style.to_owned(), created: now_ms(), questions, materials: vec![material.to_owned()] };
         self.save_exam(&exam)?;
-        let record = write_json(&self.catalog_dir().join(format!("{}.json", entry.id)), &Record { material: material.to_owned(), exam: exam.id.clone() });
+        let record = write_json(&self.catalog_dir().join(format!("{}.json", entry.id)), &Record { material: material.to_owned(), exam: exam.id.clone(), split: exam::SPLIT_VERSION });
         if let Err(e) = record {
             let _ = self.delete_exam(&exam.id);
             return Err(StoreError::from(e).into());
@@ -535,7 +578,7 @@ mod tests {
         assert!(items.iter().all(|i| i.official_key && i.state == CatalogState::NotDownloaded));
         // A record pointing at an exam that is gone is not ready.
         std::fs::create_dir_all(root.join("catalog")).unwrap();
-        write_json(&root.join("catalog/uepg-2025-grupo-1.json"), &Record { material: id::new_id(), exam: id::new_id() }).unwrap();
+        write_json(&root.join("catalog/uepg-2025-grupo-1.json"), &Record { material: id::new_id(), exam: id::new_id(), split: 0 }).unwrap();
         assert_eq!(store.catalog()[0].state, CatalogState::NotDownloaded);
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -581,6 +624,99 @@ mod tests {
         }
         // Eight exams from seven materials (the two Conhecimentos Gerais entries share one file).
         assert_eq!((store.exams().len(), store.materials().len()), (8, 7));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    fn plain_question(number: u32) -> Question {
+        Question { number, kind: exam::QuestionKind::Sum, passage: None, stem: "stem".into(), options: vec![], answer: None, answer_by_ai: false, topic: None, explanation: None, source: None, annulled: false, void: 0, pages: None }
+    }
+
+    /// Adversarial: an old record whose material is not the catalogue file (or has a hostile id)
+    /// rebuilds nothing, writes nothing and does not panic; the exam stays listed.
+    #[test]
+    fn an_old_record_over_the_wrong_file_is_left_alone() {
+        let (store, root) = temp_store();
+        let e = entry("uepg-2025-grupo-1");
+        // A material that is not the catalogue's PDF.
+        let m = store.import_bytes("x.txt", extract::Format::Text, b"1. a\n".to_vec()).unwrap();
+        let exam = Exam { id: id::new_id(), title: e.title.into(), style: e.style.into(), created: 1, questions: (1..=e.questions).map(plain_question).collect(), materials: vec![m.id.clone()] };
+        store.save_exam(&exam).unwrap();
+        let exam_path = root.join("exams").join(format!("{}.json", exam.id));
+        let record_path = root.join("catalog").join(format!("{}.json", e.id));
+        std::fs::create_dir_all(record_path.parent().unwrap()).unwrap();
+        let (exam_bytes, before) = (std::fs::read(&exam_path).unwrap(), tree(&root));
+        for material in [m.id.as_str(), "..\\x", "../x", "C:\\Windows\\win.ini", "/etc/passwd", &id::new_id()] {
+            write_json(&record_path, &Record { material: material.to_owned(), exam: exam.id.clone(), split: 0 }).unwrap();
+            let record_bytes = std::fs::read(&record_path).unwrap();
+            assert_eq!(store.catalog()[0].state, CatalogState::Ready { exam: exam.id.clone() }, "{material:?}");
+            assert_eq!(store.get_ready_made(e.id, &mut |_, _| panic!("downloading"), &AtomicBool::new(false)).unwrap(), exam.id);
+            assert_eq!(std::fs::read(&exam_path).unwrap(), exam_bytes, "{material:?}");
+            assert_eq!(std::fs::read(&record_path).unwrap(), record_bytes, "{material:?}");
+        }
+        // Only the record the test wrote: no new file anywhere.
+        let mut want = before;
+        want.push(std::path::Path::new("catalog").join("uepg-2025-grupo-1.json").to_string_lossy().into_owned());
+        want.sort();
+        assert_eq!(tree(&root), want);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Needs the local dataset: `JAYS_DATASET=<folder with exam_sum/> cargo test catalog -- --ignored --nocapture`.
+    /// Exams stored the old way (no pages, no passages, no split version) are rebuilt in place by
+    /// `catalog()` or `get_ready_made`, offline, and a finished attempt on them stays untouched.
+    #[test]
+    #[ignore]
+    fn old_catalogue_exams_are_rebuilt_in_place() {
+        let dir = std::env::var("JAYS_DATASET").expect("JAYS_DATASET");
+        let (store, root) = temp_store();
+        let cancel = AtomicBool::new(false);
+        for e in &ENTRIES {
+            let part = root.join("catalog").join(format!("{}.part", e.id));
+            std::fs::create_dir_all(part.parent().unwrap()).unwrap();
+            std::fs::copy(format!("{dir}/exam_sum/{}", e.download.file), &part).unwrap();
+            store.get_ready_made(e.id, &mut |_, _| {}, &cancel).unwrap();
+        }
+        for (n, e) in ENTRIES.iter().enumerate() {
+            let record_path = root.join("catalog").join(format!("{}.json", e.id));
+            let record: Record = read_json(&record_path).unwrap();
+            assert_eq!(record.split, exam::SPLIT_VERSION);
+            let fresh = store.exam(&record.exam).unwrap();
+            // The old shape: no page ranges, no base texts, a record without the version.
+            let mut old = fresh.clone();
+            old.questions.iter_mut().for_each(|q| (q.pages, q.passage) = (None, None));
+            store.save_exam(&old).unwrap();
+            let mut raw: serde_json::Value = serde_json::from_slice(&std::fs::read(&record_path).unwrap()).unwrap();
+            raw.as_object_mut().unwrap().remove("split");
+            std::fs::write(&record_path, serde_json::to_vec(&raw).unwrap()).unwrap();
+            let (attempt, _) = store.start_attempt(&fresh.id, crate::records::Mode::Exam, None).unwrap();
+            for i in [0, 3, 9] {
+                store.answer(&attempt.id, i, Some("01".into()), 1500).unwrap();
+            }
+            store.finish_attempt(&attempt.id).unwrap();
+            let attempt_path = root.join("attempts").join(format!("{}.json", attempt.id));
+            let attempt_bytes = std::fs::read(&attempt_path).unwrap();
+
+            // Even entries through catalog(), odd ones through get_ready_made: neither may download.
+            let id = if n % 2 == 0 {
+                match store.catalog().into_iter().find(|i| i.id == e.id).unwrap().state {
+                    CatalogState::Ready { exam } => exam,
+                    s => panic!("{}: {s:?}", e.id),
+                }
+            } else {
+                store.get_ready_made(e.id, &mut |_, _| panic!("downloading"), &cancel).unwrap()
+            };
+            let rebuilt = store.exam(&id).unwrap();
+            assert_eq!((rebuilt.id.as_str(), rebuilt.questions.len(), rebuilt.created), (fresh.id.as_str(), fresh.questions.len(), fresh.created), "{}", e.id);
+            assert_eq!(serde_json::to_string(&rebuilt).unwrap(), serde_json::to_string(&fresh).unwrap(), "{}: not equal to a fresh build", e.id);
+            assert_eq!(std::fs::read(&attempt_path).unwrap(), attempt_bytes, "{}: attempt changed", e.id);
+            let loaded = store.attempt(&attempt.id).unwrap();
+            assert_eq!(loaded.result.as_ref().unwrap().questions.len(), rebuilt.questions.len());
+            assert_eq!(read_json::<Record>(&record_path).unwrap().split, exam::SPLIT_VERSION);
+            let count = |x: &Exam| (x.questions.iter().filter(|q| q.pages.is_some()).count(), x.questions.iter().filter(|q| q.passage.is_some()).count());
+            println!("{}: {} questions; with pages / with passage: before {:?}, after {:?}; attempt untouched, result graded {} questions", e.id, rebuilt.questions.len(), count(&old), count(&rebuilt), loaded.result.unwrap().questions.len());
+            // A second call has nothing left to do.
+            assert_eq!(store.get_ready_made(e.id, &mut |_, _| panic!("downloading"), &cancel).unwrap(), id);
+        }
         std::fs::remove_dir_all(root).unwrap();
     }
 

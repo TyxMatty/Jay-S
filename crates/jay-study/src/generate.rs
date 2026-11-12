@@ -316,7 +316,7 @@ pub fn focuses(chunk: &str) -> Vec<String> {
 }
 
 /// The most characters of a question's base text that go to the model.
-const MAX_PASSAGE_CHARS: usize = 4000;
+pub(crate) const MAX_PASSAGE_CHARS: usize = 4000;
 
 /// A question as plain text (base text, stem, options), for prompts.
 pub fn question_text(q: &Question) -> String {
