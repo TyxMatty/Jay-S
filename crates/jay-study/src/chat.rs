@@ -709,10 +709,6 @@ fn asks_test_decision(message: &str) -> bool {
         })
 }
 
-/// A message that asks for a test decision with data in it is a calculation, also when it asks for
-/// more ("resuma a aula e aplique nesta questão"): the classifier said `material` for all of those,
-/// and the decision step only exists on the calc route. Only material and follow-up become `Calc`;
-/// app, talk and general keep their route, and a request for code is never a calculation.
 /// The one fixed sentence a test-decision problem gets when the calc route could not stand and the
 /// message fell back to another route (`kind` is then not Calc). Never model text.
 fn calc_failed_note(tried: bool, kind: Kind, lang: Lang) -> Option<Sentence> {
@@ -726,11 +722,38 @@ fn calc_failed_note(tried: bool, kind: Kind, lang: Lang) -> Option<Sentence> {
     Some(Sentence { text: text.into(), sources: vec![], status: Status::Plain })
 }
 
+/// A message that asks for a test decision with data in it is a calculation, also when it asks for
+/// more ("resuma a aula e aplique nesta questão"): the classifier said `material` for all of those,
+/// and the decision step only exists on the calc route. Only material and follow-up become `Calc`;
+/// app, talk and general keep their route, and a request for code is never a calculation.
 fn problem_intent(intent: Intent, problem: bool, asks_code: bool) -> Intent {
     match intent {
         Intent::Material | Intent::FollowUp if problem && !asks_code => Intent::Calc,
         other => other,
     }
+}
+
+/// The student's own message also asks for a summary or an explanation of the material ("pode
+/// resumir a aula 18 … e como aplicar nessa questão"), next to the problem.
+/// shortcut: words on the whole message, the problem's own text included; a problem that says
+/// "explain" would also match, and the material answer is then one more block. Upgrade when measured.
+fn asks_summary(message: &str) -> bool {
+    overview(message) || ["expliq", "explain"].iter().any(|w| norm(message).contains(w))
+}
+
+/// The calc reply, then the material answer after it, as one reply. The kind stays `Calc`: the page
+/// draws one badge per reply, and "Computed by the app" is the one that must not be lost (the
+/// material sentences keep their own per-sentence "Not confirmed" label and source chips). The
+/// material sources follow the calc ones, so their numbers (and the sentences' indices) shift.
+fn merged(calc: Reply, material: Reply) -> Reply {
+    let off = calc.sources.len();
+    let mut sentences = calc.sentences;
+    sentences.extend(material.sentences.into_iter().map(|s| Sentence { sources: s.sources.iter().map(|n| n + off).collect(), ..s }));
+    let mut sources = calc.sources;
+    sources.extend(material.sources.into_iter().map(|s| Source { n: s.n + off, ..s }));
+    let checks = Checks { retried: calc.checks.retried || material.checks.retried, second_reading: calc.checks.second_reading || material.checks.second_reading, rejected_quotes: calc.checks.rejected_quotes + material.checks.rejected_quotes };
+    // `list` is the calc reply's (its steps); the page draws the material sentences as items then.
+    Reply { kind: Kind::Calc, sentences, sources, checks, list: calc.list, go: None, code: None }
 }
 
 /// A request for code is never about the app or a calculation, and with no sources chosen it is not
@@ -1550,10 +1573,13 @@ impl Store {
         if let Some(u) = understood.as_mut().filter(|u| u.intent == Intent::Talk && (!talk_allowed(&question) || (correcting && !talk_allowed(&u.question)))) {
             u.intent = Intent::General;
         }
+        let mut summary_too = false;
         if let Some(u) = understood.as_mut() {
             u.asks_code |= names_code(&question);
             u.intent = code_intent(u.intent, u.asks_code, c.scope.is_empty());
+            let before = u.intent;
             u.intent = problem_intent(u.intent, asks_test_decision(&question), u.asks_code);
+            summary_too = before != u.intent && !c.scope.materials.is_empty() && asks_summary(&question);
         }
         let asks_code = understood.as_ref().is_some_and(|u| u.asks_code && u.intent == Intent::General);
         if let Some(u) = understood.as_mut().filter(|u| u.intent == Intent::Calc && !has_numbers(&question, &u.question)) {
@@ -1596,7 +1622,19 @@ impl Store {
             None
         };
         let mut reply = if let Some(r) = computed {
-            r
+            // The summary asked for next to the problem: the material route runs after the calc one
+            // (a call of its own, with its own budget). It fails or finds nothing: the calc reply alone.
+            if summary_too && !app && !outside_sources(&c.scope, &passages) {
+                match self.grounded_reply(&c, &question, rewritten, with_history, previous.as_deref(), &passages, general, app, asks_code && general, lang, server, cancel) {
+                    // Unknown: nothing confirmed (seen: a summary whose quotes all failed); its sentences
+                    // still come, each with its own "not confirmed" label.
+                    Ok(m) if matches!(m.kind, Kind::Material | Kind::Unknown) && m.sentences.iter().any(|s| !about_sources(&s.text)) => merged(r, Reply { sentences: m.sentences.into_iter().filter(|s| !about_sources(&s.text)).collect(), ..m }),
+                    Err(BuildError::Ai(AiError::Cancelled)) => return Err(AiError::Cancelled.into()),
+                    _ => r,
+                }
+            } else {
+                r
+            }
         } else if talk {
             self.talk_reply(&c, &question, previous.as_deref(), lang, server, cancel)?
         } else if !app && outside_sources(&c.scope, &passages) {
@@ -2033,6 +2071,27 @@ mod tests {
         assert_eq!(serde_json::from_str::<Reply>(&hostile).unwrap().go.as_deref(), Some("../x"));
         let long = format!("{base},\"go\":\"{}\"}}", "a".repeat(100_000));
         assert_eq!(serde_json::from_str::<Reply>(&long).unwrap().go.unwrap().len(), 100_000);
+    }
+
+    #[test]
+    fn a_summary_next_to_the_problem_is_merged_after_the_calc_sentences() {
+        for q in ["Pode resumir a aula 18 para mim, e como aplicar nessa questão: α = 5%", "Explique a aula e rejeite H0 a 5%?", "summarize lesson 3, then test at the 5% level", "Faça um resumo e resolva: n=10, alfa 0,05"] {
+            assert!(asks_summary(q), "{q}");
+        }
+        for q in ["então, responda:\nX: n=10, média 5; rejeito H0 a 5%?", "Rejeito H0 com alfa 0,05?", "Qual o valor crítico?"] {
+            assert!(!asks_summary(q), "{q}");
+        }
+        let s = |t: &str, sources: &[usize], status| Sentence { text: t.into(), sources: sources.to_vec(), status };
+        let src = |n: usize, l: &str| Source { n, label: l.into(), quotes: vec![format!("q{n}")], key: None };
+        let calc = Reply { kind: Kind::Calc, sentences: vec![s("z = 1,46", &[1], Status::Confirmed), s("Não rejeita.", &[], Status::Plain)], sources: vec![src(1, "A")], checks: Checks { retried: false, second_reading: false, rejected_quotes: 1 }, list: true, go: None, code: None };
+        let material = Reply { kind: Kind::Material, sentences: vec![s("Resumo um.", &[1, 2], Status::Confirmed), s("Resumo dois.", &[2], Status::Unconfirmed)], sources: vec![src(1, "B"), src(2, "C")], checks: Checks { retried: true, second_reading: true, rejected_quotes: 2 }, list: false, go: None, code: None };
+        let m = merged(calc, material);
+        assert_eq!((m.kind, m.list), (Kind::Calc, true));
+        assert_eq!(m.sentences.iter().map(|x| x.text.as_str()).collect::<Vec<_>>(), ["z = 1,46", "Não rejeita.", "Resumo um.", "Resumo dois."]);
+        assert_eq!(m.sentences.iter().map(|x| x.sources.clone()).collect::<Vec<_>>(), [vec![1], vec![], vec![2, 3], vec![3]]);
+        assert_eq!(m.sentences.iter().map(|x| x.status).collect::<Vec<_>>(), [Status::Confirmed, Status::Plain, Status::Confirmed, Status::Unconfirmed]);
+        assert_eq!(m.sources.iter().map(|x| (x.n, x.label.as_str(), x.quotes[0].as_str())).collect::<Vec<_>>(), [(1, "A", "q1"), (2, "B", "q1"), (3, "C", "q2")]);
+        assert_eq!((m.checks.retried, m.checks.second_reading, m.checks.rejected_quotes), (true, true, 3));
     }
 
     #[test]
