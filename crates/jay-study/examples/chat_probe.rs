@@ -39,6 +39,10 @@ const ENGLISH: [&str; 7] = ["hi, how are you?", "can I call you Matty?", "what's
 /// responda:" (newline between the lead-in and the problem, as a paste would have it).
 const PROBLEM_TEXT: &str = "Dez estudantes da área de informática da faculdade X foram entrevistados quanto ao tempo de uso de Internet. A média de uso de Internet dessa amostra foi de 6 horas por dia. Sabe-se que o desvio padrão de tempo de uso de Internet dessa população é de 2 horas por dia. Depois, 15 estudantes da área de informática da faculdade Y foram entrevistados quanto ao tempo de uso de Internet. A média de uso de Internet dessa amostra foi de 5 horas por dia. Sabe-se que o desvio padrão de tempo de uso de Internet dessa população é de 1 hora por dia. Há diferença de média de uso de Internet, ao nível de α=5%?";
 
+/// A two-sample z test asked in English, in a chat scoped to an English handout: every sentence must
+/// come back in English, and the decision is the engine's (z = 2.0062 >= 1.96: reject H0).
+const EN_PROBLEM: [&str; 1] = ["Two independent samples: group A has n = 40, mean 72.5 and standard deviation 8; group B has n = 50, mean 68.9 and standard deviation 9. At the 5% significance level, is there a difference between the means? Should I reject H0?"];
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let root = std::env::temp_dir().join(format!("jay-s-chat-probe-{}", jay_study::id::new_id()));
@@ -65,10 +69,12 @@ fn main() {
 {PROBLEM_TEXT}")];
     let problem: Vec<&str> = problem.iter().map(String::as_str).collect();
     let scoped = Scope { materials: materials.clone(), attempt: None };
-    let chats = [(Scope { materials, attempt: None }, &SCOPED[..]), (Scope::default(), &GENERAL[..]), (Scope::default(), &PERSONAL[..]), (Scope::default(), &MIXED[..]), (Scope::default(), &ENGLISH[..]), (scoped, &problem[..])];
+    let en_scoped = Scope { materials: materials.clone(), attempt: None };
+    let chats = [(Scope { materials, attempt: None }, &SCOPED[..]), (Scope::default(), &GENERAL[..]), (Scope::default(), &PERSONAL[..]), (Scope::default(), &MIXED[..]), (Scope::default(), &ENGLISH[..]), (scoped, &problem[..]), (en_scoped, &EN_PROBLEM[..])];
     // Only one conversation, for repeated runs: PROBE_GENERAL=1 (the second), PROBE_PERSONAL=1 (the
-    // third), PROBE_MIXED=1 (the fourth), PROBE_ENGLISH=1 (the fifth), PROBE_PROBLEM=1 (the sixth).
-    let only = [("PROBE_GENERAL", 1), ("PROBE_PERSONAL", 2), ("PROBE_MIXED", 3), ("PROBE_ENGLISH", 4), ("PROBE_PROBLEM", 5)].iter().find(|(v, _)| std::env::var_os(v).is_some()).map(|&(_, i)| i);
+    // third), PROBE_MIXED=1 (the fourth), PROBE_ENGLISH=1 (the fifth), PROBE_PROBLEM=1 (the sixth),
+    // PROBE_EN_PROBLEM=1 (the seventh; pass the English handout as the file).
+    let only = [("PROBE_GENERAL", 1), ("PROBE_PERSONAL", 2), ("PROBE_MIXED", 3), ("PROBE_ENGLISH", 4), ("PROBE_PROBLEM", 5), ("PROBE_EN_PROBLEM", 6)].iter().find(|(v, _)| std::env::var_os(v).is_some()).map(|&(_, i)| i);
     for (i, (scope, questions)) in chats.into_iter().enumerate() {
         if only.is_some_and(|o| o != i) {
             continue;

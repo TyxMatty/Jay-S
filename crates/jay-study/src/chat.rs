@@ -1309,6 +1309,13 @@ fn calc_steps(reply: &Value, question: &str, passages: &[Passage], lang: Lang) -
             if texto.is_empty() {
                 return None;
             }
+            // A step that only announces the critical value, computing and stating nothing (the "5%" is
+            // the question's): the engine's comparison line already shows that value, so the step goes.
+            // shortcut: only the critical value is recognised; a step announcing another value with nothing computed still shows. Upgrade when one is seen.
+            let folded = norm(&texto);
+            if conta.is_empty() && (folded.contains("valor critico") || folded.contains("critical value")) && numbers(&texto).is_subset(&numbers(question)) {
+                return None;
+            }
             let own = numbers(conta);
             let wrote_result = numbers(&texto).iter().any(|n| !n.is_empty() && !known.contains(n) && !own.contains(n));
             let (text, computed) = match (conta.is_empty(), calc::eval(conta)) {
@@ -1354,12 +1361,21 @@ fn calc_ask(question: &str, rewritten: &str, passages: &[Passage], facts: &Facts
     let full = if norm(rewritten) == norm(question) { String::new() } else { format!("Pergunta completa, pelo contexto: <pergunta>{}</pergunta>\n", data(rewritten)) };
     format!(
         "Há uma conta a fazer. Se os trechos trazem a fórmula, use a deles e diga num passo qual é; senão, use a fórmula que você conhece e diga isso. Em 'plano', antes, anote em poucas palavras a fórmula, os dados da pergunta e os passos; o aluno não vê o plano. \
-         Em 'passos' (de 1 a 6), cada passo tem 'texto', uma explicação curta SEM escrever nenhum resultado nem número de passo, e 'conta', uma expressão aritmética completa com os números (só números, + - * / ^, sqrt(), teto(), parênteses; vírgula decimal vale; sem letras, sem '=' e sem resultado). O app calcula cada 'conta' e mostra o resultado depois do 'texto', então termine o 'texto' com ':' quando houver conta. Cada 'conta' vale sozinha, sem usar o resultado de outro passo: o arredondamento para cima final é teto(<a expressão inteira>). Um tamanho de amostra é sempre arredondado para cima: o último passo é teto(<a expressão inteira>). 'conta' fica vazia num passo que só explica. Não escreva 'trecho' no texto. Se a pergunta é um teste de hipótese ou pergunta se há diferença ou efeito ao nível de α, preencha também 'decisao' (depois dos passos), e a conclusão do teste vai só nela, não nos passos: 'passo_da_estatistica' é a posição (1 a 6) do passo cuja 'conta' calcula a estatística do teste, 'critico' é uma expressão como as de 'conta' com o valor crítico do nível pedido, escrito como a tabela ou os trechos o trazem, 'cauda' é 'bilateral', 'direita' ou 'esquerda' (a hipótese alternativa: diferente, maior ou menor), e 'se_rejeita' e 'se_nao_rejeita' são as duas conclusões possíveis, cada uma uma frase completa e afirmativa (não condicional), SEM números; o app compara a estatística com o crítico e escolhe a conclusão, então não diga qual vale. Sem teste de hipótese, omita 'decisao'. Responda na língua da pergunta.\n{}{}{full}<pergunta>{}</pergunta>{}",
+         {english}Em 'passos' (de 1 a 6), cada passo tem 'texto', uma explicação curta SEM escrever nenhum resultado nem número de passo, e 'conta', uma expressão aritmética completa com os números (só números, + - * / ^, sqrt(), teto(), parênteses; vírgula decimal vale; sem letras, sem '=' e sem resultado). O app calcula cada 'conta' e mostra o resultado depois do 'texto', então termine o 'texto' com ':' quando houver conta. Cada 'conta' vale sozinha, sem usar o resultado de outro passo: o arredondamento para cima final é teto(<a expressão inteira>). Um tamanho de amostra é sempre arredondado para cima: o último passo é teto(<a expressão inteira>). 'conta' fica vazia num passo que só explica. Não escreva 'trecho' no texto. Se a pergunta é um teste de hipótese ou pergunta se há diferença ou efeito ao nível de α, preencha também 'decisao' (depois dos passos), e a conclusão do teste vai só nela, não nos passos: 'passo_da_estatistica' é a posição (1 a 6) do passo cuja 'conta' calcula a estatística do teste, 'critico' é uma expressão como as de 'conta' com o valor crítico do nível pedido, escrito como a tabela ou os trechos o trazem, 'cauda' é 'bilateral', 'direita' ou 'esquerda' (a hipótese alternativa: diferente, maior ou menor), e 'se_rejeita' e 'se_nao_rejeita' são as duas conclusões possíveis, cada uma uma frase completa e afirmativa (não condicional), SEM números; o app compara a estatística com o crítico e escolhe a conclusão, então não diga qual vale. Sem teste de hipótese, omita 'decisao'. Responda na língua da pergunta.\n{}{}{full}<pergunta>{}</pergunta>{}",
         facts_block(facts),
         trechos(passages),
         data(question),
-        language_line(lang)
+        language_line(lang),
+        english = if lang == Lang::En { "The student writes in English: write every 'texto', 'se_rejeita' and 'se_nao_rejeita' in English. " } else { "" },
     )
+}
+
+/// Whether any text the model wrote in a calc reply (step texts, the two conclusions) reads as
+/// Portuguese. A text with no language signal takes the question's language, so a bare number is fine.
+fn calc_in_portuguese(reply: &Value, question: &str) -> bool {
+    let steps = reply["passos"].as_array().into_iter().flatten().take(6).filter_map(|s| s["texto"].as_str());
+    let conclusions = ["se_rejeita", "se_nao_rejeita"].into_iter().filter_map(|k| reply["decisao"][k].as_str());
+    steps.chain(conclusions).any(|t| language(t, Some(question)) == Lang::Pt)
 }
 
 /// A calculation, answered in steps. `Ok(None)` when no step can stand (the caller falls back).
@@ -1396,15 +1412,36 @@ fn calc_reply(question: &str, rewritten: &str, passages: &[Passage], facts: &Fac
     // Tokens: plano 600 + 6 × (texto 300 + conta 200) chars + JSON is about 4,500 chars, ~1,500 tokens.
     // Prompt at the worst case (2.5 chars/token): system 500 + rules 2,300 + question and rewrite 1,600 +
     // passages 6,323 (see `fit`) = 10,700 chars, 4,280 tokens, plus 1,800 of reply = 6,080 of the 8,192.
-    // The second call sends the same messages, so it is the same.
+    // The decision retry sends the same messages, so it is the same. The language correction adds the
+    // accepted reply (1,800) and one line (~60 tokens): 4,280 + 1,860 + 1,800 = 7,940 of the 8,192.
     let reply = server.chat_at(0.2, &messages, Some(&calc_schema(false)), 1800, &mut |_| {}, cancel)?;
-    let mut found = calc_sentences(&json_in(&reply)?, question, rewritten, passages, lang, test);
+    let mut value = json_in(&reply)?;
+    let mut found = calc_sentences(&value, question, rewritten, passages, lang, test);
+    // `raw` is the text of the accepted reply, `required` whether it came from the required-decision call.
+    let (mut raw, mut required) = (reply, false);
     // The model leaves `decisao` out half the time: ask once more with it required, and take that
     // reply only if it decides and its steps stand. Any error but a cancel keeps the first reply.
     if test && !found.as_ref().is_some_and(|f| f.1) {
         match server.chat_at(0.2, &messages, Some(&calc_schema(true)), 1800, &mut |_| {}, cancel) {
             Ok(second) => {
-                if let Some(f) = json_in(&second).ok().and_then(|r| calc_sentences(&r, question, rewritten, passages, lang, test)).filter(|f| f.1) {
+                if let Some((r, f)) = json_in(&second).ok().and_then(|r| calc_sentences(&r, question, rewritten, passages, lang, test).map(|f| (r, f))).filter(|(_, f)| f.1) {
+                    (value, found, raw, required) = (r, Some(f), second, true);
+                }
+            }
+            Err(AiError::Cancelled) => return Err(AiError::Cancelled.into()),
+            Err(_) => {}
+        }
+    }
+    // The model kept writing Portuguese on an English question (3/3 seeds before the English sentence
+    // in `calc_ask`, 1/3 with it): one correction. shortcut: one retry, a reply still Portuguese after it is shown as is; upgrade if the probe shows it.
+    if lang == Lang::En && found.is_some() && calc_in_portuguese(&value, question) {
+        let mut again = messages.to_vec();
+        again.push(json!({ "role": "assistant", "content": raw }));
+        again.push(json!({ "role": "user", "content": format!("Sua resposta está em português, mas o aluno escreve em inglês. Responda de novo, igual, com cada 'texto', 'se_rejeita' e 'se_nao_rejeita' em inglês.{}", language_line(lang)) }));
+        match server.chat_at(0.2, &again, Some(&calc_schema(required)), 1800, &mut |_| {}, cancel) {
+            Ok(third) => {
+                let kept = found.as_ref().is_some_and(|f| f.1);
+                if let Some(f) = json_in(&third).ok().filter(|r| !calc_in_portuguese(r, question)).and_then(|r| calc_sentences(&r, question, rewritten, passages, lang, test)).filter(|f| f.1 || !kept) {
                     found = Some(f);
                 }
             }
@@ -3063,6 +3100,25 @@ mod tests {
     }
 
     #[test]
+    fn calc_steps_drop_an_empty_critical_value_announcement() {
+        let q = "A média difere de 10 ao nível de 5%? Faça o teste.";
+        let steps = |v: Value, q: &str, lang| calc_steps(&json!({ "plano": "x", "passos": v }), q, &[], lang);
+        let r = steps(
+            json!([
+                { "texto": "Soma:", "conta": "1+1" },
+                { "texto": "Encontra o valor crítico para um nível de significância de 5% em um teste bilateral.", "conta": "" },
+                { "texto": "O valor crítico é 1,96.", "conta": "" },
+            ]),
+            q,
+            Lang::Pt,
+        );
+        assert_eq!(r.len(), 2);
+        assert!(r[0].text.ends_with("= 2") && r[1].text == "O valor crítico é 1,96.");
+        let en = steps(json!([{ "texto": "Find the critical value for a 5% two-tailed test.", "conta": "" }, { "texto": "Define the hypotheses.", "conta": "" }]), "Is it significant at 5%?", Lang::En);
+        assert_eq!(en.iter().map(|s| s.text.as_str()).collect::<Vec<_>>(), ["Define the hypotheses."]);
+    }
+
+    #[test]
     fn calc_steps_show_only_the_engines_numbers() {
         let p = [passage("Para a proporção, n = z² · p · q / E², com z = 1,96 para 95%.", None)];
         let q = "Qual o tamanho da amostra com 95%, erro de 2% e estimativa de 10%?";
@@ -3293,6 +3349,25 @@ mod tests {
         }
         // The message wins over the previous one; a previous one with no signal is Portuguese.
         assert_eq!((language("Oi, tudo bem?", Some("how are you?")), language("how are you?", Some("Oi")), language("ok", Some("42"))), (Pt, En, Pt));
+    }
+
+    #[test]
+    fn calc_in_portuguese_reads_every_text_the_model_wrote() {
+        let q = "how large must the sample be?";
+        let step = |t: &str| json!({ "texto": t, "conta": "2 + 2" });
+        let en = json!({ "passos": [step("Compute the sample size from the formula:")], "decisao": { "se_rejeita": "We reject the null hypothesis.", "se_nao_rejeita": "We do not reject the null hypothesis." } });
+        assert!(!calc_in_portuguese(&en, q));
+        // A step with no language signal takes the question's language.
+        assert!(!calc_in_portuguese(&json!({ "passos": [step("(1.96 * 10 / 4)^2")] }), q));
+        let pt_step = json!({ "passos": [step("Compute the sample size from the formula:"), step("Calcule o tamanho da amostra com a fórmula:")] });
+        assert!(calc_in_portuguese(&pt_step, q));
+        let mut pt_conclusion = en.clone();
+        pt_conclusion["decisao"]["se_nao_rejeita"] = json!("Não rejeitamos a hipótese nula, não há diferença.");
+        assert!(calc_in_portuguese(&pt_conclusion, q));
+        // The English sentence is in the English prompt only.
+        let (p, f) = ([passage("x", None)], Facts::default());
+        assert!(!calc_ask(q, q, &p, &f, Lang::Pt).contains("The student writes in English"));
+        assert!(calc_ask(q, q, &p, &f, Lang::En).contains("The student writes in English"));
     }
 
     #[test]
