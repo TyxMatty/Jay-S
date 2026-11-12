@@ -69,11 +69,6 @@ Calm, Neon and Soft, each in a light and a dark theme.
 
 <p align="center"><img src="docs/images/light.png" alt="The Ready-made exams tab in the light theme with the Soft style: white cards and orange buttons, Grupo 1 and Grupo 2 ready to take" width="880"></p>
 
-## The wolf
-
-The Jay-S mark is a hand-drawn wolf. The app paints it in the colors of the style you use, in the top bar, the window and the taskbar.
-
-<p align="center"><img src="docs/images/wolf.png" alt="The Jay-S wolf: large in orange on the app's dark background; the same mark in the Calm (purple), Neon (cyan) and Soft (orange) colors; at 64, 48, 32, 24 and 16 pixels; and the original thin-line drawing next to the thickened, filled icon made from it" width="880"></p>
 
 ## Private by design
 
