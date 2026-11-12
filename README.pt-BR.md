@@ -69,11 +69,6 @@ Calmo, Neon e Suave, cada um com tema claro e escuro.
 
 <p align="center"><img src="docs/images/light.png" alt="A aba Provas prontas no tema claro com o estilo Suave: cartões brancos e botões laranja, Grupo 1 e Grupo 2 prontos para fazer" width="880"></p>
 
-## O lobo
-
-A marca do Jay-S é um lobo desenhado à mão. O app pinta o lobo nas cores do estilo que você usa, na barra do topo, na janela e na barra de tarefas.
-
-<p align="center"><img src="docs/images/wolf.png" alt="O lobo do Jay-S: grande, em laranja, no fundo escuro do app; a mesma marca nas cores dos estilos Calmo (roxo), Neon (ciano) e Suave (laranja); em 64, 48, 32, 24 e 16 pixels; e o desenho original, de traço fino, ao lado do ícone engrossado e preenchido feito a partir dele (legendas em inglês)" width="880"></p>
 
 ## Privado por natureza
 
