@@ -929,6 +929,14 @@ Pelos 10 pontos: **1** nenhuma superfície nova (sem IPC, arquivo, rede ou proce
 
 **Limites:** uma correção só; uma resposta que continua em português depois dela aparece como está. A detecção é a lista de palavras de função: uma frase curta em português sem nenhuma delas passa. Só a rota de conta ganhou a correção; a rota geral ainda escorrega para o português (a calculadora em C acima).
 
+### Um passo que só anuncia o valor crítico sai
+
+**Defeito, visto:** a resposta da conta terminava em "Encontra o valor crítico para um nível de significância de 5% em um teste bilateral.", sem `conta` e sem valor: anunciava um número e não dava nenhum. **Mudança:** `calc_steps` tira o passo sem `conta` que fala do valor crítico ("valor critico"/"critical value", sem acentos) e cujos números são todos da pergunta (o "5%"); um passo que diz o valor ("O valor crítico é 1,96") fica. Quando o motor decide, a linha da comparação ("Estatística: |1,4639| < 1,96 (valor crítico)") já mostra o valor; sem decisão, a frase fixa manda comparar. Não muda a superfície (só tira texto do modelo da tela). Teste: `calc_steps_drop_an_empty_critical_value_announcement`.
+
+**Medido (as mesmas sondas da seção acima, sementes 1 a 3):** `PROBE_PROBLEM`: saíram 3 passos em 6 respostas ("Encontra-se o valor crítico para o nível de significância de 5% em teste bilateral.", "Compara-se o valor absoluto da estatística calculada com o valor crítico.", "Para um nível de 5% bilateral, encontramos o valor crítico da tabela Z:"); o resto igual a `main`. `PROBE_EN_PROBLEM`, `PROBE_ENGLISH` e `reason_bench` (28,67, questão por questão): iguais à mudança anterior.
+
+**Limites:** só o valor crítico é reconhecido; um passo que anuncia outro valor sem conta continua. Um passo que só manda comparar com o valor crítico, sem número, também sai (visto acima): a linha do motor ou a frase fixa diz o mesmo.
+
 
 ## 8. Etapas
 

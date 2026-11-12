@@ -1309,6 +1309,13 @@ fn calc_steps(reply: &Value, question: &str, passages: &[Passage], lang: Lang) -
             if texto.is_empty() {
                 return None;
             }
+            // A step that only announces the critical value, computing and stating nothing (the "5%" is
+            // the question's): the engine's comparison line already shows that value, so the step goes.
+            // shortcut: only the critical value is recognised; a step announcing another value with nothing computed still shows. Upgrade when one is seen.
+            let folded = norm(&texto);
+            if conta.is_empty() && (folded.contains("valor critico") || folded.contains("critical value")) && numbers(&texto).is_subset(&numbers(question)) {
+                return None;
+            }
             let own = numbers(conta);
             let wrote_result = numbers(&texto).iter().any(|n| !n.is_empty() && !known.contains(n) && !own.contains(n));
             let (text, computed) = match (conta.is_empty(), calc::eval(conta)) {
@@ -3090,6 +3097,25 @@ mod tests {
         for q in ["por que se usa n-1 graus de liberdade?", "Qual o tamanho da amostra com erro de 2% e 95%?", "Quanto é -5?", "quanto é 1/0?", "quanto é 2 + rm -rf", "", "?", "quanto é"] {
             assert!(bare_arithmetic(q, Lang::Pt).is_none(), "{q}");
         }
+    }
+
+    #[test]
+    fn calc_steps_drop_an_empty_critical_value_announcement() {
+        let q = "A média difere de 10 ao nível de 5%? Faça o teste.";
+        let steps = |v: Value, q: &str, lang| calc_steps(&json!({ "plano": "x", "passos": v }), q, &[], lang);
+        let r = steps(
+            json!([
+                { "texto": "Soma:", "conta": "1+1" },
+                { "texto": "Encontra o valor crítico para um nível de significância de 5% em um teste bilateral.", "conta": "" },
+                { "texto": "O valor crítico é 1,96.", "conta": "" },
+            ]),
+            q,
+            Lang::Pt,
+        );
+        assert_eq!(r.len(), 2);
+        assert!(r[0].text.ends_with("= 2") && r[1].text == "O valor crítico é 1,96.");
+        let en = steps(json!([{ "texto": "Find the critical value for a 5% two-tailed test.", "conta": "" }, { "texto": "Define the hypotheses.", "conta": "" }]), "Is it significant at 5%?", Lang::En);
+        assert_eq!(en.iter().map(|s| s.text.as_str()).collect::<Vec<_>>(), ["Define the hypotheses."]);
     }
 
     #[test]

@@ -930,6 +930,14 @@ By the 10 points: **1** no new surface (no IPC, file, network or process). **2, 
 
 **Limits:** one correction only; a reply still Portuguese after it is shown as is. Detection is the function-word list: a short Portuguese sentence with none of them passes. Only the calc route got the correction; the general route still slips into Portuguese (the C calculator above).
 
+### A step that only announces the critical value goes
+
+**Defect, seen:** the calc reply ended with "Encontra o valor crítico para um nível de significância de 5% em um teste bilateral." ("Finds the critical value for a 5% significance level in a two-tailed test."), with no `conta` and no value: it announced a number and gave none. **Change:** `calc_steps` drops a step with no `conta` that talks about the critical value ("valor critico"/"critical value", accents folded) and whose numbers all come from the question (the "5%"); a step that states the value ("O valor crítico é 1,96") stays. When the engine decides, the comparison line ("Statistic: |2.0062| ≥ 1.96 (critical value)") already shows the value; without a decision, the fixed sentence says to compare. No change to the surface (it only takes model text off the screen). Test: `calc_steps_drop_an_empty_critical_value_announcement`.
+
+**Measured (the same probes as the section above, seeds 1 to 3):** `PROBE_PROBLEM`: 3 steps went in 6 replies ("Encontra-se o valor crítico para o nível de significância de 5% em teste bilateral.", "Compara-se o valor absoluto da estatística calculada com o valor crítico.", "Para um nível de 5% bilateral, encontramos o valor crítico da tabela Z:"); the rest the same as `main`. `PROBE_EN_PROBLEM`, `PROBE_ENGLISH` and `reason_bench` (28.67, question by question): the same as the previous change.
+
+**Limits:** only the critical value is recognised; a step announcing another value with no `conta` still shows. A step that only says to compare with the critical value, with no number, also goes (seen above): the engine's line or the fixed sentence says the same.
+
 
 ## 8. Stages
 
