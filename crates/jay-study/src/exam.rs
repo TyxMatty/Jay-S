@@ -306,7 +306,7 @@ fn option_text(line: &str) -> String {
 
 /// Bump it when `split_questions` changes what it produces: catalogue exams stored with an older
 /// version are re-split in place (catalog.rs).
-pub const SPLIT_VERSION: u32 = 1;
+pub const SPLIT_VERSION: u32 = 2;
 
 /// The questions of an exam's text, in order. Lines that aren't part of a recognized question (cover
 /// pages, instructions) are left out.
@@ -331,6 +331,10 @@ pub fn split_questions(text: &str) -> Vec<Question> {
     let close = |draft: &mut Option<Draft>, out: &mut Vec<Question>, gap: &mut usize, tails: &mut Vec<Tail>| {
         if let Some(d) = draft.take() {
             let end = d.end;
+            // After a page break, lines that follow a finished sentence aren't a wrapped option: the page's
+            // first lines are the next question's (a matrix printed before its "19–") or the page furniture.
+            // shortcut: an option without a final stop followed by furniture keeps the page, when to upgrade: if a sample shows it.
+            let page_end = d.opt_at.last().and_then(|&lo| (lo + 1..=end).find(|&j| page_of[j] > page_of[j - 1] && ends_sentence(&lines[j - 1]))).map_or(end, |j| j - 1);
             let tail = d.opt_at.last().map(|&last_opt| Tail {
                 start: d.start,
                 last_opt,
@@ -339,7 +343,7 @@ pub fn split_questions(text: &str) -> Vec<Question> {
             });
             if let Some(mut q) = d.finish() {
                 tails.extend(tail);
-                q.pages = Some((page_of[(*gap).min(end)], page_of[end]));
+                q.pages = Some((page_of[(*gap).min(end)], page_of[page_end]));
                 *gap = end + 1;
                 out.push(q);
             }
@@ -1107,6 +1111,19 @@ mod tests {
         let old: Question = serde_json::from_str(r#"{"number":1,"kind":"choice","stem":"?","options":[]}"#).unwrap();
         assert_eq!(old.pages, None);
         assert!(!serde_json::to_string(&old).unwrap().contains("pages"));
+    }
+
+    #[test]
+    fn a_next_pages_first_lines_after_a_finished_option_are_not_the_questions_page() {
+        // Question 1 ends with "anos." on page 0; the first line of page 1 is the matrix printed before
+        // question 2's "02–" (it lands in the last option as a continuation, which the text keeps).
+        let text = "01– Primeira pergunta?\na) um\nb) dois\nc) tres\nd) quatro anos.\n\x0c−3 4 2 y z −2 6 7\n02– Segunda pergunta?\na) um\nb) dois\nc) tres\nd) quatro\n";
+        let qs = split_questions(text);
+        assert_eq!(qs.iter().map(|q| q.pages).collect::<Vec<_>>(), [Some((0, 0)), Some((1, 1))]);
+        assert!(qs[0].options[3].text.contains("−3 4 2"));
+        // An option that wraps onto the next page mid-sentence keeps that page.
+        let wrapped = text.replace("quatro anos.", "quatro anos e");
+        assert_eq!(split_questions(&wrapped)[0].pages, Some((0, 1)));
     }
 
     #[test]
