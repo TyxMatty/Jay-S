@@ -41,7 +41,7 @@ A análise é a leitura que o modelo faz das suas respostas, não uma nota: como
 
 Pergunte ao Jay-AI sobre qualquer coisa, sobre os seus materiais ou sobre uma prova que você fez. Quando a pergunta é uma conta, o Jay-AI escolhe a fórmula e **o Jay-S faz a conta**: cada número é calculado pelo app, e num teste de hipótese a decisão (rejeitar H0 ou não) é a comparação que o app faz da estatística com o valor crítico. A resposta avisa com o selo "Calculado pelo app" e pede que você confira a fórmula no seu material.
 
-<p align="center"><img src="docs/images/chat.png" alt="Uma conversa com o Jay-AI sobre uma apostila de estatística: a pergunta, em inglês, traz duas amostras (n = 40, média 72,5, desvio padrão 8; n = 50, média 68,9, desvio padrão 9) e pergunta se rejeita H0 ao nível de 5%; a resposta, com o selo Calculado pelo app, diz para rejeitar H0 porque |2,0062| é maior ou igual ao valor crítico 1,96, e mostra os passos com o erro padrão 1,7944 e Z = 2,0062" width="792"></p>
+<p align="center"><img src="docs/images/chat.png" alt="Uma conversa com o Jay-AI sobre uma apostila de estatística: a pergunta, em inglês, traz duas amostras (n = 40, média 72,5, desvio padrão 8; n = 50, média 68,9, desvio padrão 9) e pergunta se rejeita H0 ao nível de 5%; a resposta, com o selo Calculado pelo app, diz para rejeitar H0 porque |2,0062| é maior ou igual ao valor crítico 1,96, e mostra os passos, em inglês como a pergunta, com o erro padrão 1,7944 e Z = 2,0062" width="792"></p>
 
 ## Explicações e flashcards
 

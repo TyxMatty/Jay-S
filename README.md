@@ -41,7 +41,7 @@ The analysis is the model's reading of your answers, not a grade: like any langu
 
 Ask Jay-AI about anything, about your materials, or about an exam you took. When the question is a calculation, Jay-AI picks the formula and **Jay-S does the arithmetic**: every number is computed by the app, and for a hypothesis test the decision (reject H0 or not) is the app's comparison of the statistic with the critical value. The reply says so with a "Computed by the app" badge, and asks you to check the formula against your material. (In the picture, Jay-AI wrote the steps in Portuguese.)
 
-<p align="center"><img src="docs/images/chat.png" alt="A Jay-AI conversation about a statistics handout: the question gives two samples (n = 40, mean 72.5, standard deviation 8; n = 50, mean 68.9, standard deviation 9) and asks whether to reject H0 at the 5% level; the reply, marked Computed by the app, says to reject H0 because |2.0062| is at least the critical value 1.96, and lists the steps in Portuguese with the standard error 1.7944 and Z = 2.0062" width="792"></p>
+<p align="center"><img src="docs/images/chat.png" alt="A Jay-AI conversation about a statistics handout: the question gives two samples (n = 40, mean 72.5, standard deviation 8; n = 50, mean 68.9, standard deviation 9) and asks whether to reject H0 at the 5% level; the reply, marked Computed by the app, says to reject H0 because |2.0062| is at least the critical value 1.96, and lists the steps, in English like the question, with the standard error 1.7944 and Z = 2.0062" width="792"></p>
 
 ## Explanations and flashcards
 
