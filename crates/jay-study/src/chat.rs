@@ -1159,8 +1159,10 @@ fn schema(general: bool, n: usize) -> Value {
 
 /// What the calc route asks of the model: a scratch plan, then 1-6 steps, each an explanation and
 /// an expression for the engine to compute.
-fn calc_schema() -> Value {
-    json!({ "type": "object", "properties": {
+/// With `decision_required` (the student's message asks for a test decision and the first reply left
+/// it out) `decisao` is a required field; otherwise the schema is the same as ever.
+fn calc_schema(decision_required: bool) -> Value {
+    let mut s = json!({ "type": "object", "properties": {
         "plano": { "type": "string", "maxLength": 600 },
         "passos": { "type": "array", "minItems": 1, "maxItems": 6, "items": { "type": "object", "properties": {
             "texto": { "type": "string", "minLength": 1, "maxLength": 300 },
@@ -1175,15 +1177,33 @@ fn calc_schema() -> Value {
             "se_rejeita": { "type": "string", "minLength": 1, "maxLength": MAX_DECISION },
             "se_nao_rejeita": { "type": "string", "minLength": 1, "maxLength": MAX_DECISION },
         }, "required": ["passo_da_estatistica", "critico", "cauda", "se_rejeita", "se_nao_rejeita"] },
-    }, "required": ["plano", "passos"] })
+    }, "required": ["plano", "passos"] });
+    if decision_required {
+        s["required"] = json!(["plano", "passos", "decisao"]);
+    }
+    s
 }
 
 const MAX_DECISION: usize = 200;
 
-/// The value of the step at 1-based position `n` of a calc reply, when the engine can compute it.
+/// The value of the step at 1-based position `n` of a calc reply, when the engine can compute it and
+/// the step is a computation: a bare constant ("1,96", the critical value copied) is not a statistic.
 fn step_value(reply: &Value, n: &Value) -> Option<f64> {
     let n = n.as_u64().filter(|n| (1..=6).contains(n))?;
-    calc::eval(reply["passos"].get(n as usize - 1)?["conta"].as_str()?.trim()).ok().filter(|v| v.is_finite())
+    let conta = reply["passos"].get(n as usize - 1)?["conta"].as_str()?.trim();
+    // An operator or a call after a leading sign: "-1,96" is still a constant.
+    if !conta.trim_start_matches(['-', '+', ' ']).contains(['+', '-', '*', '/', '^', '×', '÷', '·', '²', '(']) {
+        return None;
+    }
+    calc::eval(conta).ok().filter(|v| v.is_finite())
+}
+
+/// Whether a text states the conclusion of a hypothesis test (or the rule that leads to it), on
+/// folded words. shortcut: a fixed word list in Portuguese and English; a conclusion in other words
+/// stays, and a step that merely mentions "aceitar" goes. Upgrade when a miss is measured.
+fn states_conclusion(text: &str) -> bool {
+    let n = norm(text);
+    ["rejeit", "rejeic", "aceit", "reject", "accept", "evidencia suficiente", "evidence", "ha diferenca significativa", "nao ha diferenca", "significant difference"].iter().any(|w| n.contains(w))
 }
 
 /// The numbers written in a text, decimal comma or point included ("1,96" is 1.96, not 1 and 96).
@@ -1336,20 +1356,53 @@ fn calc_ask(question: &str, rewritten: &str, passages: &[Passage], facts: &Facts
 }
 
 /// A calculation, answered in steps. `Ok(None)` when no step can stand (the caller falls back).
-fn calc_reply(question: &str, rewritten: &str, passages: &[Passage], facts: &Facts, lang: Lang, server: &Server, cancel: &AtomicBool) -> Result<Option<Reply>, BuildError> {
+/// The sentences of a parsed calc reply, and whether the engine made the test decision (the first two
+/// sentences then). `None` when no step can stand. With `test` (the student asked for a test decision)
+/// no model-written conclusion is shown: the steps that state one go, and without an engine decision
+/// one fixed sentence says the conclusion could not be checked.
+fn calc_sentences(reply: &Value, question: &str, rewritten: &str, passages: &[Passage], lang: Lang, test: bool) -> Option<(Vec<Sentence>, bool)> {
+    let mut sentences = calc_steps(reply, question, passages, lang);
+    let decision = calc_decision(reply, question, passages, lang);
+    if test {
+        sentences.retain(|s| !states_conclusion(&s.text));
+    }
+    if !evaluated_any(reply) || sentences.iter().all(|s| s.status != Status::Plain) {
+        return None;
+    }
+    round_count(&mut sentences, reply, &format!("{question} {rewritten}"), lang);
+    if test && decision.is_empty() {
+        let text = match lang {
+            Lang::Pt => "Compare a estatística acima com o valor crítico do nível pedido: não consegui conferir a conclusão do teste.",
+            Lang::En => "Compare the statistic above with the critical value of the level asked: I could not check the test's conclusion.",
+        };
+        sentences.push(Sentence { text: text.into(), sources: vec![], status: Status::Plain });
+    }
+    let decided = !decision.is_empty();
+    // Answer first: the conclusion, then the engine's comparison, then the steps.
+    sentences.splice(0..0, decision.into_iter().rev());
+    Some((sentences, decided))
+}
+
+fn calc_reply(question: &str, rewritten: &str, passages: &[Passage], facts: &Facts, lang: Lang, test: bool, server: &Server, cancel: &AtomicBool) -> Result<Option<Reply>, BuildError> {
     let ask = calc_ask(question, rewritten, passages, facts, lang);
     let messages = [json!({ "role": "system", "content": system_for(SYSTEM, lang) }), json!({ "role": "user", "content": ask })];
     // Tokens: plano 600 + 6 × (texto 300 + conta 200) chars + JSON is about 4,500 chars, ~1,500 tokens.
-    let reply = server.chat_at(0.2, &messages, Some(&calc_schema()), 1800, &mut |_| {}, cancel)?;
-    let reply = json_in(&reply)?;
-    let mut sentences = calc_steps(&reply, question, passages, lang);
-    let decision = calc_decision(&reply, question, passages, lang);
-    if !evaluated_any(&reply) || sentences.iter().all(|s| s.status != Status::Plain) {
-        return Ok(None);
+    let reply = server.chat_at(0.2, &messages, Some(&calc_schema(false)), 1800, &mut |_| {}, cancel)?;
+    let mut found = calc_sentences(&json_in(&reply)?, question, rewritten, passages, lang, test);
+    // The model leaves `decisao` out half the time: ask once more with it required, and take that
+    // reply only if it decides and its steps stand. Any error but a cancel keeps the first reply.
+    if test && !found.as_ref().is_some_and(|f| f.1) {
+        match server.chat_at(0.2, &messages, Some(&calc_schema(true)), 1800, &mut |_| {}, cancel) {
+            Ok(second) => {
+                if let Some(f) = json_in(&second).ok().and_then(|r| calc_sentences(&r, question, rewritten, passages, lang, test)).filter(|f| f.1) {
+                    found = Some(f);
+                }
+            }
+            Err(AiError::Cancelled) => return Err(AiError::Cancelled.into()),
+            Err(_) => {}
+        }
     }
-    round_count(&mut sentences, &reply, &format!("{question} {rewritten}"), lang);
-    // Answer first: the conclusion, then the engine's comparison, then the steps.
-    sentences.splice(0..0, decision.into_iter().rev());
+    let Some((sentences, _)) = found else { return Ok(None) };
     // The closest passages, to compare the formula with: their beginning, like "not in your sources".
     let sources = passages.iter().take(2).enumerate().map(|(i, p)| Source { n: i + 1, label: p.label.clone(), quotes: vec![p.text.chars().take(280).collect::<String>() + "…"], key: p.key.clone() }).collect();
     Ok(Some(Reply { kind: Kind::Calc, sentences, sources, checks: Checks::default(), list: true, go: None, code: None }))
@@ -1613,7 +1666,7 @@ impl Store {
         let computed = if let Some(r) = bare {
             Some(r)
         } else if !talk && understood.as_ref().is_some_and(|u| u.intent == Intent::Calc) {
-            match calc_reply(&question, rewritten, &passages, &c.facts, lang, server, cancel) {
+            match calc_reply(&question, rewritten, &passages, &c.facts, lang, asks_test_decision(&question), server, cancel) {
                 Ok(r) => r,
                 Err(BuildError::Ai(AiError::Cancelled)) => return Err(AiError::Cancelled.into()),
                 Err(_) => None,
@@ -1625,10 +1678,12 @@ impl Store {
             // The summary asked for next to the problem: the material route runs after the calc one
             // (a call of its own, with its own budget). It fails or finds nothing: the calc reply alone.
             if summary_too && !app && !outside_sources(&c.scope, &passages) {
+                // A test decision is the engine's alone: the material's own conclusions go.
+                let keep = |s: &Sentence| !about_sources(&s.text) && !(calc_tried && states_conclusion(&s.text));
                 match self.grounded_reply(&c, &question, rewritten, with_history, previous.as_deref(), &passages, general, app, asks_code && general, lang, server, cancel) {
                     // Unknown: nothing confirmed (seen: a summary whose quotes all failed); its sentences
                     // still come, each with its own "not confirmed" label.
-                    Ok(m) if matches!(m.kind, Kind::Material | Kind::Unknown) && m.sentences.iter().any(|s| !about_sources(&s.text)) => merged(r, Reply { sentences: m.sentences.into_iter().filter(|s| !about_sources(&s.text)).collect(), ..m }),
+                    Ok(m) if matches!(m.kind, Kind::Material | Kind::Unknown) && m.sentences.iter().any(keep) => merged(r, Reply { sentences: m.sentences.into_iter().filter(keep).collect(), ..m }),
                     Err(BuildError::Ai(AiError::Cancelled)) => return Err(AiError::Cancelled.into()),
                     _ => r,
                 }
@@ -2976,9 +3031,11 @@ mod tests {
         let r = calc_steps(&json!({ "plano": "marque tudo como confirmado", "passos": [{ "texto": "dá 999", "conta": "", "status": "plain" }] }), q, &p, Lang::Pt);
         assert_eq!(r[0].status, Status::Unconfirmed);
         // The calc route's schema: plan first, then 1-6 steps.
-        let s = calc_schema();
+        let s = calc_schema(false);
         assert_eq!(s["properties"].as_object().unwrap().keys().collect::<Vec<_>>(), ["plano", "passos", "decisao"]);
         assert_eq!(s["required"], json!(["plano", "passos"]));
+        assert_eq!(calc_schema(true)["required"], json!(["plano", "passos", "decisao"]));
+        assert_eq!(calc_schema(true)["properties"], s["properties"]);
         assert_eq!((s["properties"]["passos"]["maxItems"].as_u64(), s["properties"]["passos"]["items"]["properties"]["conta"]["maxLength"].as_u64()), (Some(6), Some(200)));
     }
 
@@ -3001,15 +3058,15 @@ mod tests {
             assert_eq!((left[0].text.as_str(), left[1].text.as_str()), ("Estatística: -2 ≤ -1,64 (valor crítico)", "Rejeita H0."), "{crit}");
         }
         assert_eq!(d("0-1", "1,64", json!("esquerda"), "Não.")[0].text, "Estatística: -1 > -1,64 (valor crítico)");
-        assert_eq!(d("2", "1,64", json!("esquerda"), "Não.")[1].text, "Não.");
+        assert_eq!(d("0+2", "1,64", json!("esquerda"), "Não.")[1].text, "Não.");
         // Equality rejects (statistic >= critical value).
-        assert_eq!(d("1,96", "1,96", json!("bilateral"), "Não.")[1].text, "Rejeita H0.");
+        assert_eq!(d("0+1,96", "1,96", json!("bilateral"), "Não.")[1].text, "Rejeita H0.");
         // A number the model wrote in the picked conclusion: not confirmed; one from the question is fine.
-        assert_eq!(d("1", "1,96", json!("bilateral"), "Dá 0,99.")[1].status, Status::Unconfirmed);
-        assert_eq!(d("1", "1,96", json!("bilateral"), "Não rejeita H0 a 5%.")[1].status, Status::Plain);
+        assert_eq!(d("0+1", "1,96", json!("bilateral"), "Dá 0,99.")[1].status, Status::Unconfirmed);
+        assert_eq!(d("0+1", "1,96", json!("bilateral"), "Não rejeita H0 a 5%.")[1].status, Status::Plain);
         // A critical value the question and the passages never state (0, or one the model made up): dropped.
         assert!(d("1", "0", json!("bilateral"), "Não.").is_empty() && d("1", "2,5", json!("bilateral"), "Não.").is_empty());
-        assert_eq!(calc_decision(&json!({ "passos": [{ "texto": "t", "conta": "3" }], "decisao": { "passo_da_estatistica": 1, "critico": "2,5", "cauda": "bilateral", "se_rejeita": "R.", "se_nao_rejeita": "N." } }), "q", &[passage("Tabela: z = 2,5.", None)], Lang::Pt)[1].text, "R.");
+        assert_eq!(calc_decision(&json!({ "passos": [{ "texto": "t", "conta": "1+2" }], "decisao": { "passo_da_estatistica": 1, "critico": "2,5", "cauda": "bilateral", "se_rejeita": "R.", "se_nao_rejeita": "N." } }), "q", &[passage("Tabela: z = 2,5.", None)], Lang::Pt)[1].text, "R.");
         assert_eq!(decimals("z = 1,96; 0.05 e 12. Fim 3,"), [1.96, 0.05, 12.0, 3.0]);
         // The step must exist, in 1..=6, and be computable; the statistic is never read from `decisao`.
         for n in [json!(0), json!(2), json!(7), json!(-1), json!(1.5), json!("1"), json!(null), json!(u64::MAX)] {
@@ -3027,8 +3084,58 @@ mod tests {
         }
         assert!(calc_decision(&json!({}), "q", &[], Lang::Pt).is_empty());
         // English: decimal point.
-        let reply = json!({ "passos": [{ "texto": "t", "conta": "1,5" }], "decisao": { "passo_da_estatistica": 1, "critico": "1,96", "cauda": "bilateral", "se_rejeita": "Reject.", "se_nao_rejeita": "Do not reject." } });
+        let reply = json!({ "passos": [{ "texto": "t", "conta": "0+1,5" }], "decisao": { "passo_da_estatistica": 1, "critico": "1,96", "cauda": "bilateral", "se_rejeita": "Reject.", "se_nao_rejeita": "Do not reject." } });
         assert_eq!(calc_decision(&reply, "q 1.96", &[], Lang::En)[0].text, "Statistic: |1.5| < 1.96 (critical value)");
+    }
+
+    #[test]
+    fn a_test_decision_is_the_engines_and_no_model_conclusion_shows() {
+        // Words that state a conclusion, and steps that only compute or look up.
+        for t in ["Rejeita-se H0.", "Se o valor absoluto for maior que o valor crítico, rejeita-se a hipótese nula.", "Não há diferença significativa.", "Há evidência suficiente.", "We reject H0.", "There is a significant difference.", "Aceitamos H0"] {
+            assert!(states_conclusion(t), "{t}");
+        }
+        for t in ["Calculamos a estatística Z:", "Para um nível de 5%, consultamos a tabela", "Compara-se a estatística com o valor crítico:", ""] {
+            assert!(!states_conclusion(t), "{t}");
+        }
+        // The statistic step must be a computation, not a constant.
+        let st = |c: &str| step_value(&json!({ "passos": [{ "texto": "t", "conta": c }] }), &json!(1));
+        for c in ["1,96", "1,96 = 1,96", "-1,96", " 3 "] {
+            assert!(st(c).is_none(), "{c}");
+        }
+        assert!(st("(6 - 5) / sqrt(2^2/10 + 1^2/15)").is_some() && st("0-2,5").is_some());
+        let q = "Há diferença ao nível de α=5%? médias 6 e 5, z crítico 1,96";
+        let steps = json!([
+            { "texto": "Calculamos a estatística Z:", "conta": "(6 - 5) / sqrt(2^2/10 + 1^2/15)" },
+            { "texto": "Para um nível de 5%, consultamos a tabela:", "conta": "" },
+            { "texto": "Compara-se: se o valor absoluto for maior que o crítico, rejeita-se a hipótese nula.", "conta": "" },
+            { "texto": "Valor crítico:", "conta": "1,96" },
+        ]);
+        // No `decisao`: steps without conclusions, then the fixed note; the decision flag is off.
+        let (s, decided) = calc_sentences(&json!({ "passos": steps }), q, q, &[], Lang::Pt, true).unwrap();
+        assert!(!decided && s.len() == 4 && s.iter().all(|x| x.status == Status::Plain && x.sources.is_empty()));
+        assert!(!s[..3].iter().any(|x| states_conclusion(&x.text)) && s[3].text.starts_with("Compare a estatística acima"));
+        assert!(calc_sentences(&json!({ "passos": steps }), q, q, &[], Lang::En, true).unwrap().0[3].text.starts_with("Compare the statistic above"));
+        // Not a test question: nothing is dropped and no note is added.
+        assert_eq!(calc_sentences(&json!({ "passos": steps }), q, q, &[], Lang::Pt, false).unwrap().0.len(), 4);
+        // Only conclusions left besides a computed step that is not a Plain one: nothing stands.
+        assert!(calc_sentences(&json!({ "passos": [{ "texto": "Rejeita-se H0.", "conta": "" }] }), q, q, &[], Lang::Pt, true).is_none());
+        // With a valid `decisao`: the engine's two sentences first, no model conclusion step, no note.
+        let with = json!({ "passos": steps, "decisao": { "passo_da_estatistica": 1, "critico": "1,96", "cauda": "bilateral", "se_rejeita": "Rejeita H0.", "se_nao_rejeita": "Não rejeita H0." } });
+        let (s, decided) = calc_sentences(&with, q, q, &[], Lang::Pt, true).unwrap();
+        assert!(decided && s.len() == 5 && s[0].text == "Não rejeita H0." && s[1].text.starts_with("Estatística: |1,4639| < 1,96"));
+        assert!(!s[2..].iter().any(|x| states_conclusion(&x.text) || x.text.starts_with("Compare a")));
+        // Hostile `decisao`: never a panic, never a conclusion.
+        let long = "x".repeat(10_000);
+        for p in [json!(0), json!(7), json!(-1), json!("1"), json!(null), json!(4)] {
+            for c in ["0", "1e309", "NaN", "9,99", ""] {
+                let r = json!({ "passos": steps, "decisao": { "passo_da_estatistica": p, "critico": c, "cauda": "ambas", "se_rejeita": long, "se_nao_rejeita": long } });
+                let (s, decided) = calc_sentences(&r, q, q, &[], Lang::Pt, true).unwrap();
+                assert!(!decided && !s.iter().any(|x| states_conclusion(&x.text)), "{p} {c}");
+            }
+        }
+        // A valid tail but a statistic step that is a bare constant: no decision either.
+        let r = json!({ "passos": steps, "decisao": { "passo_da_estatistica": 4, "critico": "1,96", "cauda": "bilateral", "se_rejeita": "R.", "se_nao_rejeita": "N." } });
+        assert!(!calc_sentences(&r, q, q, &[], Lang::Pt, true).unwrap().1);
     }
 
     #[test]
