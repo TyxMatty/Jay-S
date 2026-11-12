@@ -396,17 +396,7 @@ impl Server {
     pub fn chat_at(&self, temperature: f32, messages: &[Value], schema: Option<&Value>, max_tokens: u32, on_token: &mut dyn FnMut(usize), cancel: &AtomicBool) -> Result<String, AiError> {
         let seed = self.seed.load(Ordering::Relaxed);
         let body = request_body(temperature, messages, schema, max_tokens, (seed >= 0).then_some(seed));
-        let response = ureq::post(&self.url("/v1/chat/completions"))
-            .header("Authorization", format!("Bearer {}", self.key))
-            .config()
-            .timeout_global(Some(Duration::from_secs(900)))
-            .build()
-            .send_json(&body)
-            .map_err(|e| match e {
-                // shortcut: every 400 is read as "too long" (the one measured: a prompt past the context); a bad schema would be mislabelled, read the body if that ever shows up.
-                ureq::Error::StatusCode(400) => AiError::TooLong,
-                e => AiError::BadReply(e.to_string()),
-            })?;
+        let response = post_chat(&self.url("/v1/chat/completions"), &self.key, &body)?;
         let reader = BufReader::new(response.into_body().into_with_config().limit(64 << 20).reader());
         let mut text = String::new();
         let mut finished = None;
@@ -437,6 +427,49 @@ impl Server {
             Some("length") => Err(AiError::BadReply("the reply was cut at the token limit".into())),
             _ => Ok(text),
         }
+    }
+}
+
+/// The most of an error reply's body that is read.
+const MAX_ERROR_BODY: u64 = 64 << 10;
+
+/// Sends the chat request. A non-2xx status reads (a bounded part of) the body: only a prompt past
+/// the context is `TooLong`; anything else is a generic failure (status only, never the prompt).
+fn post_chat(url: &str, key: &str, body: &Value) -> Result<ureq::http::Response<ureq::Body>, AiError> {
+    let response = ureq::post(url)
+        .header("Authorization", format!("Bearer {key}"))
+        .config()
+        .timeout_global(Some(Duration::from_secs(900)))
+        .http_status_as_error(false)
+        .build()
+        .send_json(body)
+        .map_err(|e| AiError::BadReply(e.to_string()))?;
+    let status = response.status();
+    if status.is_success() {
+        return Ok(response);
+    }
+    let mut bytes = Vec::new();
+    // A failed read leaves what arrived; an empty body is simply not "too long".
+    let _ = response.into_body().into_reader().take(MAX_ERROR_BODY).read_to_end(&mut bytes);
+    if status.as_u16() == 400 && exceeds_context(&String::from_utf8_lossy(&bytes)) {
+        return Err(AiError::TooLong);
+    }
+    Err(AiError::BadReply(format!("the server answered HTTP {}", status.as_u16())))
+}
+
+/// Whether an error body says the prompt did not fit the context. llama.cpp: `type` is
+/// `exceed_context_size_error`; older builds only say so in the message.
+fn exceeds_context(body: &str) -> bool {
+    let words = |s: &str| {
+        let s = s.to_lowercase();
+        s.contains("context") && s.contains("exceed")
+    };
+    match serde_json::from_str::<Value>(body) {
+        Ok(v) => {
+            let error = &v["error"];
+            error["type"].as_str() == Some("exceed_context_size_error") || error["message"].as_str().is_some_and(words)
+        }
+        Err(_) => words(body),
     }
 }
 
@@ -565,6 +598,60 @@ fn marker_at(rest: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const TOO_LONG: &str = r#"{"error":{"code":400,"message":"request (9000 tokens) exceeds the available context size (8192 tokens), try increasing it","type":"exceed_context_size_error","n_prompt_tokens":9000,"n_ctx":8192}}"#;
+    const BAD_SCHEMA: &str = r#"{"error":{"code":400,"message":"JSON schema conversion failed: unsupported type","type":"invalid_request_error"}}"#;
+
+    #[test]
+    fn only_a_context_overflow_body_is_too_long() {
+        assert!(exceeds_context(TOO_LONG));
+        // Older builds: no type, only the words.
+        assert!(exceeds_context(r#"{"error":{"message":"prompt exceeds the context window"}}"#));
+        assert!(exceeds_context("the request exceeds the context size"));
+        assert!(!exceeds_context(BAD_SCHEMA));
+        assert!(!exceeds_context(""));
+        assert!(!exceeds_context("bad request"));
+        // Hostile: words far past the read limit are never seen; junk must not panic.
+        let mut huge = vec![b'x'; 4 << 20];
+        huge.extend_from_slice(b" exceed context");
+        let cut = &huge[..MAX_ERROR_BODY as usize];
+        assert!(!exceeds_context(&String::from_utf8_lossy(cut)));
+        assert!(!exceeds_context(&String::from_utf8_lossy(&[0xff, 0xfe, 0x00, b'{'])));
+    }
+
+    /// Answers one request with a canned status and body, on a local port.
+    fn canned_server(status: &str, body: Vec<u8>) -> String {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/v1/chat/completions", listener.local_addr().unwrap());
+        let head = format!("HTTP/1.1 {status}\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n");
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 8192];
+            // Drain the request first: closing with unread data would reset the connection.
+            stream.set_read_timeout(Some(Duration::from_millis(300))).unwrap();
+            while stream.read(&mut buf).is_ok_and(|n| n > 0) {}
+            let _ = stream.write_all(head.as_bytes());
+            let _ = stream.write_all(&body);
+        });
+        url
+    }
+
+    #[test]
+    fn post_chat_tells_too_long_from_other_errors() {
+        let ask = |status: &str, body: &[u8]| post_chat(&canned_server(status, body.to_vec()), "k", &json!({})).err();
+        let r = ask("400 Bad Request", TOO_LONG.as_bytes()); assert!(matches!(r, Some(AiError::TooLong)), "{r:?}");
+        for (status, body) in [("400 Bad Request", BAD_SCHEMA.as_bytes()), ("400 Bad Request", b"".as_slice()), ("500 Internal Server Error", TOO_LONG.as_bytes())] {
+            match ask(status, body) {
+                Some(AiError::BadReply(m)) => assert!(m.contains("HTTP") && !m.contains("tokens"), "{m}"),
+                other => panic!("{other:?}"),
+            }
+        }
+        // A multi-megabyte body is read only up to the limit (the reply ends; no hang, no panic).
+        let mut huge = vec![b'x'; 3 << 20];
+        huge.extend_from_slice(b" exceed context");
+        assert!(matches!(ask("400 Bad Request", &huge), Some(AiError::BadReply(_))));
+        assert!(post_chat(&canned_server("200 OK", b"data: [DONE]\n".to_vec()), "k", &json!({})).is_ok());
+    }
 
     fn temp_dir() -> PathBuf {
         let dir = std::env::temp_dir().join(format!("jay-study-ai-{}", id::new_id()));
@@ -697,5 +784,14 @@ mod tests {
         let reply = server.chat(&messages, Some(&schema), 64, &mut |_| {}, &AtomicBool::new(false)).unwrap();
         let value = json_in(&reply).unwrap();
         assert!(value["capital"].as_str().unwrap().contains("Curitiba"), "{reply}");
+        // The real server's errors: a prompt past the context is TooLong; another 400 (a malformed
+        // message) and a 500 (a schema it cannot turn into a grammar) are not.
+        let long = [json!({ "role": "user", "content": "palavra ".repeat(20_000) })];
+        assert!(matches!(server.chat(&long, None, 16, &mut |_| {}, &AtomicBool::new(false)), Err(AiError::TooLong)));
+        let r = server.chat(&[json!({ "role": "nobody", "content": 3 })], None, 16, &mut |_| {}, &AtomicBool::new(false));
+        assert!(matches!(&r, Err(AiError::BadReply(m)) if m.contains("400")), "{r:?}");
+        let bad = json!({ "type": "object", "properties": { "x": { "$ref": "#/definitions/nowhere" } } });
+        let r = server.chat(&messages, Some(&bad), 16, &mut |_| {}, &AtomicBool::new(false));
+        assert!(matches!(&r, Err(AiError::BadReply(m)) if m.contains("500")), "{r:?}");
     }
 }

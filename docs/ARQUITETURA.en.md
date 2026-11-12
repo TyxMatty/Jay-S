@@ -880,6 +880,25 @@ Measured (Jay-AI, Qwen3.5 4B, `chat_probe` with `PROBE_PROBLEM`, lectures 16 to 
 
 **Limits:** one more model call (about twice the calc latency) when the decision is missing; the word list is fixed in Portuguese and English (a conclusion in other words stays, and a step that only mentions "aceitar" goes); with no engine decision the student gets the statistic and the instruction to compare, not the conclusion. In the second message about the same problem, `drop_repeats` removes the comparison line ("Estatística: |1,4639| < 1,96") as equal to the previous reply's, and the engine's conclusion shows without it (seen on seeds 2 and 3; not changed here).
 
+### "Too much" only when the context overflowed (the analysis and every other Jay-AI call)
+
+`llama-server` answers HTTP 400 both to a request larger than the context and to other requests it refuses (a malformed message, for example). Before, `Server::chat_at` read **every** 400 as `TooLong` (a `// shortcut:` said so), and the analysis of an exam showed "too much" for any of them. Now `post_chat` reads up to 64 KB of an error reply's body and returns `TooLong` only for a 400 whose body says the context was exceeded (`exceeds_context`: `error.type` equal to `exceed_context_size_error`, or, in older llama.cpp builds, the message with "context" and "exceed"); any other error status becomes the generic failure (`BadReply`), carrying only the status number. This holds for every chat call to the server (analysis, chat, explain, flashcards, generate), which all go through the same `chat_at`; a 2xx reply follows exactly the old path. Through the 10 points:
+
+1. **Attack surface.** No new command, event, file, network or process. The body of the local server's error reply is now read.
+2. **Access control / IDOR.** Nothing changes: the page sends nothing new.
+3. **Data permissions.** Nothing new.
+4. **Untrusted input.** The error body is treated as hostile data: read with a 64 KB cap (`take`), converted with `from_utf8_lossy`, parsed by `serde_json` or a word search; empty, binary, non-JSON or huge means "not too much", without a panic. The error message carries only the status, never the request, the prompt or the body.
+5. **Exposed credentials.** None; the server key stays in the header only.
+6. **Authentication.** Unchanged (the usual key).
+7. **Resource abuse and races.** At most 64 KB per error reply; the request's total timeout stays 900 s.
+8. **Dependency chain.** None new (`Cargo.lock` unchanged).
+9. **Network and exposure.** Only the server's own `127.0.0.1`, as before.
+10. **Adversarial tests.** `only_a_context_overflow_body_is_too_long` (llama.cpp's body, an older build's message, the invalid schema, empty, plain text, 4 MB of junk with the words past the limit, invalid UTF-8) and `post_chat_tells_too_long_from_other_errors` (a local TCP server answers 400 with each body, 500 with the context body, a 3 MB 400 and a 200, through the real path: only the first is `TooLong`, no error carries body text, nothing hangs). With the real server, `server_answers_with_the_key_only_and_follows_the_schema` (`#[ignore]`) now also sends a prompt larger than the context (`TooLong`), a message with an invalid role and content (an HTTP 400 that is not about the context: the generic failure) and a schema with a `$ref` to nowhere (HTTP 500: the generic failure).
+
+Measured (real server, runtime b12229, `JAYS_AI_ROOT=… cargo test --lib server_answers -- --ignored`): the 20,000-word prompt gives `TooLong`; the malformed message gives HTTP 400 and is now the generic failure (before it would be "too much"); the broken `$ref` gives HTTP 500, the generic failure as before. Engine: 210 tests passing, 0 failures.
+
+**Limits:** the words and the `type` depend on the llama.cpp version (checked on the installed runtime, b12229); another error whose message has "context" and "exceed" would be read as too much; words past the body's first 64 KB are not seen.
+
 ## 8. Stages
 
 Each stage ends with something testable; at the end of each one: commit, summary, and the question whether to go on to the next.

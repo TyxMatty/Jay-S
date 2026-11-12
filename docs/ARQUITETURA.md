@@ -879,6 +879,25 @@ Medido (Jay-AI, Qwen3.5 4B, `chat_probe` com `PROBE_PROBLEM`, aulas 16 a 18, sem
 
 **Limites:** uma chamada de modelo a mais (cerca de 2x a latência da conta) quando a decisão falta; a lista de palavras é fixa em português e inglês (uma conclusão com outras palavras fica, e um passo que só menciona "aceitar" sai); sem decisão do motor o aluno recebe a estatística e a instrução de comparar, não a conclusão. Na segunda mensagem sobre o mesmo problema, `drop_repeats` tira a linha da comparação ("Estatística: |1,4639| < 1,96") por ser igual à da resposta anterior, e a conclusão do motor aparece sem ela (visto nas sementes 2 e 3; não mudado aqui).
 
+### "Coisa demais" só quando o contexto estourou (a análise e o resto das chamadas ao Jay-AI)
+
+O `llama-server` responde HTTP 400 tanto a um pedido maior que o contexto quanto a outros pedidos que ele recusa (uma mensagem malformada, por exemplo). Antes, `Server::chat_at` lia **todo** 400 como `TooLong` (um `// shortcut:` dizia isso), e a análise de uma prova mostrava "coisa demais" para qualquer um. Agora `post_chat` lê até 64 KB do corpo de uma resposta de erro e só devolve `TooLong` num 400 cujo corpo diz que o contexto foi excedido (`exceeds_context`: `error.type` igual a `exceed_context_size_error`, ou, em versões antigas do llama.cpp, a mensagem com "context" e "exceed"); qualquer outro status de erro vira a falha genérica (`BadReply`), com só o número do status. Vale para todas as chamadas de chat ao servidor (análise, chat, explicar, flashcards, gerar), que passam pelo mesmo `chat_at`; uma resposta 2xx segue exatamente o caminho de antes. Pelos 10 pontos:
+
+1. **Superfície de ataque.** Nenhum comando, evento, arquivo, rede ou processo novo. O corpo da resposta de erro do servidor local passa a ser lido.
+2. **Controle de acesso / IDOR.** Nada muda: a página não manda nada novo.
+3. **Permissões de dados.** Nada novo.
+4. **Entrada não confiável.** O corpo de erro é tratado como dado hostil: lido com teto de 64 KB (`take`), convertido com `from_utf8_lossy`, analisado por `serde_json` ou por uma busca de palavras; vazio, binário, não JSON ou gigante dá "não é coisa demais", sem pânico. A mensagem de erro leva só o status, nunca o pedido, o prompt nem o corpo.
+5. **Credenciais expostas.** Nenhuma; a chave do servidor continua só no cabeçalho.
+6. **Autenticação.** Não muda (a chave de sempre).
+7. **Abuso de recursos e corridas.** No máximo 64 KB por resposta de erro; o tempo total do pedido continua 900 s.
+8. **Cadeia de dependências.** Nenhuma nova (o `Cargo.lock` não mudou).
+9. **Rede e exposição.** Só o `127.0.0.1` do próprio servidor, como antes.
+10. **Testes adversariais.** `only_a_context_overflow_body_is_too_long` (o corpo do llama.cpp, a mensagem de versão antiga, o esquema inválido, vazio, texto qualquer, 4 MB de lixo com as palavras depois do limite, UTF-8 inválido) e `post_chat_tells_too_long_from_other_errors` (um servidor TCP local responde 400 com cada corpo, 500 com o corpo de contexto, 400 de 3 MB e 200, pelo caminho real: só o primeiro é `TooLong`, nenhum erro leva texto do corpo, nada trava). Com o servidor real, `server_answers_with_the_key_only_and_follows_the_schema` (`#[ignore]`) agora também manda um prompt maior que o contexto (`TooLong`), uma mensagem com papel e conteúdo inválidos (HTTP 400 que não é de contexto: falha genérica) e um esquema com `$ref` para lugar nenhum (HTTP 500: falha genérica).
+
+Medido (servidor real, runtime b12229, `JAYS_AI_ROOT=… cargo test --lib server_answers -- --ignored`): o prompt de 20 000 palavras dá `TooLong`; a mensagem malformada dá HTTP 400 e agora é a falha genérica (antes seria "coisa demais"); o `$ref` quebrado dá HTTP 500, falha genérica como antes. O motor: 210 testes passando, 0 falhas.
+
+**Limites:** as palavras e o `type` dependem da versão do llama.cpp (conferidos no runtime instalado, b12229); outro erro cuja mensagem tenha "context" e "exceed" seria lido como coisa demais; palavras depois dos primeiros 64 KB do corpo não são vistas.
+
 ## 8. Etapas
 
 Cada etapa termina com algo testável; ao fim de cada uma, commit, resumo e a pergunta se segue para a próxima.
